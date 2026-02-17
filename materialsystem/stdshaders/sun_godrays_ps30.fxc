@@ -1,0 +1,79 @@
+
+#include "common_ps_fxc.h"
+#include "common_deferred_fxc.h"
+
+sampler sDepth : register( s0 );
+
+const float4 g_sunParams0 : register( c0 ); // x sunU, y sunV, z intensity, w radius
+const float4 g_sunParams1 : register( c1 ); // x decay, y falloffExp, z occlusionPower, w unused
+const float3 g_sunColor : register( c2 );
+
+struct PS_INPUT
+{
+	float2 vTexCoord : TEXCOORD0;
+};
+
+struct PS_OUTPUT
+{
+	float4 vColor_0 : COLOR0;
+};
+
+float DepthToOcclusion( float d )
+{
+	d = min( DEPTH_RECONSTRUCTION_LIMIT_FULLSCREEN, d );
+	d = lerp( DEPTH_RECONSTRUCTION_LIMIT_FULLSCREEN, d, any( d ) );
+
+	float sky = smoothstep( DEPTH_RECONSTRUCTION_LIMIT_FULLSCREEN * 0.98, DEPTH_RECONSTRUCTION_LIMIT_FULLSCREEN * 0.995, d );
+	return sky;
+}
+
+PS_OUTPUT main( const PS_INPUT In )
+{
+	const float2 uv = In.vTexCoord;
+	const float2 sunUV = g_sunParams0.xy;
+	const float intensity = max( g_sunParams0.z, 0.0 );
+	const float radius = max( g_sunParams0.w, 0.0001 );
+	const float decay = saturate( g_sunParams1.x );
+	const float falloffExp = max( g_sunParams1.y, 0.1 );
+	const float occlusionPower = max( g_sunParams1.z, 0.1 );
+
+	float2 delta = sunUV - uv;
+	float dist = length( delta );
+
+	float inRange = step( dist, radius );
+	float falloff = inRange * pow( saturate( 1.0 - dist / radius ), falloffExp );
+	if ( falloff <= 0.0 )
+	{
+		PS_OUTPUT Out;
+		Out.vColor_0 = float4( 0, 0, 0, 1 );
+		return Out;
+	}
+
+	float2 dir = delta * ( 1.0 / max( dist, 1e-4 ) );
+
+	float occlusion = 0.0;
+	float weight = 1.0;
+
+	const int NUM_SAMPLES = 12;
+	float2 stepUV = dir * ( radius / float( NUM_SAMPLES ) );
+	float2 tap = uv;
+
+	[unroll]
+	for ( int i = 0; i < NUM_SAMPLES; i++ )
+	{
+		tap += stepUV;
+		tap = clamp( tap, 0.0.xx, 1.0.xx );
+		float d = tex2D( sDepth, tap ).x;
+		occlusion += DepthToOcclusion( d ) * weight;
+		weight *= decay;
+	}
+
+	float occNorm = occlusion / max( 0.001, ( 1.0 - pow( decay, NUM_SAMPLES ) ) / max( 1.0 - decay, 0.0001 ) );
+	occNorm = pow( saturate( occNorm ), occlusionPower );
+	float glow = falloff * occNorm * intensity;
+	glow = min( glow, 0.08 );
+
+	PS_OUTPUT Out;
+	Out.vColor_0 = float4( glow * g_sunColor, 1.0 );
+	return Out;
+}

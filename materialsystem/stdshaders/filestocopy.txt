@@ -1,0 +1,5 @@
+..\..\dx9sdk\utilities\dx_proxy.dll 
+e:\SourceModding\HL2RPMSOURCE\source-sdk-2013-mapbase-v8.0\sp\src\devtools\bin\shadercompile.exe 
+e:\SourceModding\HL2RPMSOURCE\source-sdk-2013-mapbase-v8.0\sp\src\devtools\bin\shadercompile_dll.dll 
+e:\SourceModding\HL2RPMSOURCE\source-sdk-2013-mapbase-v8.0\sp\src\devtools\bin\vstdlib.dll 
+e:\SourceModding\HL2RPMSOURCE\source-sdk-2013-mapbase-v8.0\sp\src\devtools\bin\tier0.dll 

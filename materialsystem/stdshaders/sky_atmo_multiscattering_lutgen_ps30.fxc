@@ -1,0 +1,38 @@
+
+#include "common_ps_fxc.h"
+
+const float3 g_vecSunDir : register( c1 );
+
+struct PS_INPUT
+{
+	float2 vTexCoord : TEXCOORD0;
+};
+
+struct PS_OUTPUT
+{
+	float4 vColor_0 : COLOR0;
+};
+
+float3 MultiScatteringApprox( float muS, float height01 )
+{
+	float sunAbove = smoothstep( -0.02, 0.10, muS );
+	float heightTerm = exp( -height01 * 2.2 );
+
+	float base = 0.18 * sunAbove * heightTerm;
+	return base * float3( 0.45, 0.70, 1.0 );
+}
+
+PS_OUTPUT main( const PS_INPUT In )
+{
+	float2 uv = In.vTexCoord;
+
+	float muS = lerp( -1.0, 1.0, uv.x );
+	float height01 = saturate( uv.y );
+
+	float3 ms = MultiScatteringApprox( muS, height01 );
+
+	PS_OUTPUT Out;
+	Out.vColor_0 = float4( ms, 1.0 );
+	return Out;
+}
+

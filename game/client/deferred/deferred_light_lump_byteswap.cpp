@@ -1,0 +1,40 @@
+#include "cbase.h"
+#include "deferred_light_lump.h"
+ 
+#include "tier0/memdbgon.h"
+ 
+BEGIN_BYTESWAP_DATADESC( color_t )
+	DEFINE_FIELD( r, FIELD_INTEGER ),
+	DEFINE_FIELD( g, FIELD_INTEGER ),
+	DEFINE_FIELD( b, FIELD_INTEGER ),
+	DEFINE_FIELD( a, FIELD_INTEGER ),
+END_BYTESWAP_DATADESC()
+ 
+BEGIN_BYTESWAP_DATADESC( def_lump_light_global_t )
+	DEFINE_FIELD( angles, FIELD_VECTOR ),
+	DEFINE_EMBEDDED( diffuse ),
+	DEFINE_EMBEDDED( ambientLow ),
+	DEFINE_EMBEDDED( ambientHigh ),
+END_BYTESWAP_DATADESC()
+ 
+BEGIN_BYTESWAP_DATADESC( def_lump_light_t )
+	DEFINE_FIELD( origin, FIELD_VECTOR ),
+	DEFINE_FIELD( angles, FIELD_VECTOR ),
+	DEFINE_FIELD( flags, FIELD_CHARACTER ),
+	DEFINE_EMBEDDED( diffuse ),
+	DEFINE_EMBEDDED( ambient ),
+	DEFINE_FIELD( radius, FIELD_FLOAT ),
+	DEFINE_FIELD( power, FIELD_FLOAT ),
+	DEFINE_FIELD( vis_dist, FIELD_FLOAT ),
+	DEFINE_FIELD( vis_range, FIELD_FLOAT ),
+	DEFINE_FIELD( shadow_dist, FIELD_FLOAT ),
+	DEFINE_FIELD( shadow_range, FIELD_FLOAT ),
+	DEFINE_FIELD( spot_cone_inner, FIELD_FLOAT ),
+	DEFINE_FIELD( spot_cone_outer, FIELD_FLOAT ),
+	DEFINE_FIELD( style_seed, FIELD_INTEGER ),
+	DEFINE_FIELD( style_amt, FIELD_FLOAT ),
+	DEFINE_FIELD( style_speed, FIELD_FLOAT ),
+	DEFINE_FIELD( style_smooth, FIELD_FLOAT ),
+	DEFINE_FIELD( style_random, FIELD_FLOAT ),
+	DEFINE_ARRAY( cookietex, FIELD_CHARACTER, 128 ),
+END_BYTESWAP_DATADESC()

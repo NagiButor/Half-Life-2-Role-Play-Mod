@@ -1,0 +1,8 @@
+0000000000000000000000000000000000000000 3b4609a7eca003340b551781cb6dadf3b90f89d7 Mi5hlen <mikeodnol@gmail.com> 1770901478 +0500	commit (initial): initial commit
+3b4609a7eca003340b551781cb6dadf3b90f89d7 8f662472a63e1388572cb0ceee0b9b5ef1173530 Mi5hlen <mikeodnol@gmail.com> 1771061857 +0500	commit: Удаление отслеживания файлов .obj
+8f662472a63e1388572cb0ceee0b9b5ef1173530 3b4609a7eca003340b551781cb6dadf3b90f89d7 Mi5hlen <mikeodnol@gmail.com> 1771072735 +0500	reset: moving to HEAD~1
+3b4609a7eca003340b551781cb6dadf3b90f89d7 3b4609a7eca003340b551781cb6dadf3b90f89d7 Mi5hlen <mikeodnol@gmail.com> 1771076474 +0500	checkout: moving from master to master
+3b4609a7eca003340b551781cb6dadf3b90f89d7 3b4609a7eca003340b551781cb6dadf3b90f89d7 Mi5hlen <mikeodnol@gmail.com> 1771076972 +0500	checkout: moving from master to master
+3b4609a7eca003340b551781cb6dadf3b90f89d7 3b4609a7eca003340b551781cb6dadf3b90f89d7 Mi5hlen <mikeodnol@gmail.com> 1771077461 +0500	checkout: moving from master to master
+3b4609a7eca003340b551781cb6dadf3b90f89d7 1ec47a1d6b7afe06448759c4029820b228cc0c5c Mi5hlen <mikeodnol@gmail.com> 1771164516 +0500	commit: apc implemented
+1ec47a1d6b7afe06448759c4029820b228cc0c5c 688be24ba7e5c8640d0332ed8d24fa8d0e61d31b Mi5hlen <mikeodnol@gmail.com> 1771179756 +0500	commit: crashing game

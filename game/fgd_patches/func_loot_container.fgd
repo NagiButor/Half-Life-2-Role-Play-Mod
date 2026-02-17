@@ -1,0 +1,7 @@
+@SolidClass base(Trigger) = func_loot_container : "Loot Container"
+[
+	loot_displayname(string) : "Displayable name" : ""
+	loot_sound_open(sound) : "Sound open" : ""
+	loot_sound_close(sound) : "Sound close" : ""
+	loot_items(string) : "Loot items" : ""
+]

@@ -1,0 +1,51 @@
+#include "common_ps_fxc.h"
+
+sampler2D AlbedoSampler : register( s0 );
+sampler2D NormalSampler : register( s1 );
+sampler2D PositionSampler : register( s2 );
+
+float4 g_LightPos_Radius : register( c0 );
+float4 g_LightColor_Intensity : register( c1 );
+
+struct PS_INPUT
+{
+	float2 baseTexCoord : TEXCOORD0;
+	float2 ZeroTexCoord : TEXCOORD1;
+	float2 OneTexCoord  : TEXCOORD2;
+};
+
+float4 main( PS_INPUT i ) : COLOR0
+{
+	float4 albedoSample = tex2D( AlbedoSampler, i.baseTexCoord );
+	if ( albedoSample.a <= 0.0f )
+		return float4( 0, 0, 0, 0 );
+
+	float3 albedo = albedoSample.rgb;
+	float3 normal = tex2D( NormalSampler, i.baseTexCoord ).xyz;
+	normal = normalize( normal * 2.0f - 1.0f );
+	float3 worldPos = tex2D( PositionSampler, i.baseTexCoord ).xyz;
+
+	float3 lightPos = g_LightPos_Radius.xyz;
+	float radius = g_LightPos_Radius.w;
+	float3 toLight = lightPos - worldPos;
+	float distSq = dot( toLight, toLight );
+
+	float radiusSq = radius * radius;
+	if ( distSq >= radiusSq )
+	{
+		return float4( 0, 0, 0, 0 );
+	}
+
+	float dist = sqrt( distSq );
+	float3 L = ( dist > 0.0001f ) ? ( toLight / dist ) : float3( 0, 0, 1 );
+
+	float ndl = saturate( dot( normal, L ) );
+	float atten = 1.0f - saturate( dist / radius );
+	atten *= atten;
+
+	float3 lightColor = g_LightColor_Intensity.rgb;
+	float intensity = g_LightColor_Intensity.w;
+
+	float3 lit = albedo * lightColor * ( ndl * atten * intensity );
+	return float4( lit, 1.0f );
+}

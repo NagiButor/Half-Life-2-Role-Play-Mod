@@ -1,0 +1,2 @@
+	loot_displayname(string) : "Displayable name" : ""
+	loot_items(string) : "Loot items" : ""
