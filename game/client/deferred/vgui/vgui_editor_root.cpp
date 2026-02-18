@@ -133,7 +133,7 @@ void CVGUILightEditor::ToggleEditor()
 		g_EditorInstance->MakeReadyForUse();
 		g_EditorInstance->SetVisible( true );
 
-		GetLightingEditor()->SetEditorActive( true, true, false );
+		GetLightingEditor()->SetEditorActive( true, true, true );
 	}
 	else
 		g_EditorInstance->SetVisible( !g_EditorInstance->IsVisible() );
@@ -142,7 +142,7 @@ void CVGUILightEditor::ToggleEditor()
 
 	GetLightingEditor()->AbortEditorMovement( true );
 
-	GetLightingEditor()->SetEditorActive( g_EditorInstance->IsVisible(), true, false );
+	GetLightingEditor()->SetEditorActive( g_EditorInstance->IsVisible(), true, true );
 
 	g_EditorInstance->UpdateCurrentMapName();
 }

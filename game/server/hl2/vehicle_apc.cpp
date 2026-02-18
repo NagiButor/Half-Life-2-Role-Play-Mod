@@ -181,6 +181,7 @@ void CPropAPC::Precache( void )
 	PrecacheScriptSound( "Weapon_AR2.Single" );
 	PrecacheScriptSound( "PropAPC.FireRocket" );
 	PrecacheScriptSound( "combine.door_lock" );
+	PrecacheSound( "buttons/lightswitch2.wav" );
 }
 
 
@@ -1448,10 +1449,12 @@ void CPropAPC::DriveVehicle( float flFrameTime, CUserCmd *ucmd, int iButtonsDown
 		{
 			int iButtons = ucmd->buttons;
 
-			// Toggle headlights on sprint key press
-			if ( iButtonsDown & IN_SPEED )
+			// Toggle headlights on flashlight impulse (F key)
+			if ( ucmd->impulse == 100 )
 			{
 				m_bHeadlightIsOn = !m_bHeadlightIsOn;
+				EmitSound( "buttons/lightswitch2.wav" );
+				ucmd->impulse = 0; // consume
 			}
 
 			if ( iButtons & IN_ATTACK )

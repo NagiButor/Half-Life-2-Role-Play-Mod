@@ -1,15 +1,14 @@
-
 #include "cbase.h"
 #include "deferred/deferred_shared_common.h"
 
 #include "tier0/memdbgon.h"
 
-ConVar r_deferred_rt_shadowspot_res( "r_deferred_rt_shadowspot_res", "1024", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
+ConVar r_deferred_rt_shadowspot_res( "r_deferred_rt_shadowspot_res", "2048", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
 ConVar r_deferred_rt_shadowspot_lod1_res( "r_deferred_rt_shadowspot_lod1_res", "512", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
 ConVar r_deferred_rt_shadowspot_lod2_res( "r_deferred_rt_shadowspot_lod2_res", "256", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
 #endif
-ConVar r_deferred_rt_shadowpoint_res( "r_deferred_rt_shadowpoint_res", "1024", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
+ConVar r_deferred_rt_shadowpoint_res( "r_deferred_rt_shadowpoint_res", "2048", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
 ConVar r_deferred_rt_shadowpoint_lod1_res( "r_deferred_rt_shadowpoint_lod1_res", "512", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
 ConVar r_deferred_rt_shadowpoint_lod2_res( "r_deferred_rt_shadowpoint_lod2_res", "256", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );

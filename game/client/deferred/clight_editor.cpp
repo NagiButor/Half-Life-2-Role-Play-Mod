@@ -37,6 +37,8 @@ def_light_editor_t::def_light_editor_t()
 {
 	iEditorId = -1;
 	pWorldLight = NULL;
+	pSourceLight = NULL;
+	bSourceWasWorldLight = false;
 }
 
 
@@ -880,11 +882,90 @@ void CLightingEditor::SetEditorActive( bool bActive, bool bView, bool bLights )
 		if ( bActive && m_hEditorLights.Count() == 0 )
 			ImportWorldLightsToEditor();
 
+		if ( bActive )
+		{
+			// Remove backing world lights from the manager so they don't render
+			FOR_EACH_VEC( m_hEditorLights, i )
+			{
+				def_light_editor_t *pEditor = static_cast<def_light_editor_t*>( m_hEditorLights[ i ] );
+				if ( pEditor && pEditor->pWorldLight )
+				{
+					GetLightingManager()->RemoveLight( pEditor->pWorldLight );
+				}
+			}
+		}
+		else
+		{
+			// Sync editor transforms back into world lights and restore them
+			SyncEditorLightsToWorld();
+		}
+
 		m_bLightsActive = bActive;
 
 		GetLightingManager()->SetRenderWorldLights( !bActive );
 
 		ApplyEditorLightsToWorld( bActive );
+	}
+}
+
+void CLightingEditor::SyncEditorLightsToWorld()
+{
+	FOR_EACH_VEC( m_hEditorLights, i )
+	{
+		def_light_editor_t *pEditor = static_cast<def_light_editor_t*>( m_hEditorLights[ i ] );
+		if ( !pEditor )
+			continue;
+
+		// Hammer-placed light_deferred entities continuously push their own state back into
+		// their backing def_light_t (CDeferredLight::ClientThink/PostDataUpdate). To prevent
+		// edited values from being overwritten when the editor is disabled, we detach from
+		// non-world source lights and keep a separate world-light instance.
+		if ( pEditor->pSourceLight && !pEditor->bSourceWasWorldLight )
+		{
+			GetLightingManager()->RemoveLight( pEditor->pSourceLight );
+
+			if ( pEditor->pWorldLight == pEditor->pSourceLight )
+				pEditor->pWorldLight = NULL;
+		}
+
+		// Materialize a backing world light if this was editor-only
+		if ( !pEditor->pWorldLight )
+		{
+			KeyValues *pKV = pEditor->AllocateAsKeyValues();
+			if ( pKV )
+			{
+				pEditor->pWorldLight = new def_light_t();
+				pEditor->pWorldLight->ApplyKeyValueProperties( pKV );
+				pKV->deleteThis();
+			}
+		}
+
+		if ( !pEditor->pWorldLight )
+			continue;
+
+		def_light_t *pW = pEditor->pWorldLight;
+		pW->pos = pEditor->pos;
+		pW->ang = pEditor->ang;
+		pW->flRadius = pEditor->flRadius;
+		pW->flFalloffPower = pEditor->flFalloffPower;
+		pW->col_diffuse = pEditor->col_diffuse;
+		pW->col_ambient = pEditor->col_ambient;
+		pW->iLighttype = pEditor->iLighttype;
+		pW->flSpotCone_Inner = pEditor->flSpotCone_Inner;
+		pW->flSpotCone_Outer = pEditor->flSpotCone_Outer;
+		pW->iVisible_Dist = pEditor->iVisible_Dist;
+		pW->iVisible_Range = pEditor->iVisible_Range;
+		pW->iShadow_Dist = pEditor->iShadow_Dist;
+		pW->iShadow_Range = pEditor->iShadow_Range;
+
+		const uint8 kConfigMask = ( DEFLIGHT_ENABLED | DEFLIGHT_SHADOW_ENABLED | DEFLIGHT_COOKIE_ENABLED | DEFLIGHT_VOLUMETRICS_ENABLED | DEFLIGHT_LIGHTSTYLE_ENABLED );
+		pW->iFlags = ( pEditor->iFlags & kConfigMask );
+
+		pW->bWorldLight = true;
+		pW->MakeDirtyAll();
+		// Avoid stale duplicate in manager, then add fresh
+		GetLightingManager()->RemoveLight( pW );
+		GetLightingManager()->AddLight( pW );
 	}
 }
 
@@ -913,6 +994,8 @@ void CLightingEditor::ImportWorldLightsToEditor()
 			pDst->bWorldLight = false;
 			pDst->iEditorId = -1;
 			pDst->pWorldLight = pSrc;
+			pDst->pSourceLight = pSrc;
+			pDst->bSourceWasWorldLight = pSrc->bWorldLight;
 			AddEditorLight( pDst );
 		}
 
@@ -943,6 +1026,24 @@ CLightingEditor::EDITORINTERACTION_MODE CLightingEditor::GetEditorInteractionMod
 
 void CLightingEditor::FlushEditorLights()
 {
+	if ( GetLightingManager() == NULL )
+	{
+		m_hSelectedLights.Purge();
+		m_hEditorLights.PurgeAndDeleteElements();
+		return;
+	}
+
+	// Re-add any world lights that were removed during editing
+	FOR_EACH_VEC( m_hEditorLights, i )
+	{
+		def_light_editor_t *pEditor = static_cast<def_light_editor_t*>( m_hEditorLights[ i ] );
+		if ( pEditor && pEditor->pWorldLight )
+		{
+			pEditor->pWorldLight->MakeDirtyAll();
+			GetLightingManager()->AddLight( pEditor->pWorldLight );
+		}
+	}
+
 	ApplyEditorLightsToWorld( false );
 	m_hSelectedLights.Purge();
 	m_hEditorLights.PurgeAndDeleteElements();
@@ -1507,17 +1608,18 @@ void CLightingEditor::MoveSelectedLights( Vector delta )
 	FOR_EACH_VEC( m_hSelectedLights, i )
 	{
 		def_light_t *l = m_hSelectedLights[ i ];
+		def_light_editor_t *editorLight = static_cast<def_light_editor_t*>( l );
 
 		l->pos += delta;
 
-		l->MakeDirtyXForms();
-
-		def_light_editor_t *pEditorLight = static_cast<def_light_editor_t*>( l );
-		if ( pEditorLight->pWorldLight != NULL )
+		// Keep backing world light in sync so we don't leave a duplicate behind
+		if ( editorLight->pWorldLight )
 		{
-			pEditorLight->pWorldLight->pos = l->pos;
-			pEditorLight->pWorldLight->MakeDirtyXForms();
+			editorLight->pWorldLight->pos = l->pos;
+			editorLight->pWorldLight->MakeDirtyAll();
 		}
+
+		l->MakeDirtyAll();
 	}
 }
 

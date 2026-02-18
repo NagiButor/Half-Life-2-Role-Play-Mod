@@ -1959,6 +1959,10 @@ void CDeferredViewRender::ViewDrawSceneDeferred( const CViewSetup &view, int nCl
 	CPostLightingView::PopDeferredShadingFrameBuffer();
 
 	ViewOutputDeferredShading( view );
+
+	// Forward translucent after deferred composite so glass/particles render
+	DrawTranslucentRenderables( true, false );
+	DrawNoZBufferTranslucentRenderables();
 #endif
 
 	FinishCurrentView();

@@ -22,6 +22,8 @@ public:
 	def_light_editor_t();
 	int iEditorId;
 	def_light_t *pWorldLight;
+	def_light_t *pSourceLight;
+	bool bSourceWasWorldLight;
 };
 
 class CLightingEditor : public CAutoGameSystemPerFrame
@@ -146,6 +148,8 @@ private:
 	Vector m_vecSelectionCenterCache;
 
 	void ApplyEditorLightsToWorld( bool bVisible );
+	void SyncEditorLightsToWorld();
+	void LinkEditorLightsToExistingWorldLights();
 	void FlushEditorLights();
 	void ImportWorldLightsToEditor();
 

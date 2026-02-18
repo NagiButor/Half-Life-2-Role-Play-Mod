@@ -14,6 +14,9 @@
 #include "c_baseplayer.h"
 #include "c_te_effect_dispatch.h"
 #include "fx.h"
+#include "iefx.h"
+#include "ivrenderview.h"
+#include "dlight.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -26,7 +29,7 @@ ConVar r_ApcViewBlendToTime( "r_ApcViewBlendToTime", "1.5", FCVAR_CHEAT );
 
 #define APC_DELTA_LENGTH_MAX	12.0f			// 1 foot
 #define APC_FRAMETIME_MIN		1e-6
-#define APC_HEADLIGHT_DISTANCE 1000
+#define APC_HEADLIGHT_DISTANCE 1800
 
 IMPLEMENT_CLIENTCLASS_DT( C_PropAPC, DT_PropAPC, CPropAPC )
 	RecvPropBool( RECVINFO( m_bHeadlightIsOn ) ),
@@ -65,9 +68,19 @@ void C_PropAPC::Simulate( void )
 		{
 			// Create deferred headlight if deferred rendering is active, otherwise regular
 			if ( GetDeferredManager() && GetDeferredManager()->IsDeferredRenderingEnabled() )
-				m_pHeadlight = new CFlashlightEffectDeferred( entindex() );
+			{
+				CFlashlightEffectDeferred *pDeferred = new CFlashlightEffectDeferred( entindex() );
+				if ( pDeferred )
+				{
+					// Brighter, wider, further, always volumetric for vehicle headlights
+					pDeferred->SetTuning( 1.8f, 1.25f, 2.0f, true );
+				}
+				m_pHeadlight = pDeferred;
+			}
 			else
+			{
 				m_pHeadlight = new CHeadlightEffect;
+			}
 
 			if ( m_pHeadlight == NULL )
 				return;
@@ -87,6 +100,20 @@ void C_PropAPC::Simulate( void )
 			AngleVectors( vAngle, &vecForward, &vecRight, &vecUp );
 		
 			m_pHeadlight->UpdateLight( vVector, vecForward, vecRight, vecUp, APC_HEADLIGHT_DISTANCE );
+
+			// Small glow/dlight at the headlight origin
+			dlight_t *dl = effects->CL_AllocDlight( entindex() );
+			if ( dl )
+			{
+				dl->origin = vVector;
+				dl->radius = 120.0f;
+				dl->die = gpGlobals->curtime + 0.1f;
+				dl->decay = 0.0f;
+				dl->color.r = 220;
+				dl->color.g = 220;
+				dl->color.b = 255;
+				dl->color.exponent = 1;
+			}
 		}
 	}
 	else if ( m_pHeadlight )

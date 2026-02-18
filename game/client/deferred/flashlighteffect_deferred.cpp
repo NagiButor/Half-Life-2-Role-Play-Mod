@@ -42,15 +42,21 @@ void CFlashlightEffectDeferred::UpdateLight( const Vector &vecPos, const Vector 
 	VectorAngles( vecDir, vecUp, ang );
 	m_pDefLight->ang = ang;
 
-	m_pDefLight->col_diffuse.Init( 1.0f, 1.0f, 1.0f );
+	m_pDefLight->col_diffuse.Init( 1.0f * m_flIntensityScale, 1.0f * m_flIntensityScale, 1.0f * m_flIntensityScale );
 	m_pDefLight->flFalloffPower = 2.0f;
-	m_pDefLight->flRadius = Max( 32.0f, (float)nDistance );
+	m_pDefLight->flRadius = Max( 32.0f, (float)nDistance * m_flDistanceScale );
+    const uint16 visDist = (uint16)MIN( (int)( m_pDefLight->flRadius + 256.0f ), 0xFFFF );
+    m_pDefLight->iVisible_Dist = visDist;
+    m_pDefLight->iVisible_Range = visDist;
+    m_pDefLight->iShadow_Dist = visDist;
+    m_pDefLight->iShadow_Range = visDist;
 	m_pDefLight->iLighttype = DEFLIGHTTYPE_SPOT;
 
 	ConVarRef flashlightFov( "r_flashlightfov" );
 	const float flFov = flashlightFov.IsValid() ? flashlightFov.GetFloat() : 45.0f;
-	m_pDefLight->flSpotCone_Outer = SPOT_DEGREE_TO_RAD( flFov );
-	m_pDefLight->flSpotCone_Inner = SPOT_DEGREE_TO_RAD( flFov * 0.8f );
+	const float flTunedFov = flFov * m_flFovScale;
+	m_pDefLight->flSpotCone_Outer = SPOT_DEGREE_TO_RAD( flTunedFov );
+	m_pDefLight->flSpotCone_Inner = SPOT_DEGREE_TO_RAD( flTunedFov * 0.8f );
 
 	ConVarRef flashlightShadows( "r_flashlightdepthtexture" );
 	if ( flashlightShadows.IsValid() && flashlightShadows.GetBool() )
@@ -58,7 +64,7 @@ void CFlashlightEffectDeferred::UpdateLight( const Vector &vecPos, const Vector 
 	else
 		m_pDefLight->iFlags &= ~DEFLIGHT_SHADOW_ENABLED;
 
-	const bool bDoVolumetrics = r_flashlightvolumetrics.GetBool() && input->CAM_IsThirdPerson();
+	const bool bDoVolumetrics = m_bForceVolumetrics || ( r_flashlightvolumetrics.GetBool() && input->CAM_IsThirdPerson() );
 	if ( bDoVolumetrics )
 		m_pDefLight->iFlags |= DEFLIGHT_VOLUMETRICS_ENABLED;
 	else

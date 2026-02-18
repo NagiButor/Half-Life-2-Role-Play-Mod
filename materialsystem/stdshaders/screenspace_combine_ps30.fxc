@@ -1,25 +1,93 @@
-
-
 #include "common_ps_fxc.h"
 #include "common_deferred_fxc.h"
 
-sampler sInput							: register( s0 );
+sampler sInput					: register( s0 );
+
+// c0: xy = inv resolution, z = mode (0 none,1 FXAA,2 SMAA-lite), w = strength
+float4 g_PSParams0 : register( c0 );
 
 struct PS_INPUT
 {
-	float2 vTexCoord				: TEXCOORD0;
+	float2 vTexCoord			: TEXCOORD0;
 };
 
 struct PS_OUTPUT
 {
-	float4 vColor_0				:	COLOR0;
+	float4 vColor_0			: COLOR0;
 };
+
+float3 SampleFXAA( float2 uv )
+{
+	float3 rgbM = tex2D( sInput, uv ).rgb;
+	float3 rgbN = tex2D( sInput, uv + float2( 0, -g_PSParams0.y ) ).rgb;
+	float3 rgbS = tex2D( sInput, uv + float2( 0, g_PSParams0.y ) ).rgb;
+	float3 rgbE = tex2D( sInput, uv + float2( g_PSParams0.x, 0 ) ).rgb;
+	float3 rgbW = tex2D( sInput, uv + float2( -g_PSParams0.x, 0 ) ).rgb;
+
+	float lumaM = dot( rgbM, float3( 0.299f, 0.587f, 0.114f ) );
+	float lumaN = dot( rgbN, float3( 0.299f, 0.587f, 0.114f ) );
+	float lumaS = dot( rgbS, float3( 0.299f, 0.587f, 0.114f ) );
+	float lumaE = dot( rgbE, float3( 0.299f, 0.587f, 0.114f ) );
+	float lumaW = dot( rgbW, float3( 0.299f, 0.587f, 0.114f ) );
+
+	float lumaMin = min( lumaM, min( min( lumaN, lumaS ), min( lumaE, lumaW ) ) );
+	float lumaMax = max( lumaM, max( max( lumaN, lumaS ), max( lumaE, lumaW ) ) );
+
+	float2 dir = float2( lumaW - lumaE, lumaN - lumaS );
+	float dirReduce = max( ( lumaN + lumaS + lumaE + lumaW ) * 0.25f * 0.03125f, 1e-4f );
+	float rcpDirMin = rsqrt( min( dir.x * dir.x, dir.y * dir.y ) + dirReduce );
+	float2 dirNorm = normalize( dir ) * float2( g_PSParams0.x, g_PSParams0.y );
+	float2 offset = dirNorm * 0.75f;
+
+	float3 rgbA = tex2D( sInput, uv + offset ).rgb;
+	float3 rgbB = tex2D( sInput, uv - offset ).rgb;
+	float3 rgbFxaa = 0.5f * ( rgbA + rgbB );
+
+	float lumaFxaa = dot( rgbFxaa, float3( 0.299f, 0.587f, 0.114f ) );
+	bool outside = ( lumaFxaa < lumaMin ) || ( lumaFxaa > lumaMax );
+	return outside ? rgbM : rgbFxaa;
+}
+
+float3 SampleSMAALite( float2 uv )
+{
+	// lightweight edge blend using a 3x3 luma kernel
+	float3 sum = 0;
+	float weight = 0;
+	[unroll]
+	for ( int y = -1; y <= 1; ++y )
+	{
+		[unroll]
+		for ( int x = -1; x <= 1; ++x )
+		{
+			float2 ofs = float2( x * g_PSParams0.x, y * g_PSParams0.y );
+			float3 s = tex2D( sInput, uv + ofs ).rgb;
+			float l = dot( s, float3( 0.299f, 0.587f, 0.114f ) );
+			float w = ( x == 0 && y == 0 ) ? 1.0f : 0.5f;
+			sum += s * w;
+			weight += w;
+		}
+	}
+	return sum / weight;
+}
 
 PS_OUTPUT main( const PS_INPUT In )
 {
 	PS_OUTPUT Out;
+	float3 baseColor = tex2D( sInput, In.vTexCoord ).rgb;
+	float mode = g_PSParams0.z;
+	float strength = g_PSParams0.w;
 
-	Out.vColor_0 = tex2D( sInput, In.vTexCoord );
+	float3 aaColor = baseColor;
+	if ( mode > 0.5f )
+	{
+		if ( mode < 1.5f )
+			aaColor = SampleFXAA( In.vTexCoord );
+		else
+			aaColor = SampleSMAALite( In.vTexCoord );
+	}
 
+	float3 finalColor = lerp( baseColor, aaColor, strength * step( 0.5f, mode ) );
+
+	Out.vColor_0 = float4( finalColor, 1.0f );
 	return Out;
 }
