@@ -60,7 +60,10 @@ public:
 
 	void LoadVmf( const char *pszVmf );
 	void SaveCurrentVmf();
+	void SaveToVmf( const char *pszVmf );
 	const char *GetCurrentVmfPath();
+	bool HasLastSavedState();
+	void LoadLastSavedState();
 
 	enum EDITORINTERACTION_MODE
 	{
@@ -152,6 +155,8 @@ private:
 	void LinkEditorLightsToExistingWorldLights();
 	void FlushEditorLights();
 	void ImportWorldLightsToEditor();
+	void EnsureVmfLoaded( const char *pszVmf );
+	void AssignEditorIdsFromVmf();
 
 	void AddEditorLight( def_light_t *pDef );
 
@@ -167,6 +172,7 @@ private:
 
 	KeyValues *m_pKVVmf;
 	KeyValues *m_pKVGlobalLight; //* to child above
+	KeyValues *m_pKVVmfLastSaved;
 	lightData_Global_t m_EditorGlobalState;
 
 	Vector m_vecEditorView_Origin;

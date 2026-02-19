@@ -22,6 +22,7 @@ CVGUILightEditor_Controls::CVGUILightEditor_Controls( Panel *pParent )
 	: BaseClass( pParent, "LightEditorControls" )
 {
 	m_pFileVmf = NULL;
+	m_bFileDialogForSave = false;
 
 	m_pCBoxDbg = new ComboBox( this, "cboxdbg", 6, false );
 	m_pCBoxDbg->AddItem( "None", NULL );
@@ -142,8 +143,32 @@ void CVGUILightEditor_Controls::OnCommand( const char *pCmd )
 		if ( GetLightingEditor()->GetCurrentVmfPath() &&
 			*GetLightingEditor()->GetCurrentVmfPath() )
 		{
-			GetLightingEditor()->SaveCurrentVmf();
+			QueryBox *pQueryBox = new QueryBox( "Save VMF",
+				VarArgs( "Do you want to overwrite: %s?", GetLightingEditor()->GetCurrentVmfPath() ), this );
+
+			pQueryBox->AddActionSignalTarget( this );
+			pQueryBox->SetOKCommand( new KeyValues( "Command", "command", "savevmf_confirm" ) );
+			pQueryBox->SetCancelCommand( new KeyValues( "Command", "command", "savevmf_abort" ) );
+
+			pQueryBox->DoModal();
 		}
+		else
+		{
+			OpenVmfFileDialogForSave();
+		}
+	}
+	else if ( !Q_stricmp( pCmd, "savevmf_confirm" ) )
+	{
+		if ( GetLightingEditor()->GetCurrentVmfPath() &&
+			*GetLightingEditor()->GetCurrentVmfPath() )
+		{
+			GetLightingEditor()->SaveToVmf( GetLightingEditor()->GetCurrentVmfPath() );
+			PostActionSignal( new KeyValues( "VmfPathChanged" ) );
+		}
+	}
+	else if ( !Q_stricmp( pCmd, "savevmf_abort" ) )
+	{
+		// no-op
 	}
 	else if ( !Q_stricmp( pCmd, "autoload_confirm" ) )
 	{
@@ -157,6 +182,14 @@ void CVGUILightEditor_Controls::OnCommand( const char *pCmd )
 	else if ( !Q_stricmp( pCmd, "autoload_abort" ) )
 	{
 		OpenVmfFileDialog();
+	}
+	else if ( !Q_stricmp( pCmd, "loadlast_confirm" ) )
+	{
+		GetLightingEditor()->LoadLastSavedState();
+	}
+	else if ( !Q_stricmp( pCmd, "loadlast_abort" ) )
+	{
+		// no-op
 	}
 	else if ( !Q_stricmp( pCmd, "toggleprops" ) )
 	{
@@ -189,6 +222,19 @@ void CVGUILightEditor_Controls::OnCommand( const char *pCmd )
 
 void CVGUILightEditor_Controls::OnLoadVmf()
 {
+	if ( GetLightingEditor()->HasLastSavedState() )
+	{
+		QueryBox *pQueryBox = new QueryBox( "Load",
+			"Do you want to revert all editor lights to the last saved state?", this );
+
+		pQueryBox->AddActionSignalTarget( this );
+		pQueryBox->SetOKCommand( new KeyValues( "Command", "command", "loadlast_confirm" ) );
+		pQueryBox->SetCancelCommand( new KeyValues( "Command", "command", "loadlast_abort" ) );
+
+		pQueryBox->DoModal();
+		return;
+	}
+
 	char tmp[MAX_PATH*4];
 	bool bValidAutoPath = false;
 
@@ -263,6 +309,8 @@ bool CVGUILightEditor_Controls::BuildCurrentVmfPath( char *pszOut, int maxlen )
 
 void CVGUILightEditor_Controls::OpenVmfFileDialog()
 {
+	m_bFileDialogForSave = false;
+
 	char szVmfPath[MAX_PATH*4];
 	BuildVmfPath( szVmfPath, sizeof( szVmfPath ), false );
 
@@ -280,11 +328,41 @@ void CVGUILightEditor_Controls::OpenVmfFileDialog()
 	m_pFileVmf->Activate();
 }
 
+void CVGUILightEditor_Controls::OpenVmfFileDialogForSave()
+{
+	m_bFileDialogForSave = true;
+
+	char szVmfPath[MAX_PATH*4];
+	BuildVmfPath( szVmfPath, sizeof( szVmfPath ), false );
+
+	if ( m_pFileVmf != NULL )
+		m_pFileVmf->DeletePanel();
+
+	m_pFileVmf = new FileOpenDialog( this, "Save vmf", FOD_SAVE );
+
+	m_pFileVmf->SetDeleteSelfOnClose( false );
+	m_pFileVmf->AddFilter( "*.vmf", "*.vmf", true );
+	m_pFileVmf->AddActionSignalTarget( this );
+
+	m_pFileVmf->SetStartDirectoryContext( "VMFContext", szVmfPath );
+	m_pFileVmf->DoModal( false );
+	m_pFileVmf->Activate();
+}
+
 void CVGUILightEditor_Controls::OnFileSelected( KeyValues *pKV )
 {
 	const char *pszFullpath = pKV->GetString( "fullpath" );
 
-	LoadVmf( pszFullpath );
+	if ( m_bFileDialogForSave )
+	{
+		m_bFileDialogForSave = false;
+		GetLightingEditor()->SaveToVmf( pszFullpath );
+		PostActionSignal( new KeyValues( "VmfPathChanged" ) );
+	}
+	else
+	{
+		LoadVmf( pszFullpath );
+	}
 }
 
 void CVGUILightEditor_Controls::LoadVmf( const char *pszPath )

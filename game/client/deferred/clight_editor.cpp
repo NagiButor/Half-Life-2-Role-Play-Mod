@@ -6,7 +6,11 @@
 #ifdef SHADEREDITOR
 #include "ShaderEditor/ShaderEditorSystem.h"
 #include "ShaderEditor/IVShaderEditor.h"
+#include "cbase.h"
+#include "iviewrender_beams.h"
+#include "viewrender.h"
 #endif
+#include <functional>
 
 #include "view_shared.h"
 #include "view.h"
@@ -22,6 +26,40 @@ extern void ScreenToWorld( int mousex, int mousey, float fov,
 					const Vector& vecRenderOrigin,
 					const QAngle& vecRenderAngles,
 					Vector& vecPickingRay );
+
+static bool IsAbsolutePathSimple( const char *pszPath )
+{
+	if ( pszPath == NULL || *pszPath == 0 )
+		return false;
+
+	if ( ( ( pszPath[0] >= 'A' && pszPath[0] <= 'Z' ) || ( pszPath[0] >= 'a' && pszPath[0] <= 'z' ) ) && pszPath[1] == ':' )
+		return true;
+
+	return pszPath[0] == '/' || pszPath[0] == '\\';
+}
+
+static void NormalizeVmfPath( const char *pszIn, char *pszOut, int maxLen )
+{
+	if ( pszIn == NULL )
+	{
+		*pszOut = 0;
+		return;
+	}
+
+	Q_snprintf( pszOut, maxLen, "%s", pszIn );
+	Q_FixSlashes( pszOut );
+
+	if ( !IsAbsolutePathSimple( pszOut ) )
+	{
+		char fullPath[MAX_PATH * 4];
+		if ( g_pFullFileSystem->RelativePathToFullPath( pszOut, "MOD", fullPath, sizeof( fullPath ) ) )
+		{
+			Q_strncpy( pszOut, fullPath, maxLen );
+			pszOut[maxLen - 1] = 0;
+			Q_FixSlashes( pszOut );
+		}
+	}
+}
 
 static CLightingEditor __g_lightingEditor;
 CLightingEditor *GetLightingEditor()
@@ -53,6 +91,7 @@ CLightingEditor::CLightingEditor()
 
 	m_pKVVmf = NULL;
 	m_pKVGlobalLight = NULL;
+	m_pKVVmfLastSaved = NULL;
 	*m_szCurrentVmf = 0;
 
 	m_vecEditorView_Origin = vec3_origin;
@@ -72,6 +111,9 @@ CLightingEditor::~CLightingEditor()
 		m_pKVVmf->deleteThis();
 	else if ( m_pKVGlobalLight )
 		m_pKVGlobalLight->deleteThis();
+
+	if ( m_pKVVmfLastSaved )
+		m_pKVVmfLastSaved->deleteThis();
 }
 
 int DefLightSort( def_light_t *const *d0, def_light_t *const *d1 )
@@ -1033,14 +1075,20 @@ void CLightingEditor::FlushEditorLights()
 		return;
 	}
 
-	// Re-add any world lights that were removed during editing
-	FOR_EACH_VEC( m_hEditorLights, i )
+	// Only restore backing world lights when editor lighting is OFF (normal shutdown).
+	// When editor lighting is still active (e.g. Load while editing), skip —
+	// new editor lights will replace these, and SyncEditorLightsToWorld handles
+	// restoration when the editor is eventually disabled.
+	if ( !m_bLightsActive )
 	{
-		def_light_editor_t *pEditor = static_cast<def_light_editor_t*>( m_hEditorLights[ i ] );
-		if ( pEditor && pEditor->pWorldLight )
+		FOR_EACH_VEC( m_hEditorLights, i )
 		{
-			pEditor->pWorldLight->MakeDirtyAll();
-			GetLightingManager()->AddLight( pEditor->pWorldLight );
+			def_light_editor_t *pEditor = static_cast<def_light_editor_t*>( m_hEditorLights[ i ] );
+			if ( pEditor && pEditor->pWorldLight )
+			{
+				pEditor->pWorldLight->MakeDirtyAll();
+				GetLightingManager()->AddLight( pEditor->pWorldLight );
+			}
 		}
 	}
 
@@ -1077,9 +1125,31 @@ KeyValues *CLightingEditor::VmfToKeyValues( const char *pszVmf )
 		vmfBuffer.PutString( "\r\n}" );
 		vmfBuffer.PutChar( '\0' );
 
+		CUtlBuffer sanitized;
+		sanitized.SetBufferType( true, true );
+		sanitized.SeekPut( CUtlBuffer::SEEK_HEAD, 0 );
+
+		const int nBytes = vmfBuffer.TellPut();
+		const char *pData = (const char*)vmfBuffer.Base();
+		for ( int i = 0; i < nBytes; ++i )
+		{
+			char c = pData[i];
+			if ( c == '"' && (i + 1) < nBytes && pData[i + 1] == '"' )
+			{
+				sanitized.PutChar( '"' );
+				sanitized.PutChar( '_' );
+				sanitized.PutChar( '"' );
+				++i; // skip the second quote of the empty key
+				continue;
+			}
+			sanitized.PutChar( c );
+		}
+		sanitized.PutChar( '\0' );
+		sanitized.SeekPut( CUtlBuffer::SEEK_HEAD, 0 );
+
 		pszKV = new KeyValues("");
 
-		if ( !pszKV->LoadFromBuffer( "", vmfBuffer ) )
+		if ( !pszKV->LoadFromBuffer( "", sanitized ) )
 		{
 			pszKV->deleteThis();
 			pszKV = NULL;
@@ -1091,17 +1161,67 @@ KeyValues *CLightingEditor::VmfToKeyValues( const char *pszVmf )
 
 void CLightingEditor::KeyValuesToVmf( KeyValues *pKV, CUtlBuffer &vmf )
 {
-	for ( KeyValues *pKey = m_pKVVmf->GetFirstTrueSubKey(); pKey; pKey = pKey->GetNextTrueSubKey() )
+	vmf.SetBufferType( true, true );
+	vmf.SeekPut( CUtlBuffer::SEEK_HEAD, 0 );
+
+	auto VmfWriteIndent = []( CUtlBuffer &buf, int nIndent )
 	{
-		pKey->RecursiveSaveToFile( vmf, 0 );
-	}
+		for ( int i = 0; i < nIndent; ++i )
+			buf.PutChar( '\t' );
+	};
+
+	auto VmfWriteEscapedQuoted = []( CUtlBuffer &buf, const char *psz )
+	{
+		buf.PutChar( '"' );
+		for ( const char *p = psz; p && *p; ++p )
+		{
+			if ( *p == '"' )
+				buf.PutChar( '\\' );
+			buf.PutChar( *p );
+		}
+		buf.PutChar( '"' );
+	};
+
+	std::function< void( KeyValues*, int ) > VmfWriteBlock = [&]( KeyValues *pBlock, int nIndent )
+	{
+		if ( !pBlock )
+			return;
+
+		VmfWriteIndent( vmf, nIndent );
+		vmf.PutString( pBlock->GetName() );
+		vmf.PutString( "\r\n" );
+
+		VmfWriteIndent( vmf, nIndent );
+		vmf.PutString( "{\r\n" );
+
+		for ( KeyValues *pValue = pBlock->GetFirstValue(); pValue; pValue = pValue->GetNextValue() )
+		{
+			VmfWriteIndent( vmf, nIndent + 1 );
+			VmfWriteEscapedQuoted( vmf, pValue->GetName() );
+			vmf.PutChar( ' ' );
+			VmfWriteEscapedQuoted( vmf, pValue->GetString() );
+			vmf.PutString( "\r\n" );
+		}
+
+		for ( KeyValues *pSub = pBlock->GetFirstTrueSubKey(); pSub; pSub = pSub->GetNextTrueSubKey() )
+			VmfWriteBlock( pSub, nIndent + 1 );
+
+		VmfWriteIndent( vmf, nIndent );
+		vmf.PutString( "}\r\n" );
+	};
+
+	for ( KeyValues *pKey = pKV->GetFirstTrueSubKey(); pKey; pKey = pKey->GetNextTrueSubKey() )
+		VmfWriteBlock( pKey, 0 );
+
+	vmf.SeekPut( CUtlBuffer::SEEK_TAIL, 0 );
+	vmf.PutChar( '\0' );
 }
 
 void CLightingEditor::LoadVmf( const char *pszVmf )
 {
-	Q_snprintf( m_szCurrentVmf, sizeof( m_szCurrentVmf ), "%s", pszVmf );
+	NormalizeVmfPath( pszVmf, m_szCurrentVmf, sizeof( m_szCurrentVmf ) );
 
-	KeyValues *pKV = VmfToKeyValues( pszVmf );
+	KeyValues *pKV = VmfToKeyValues( m_szCurrentVmf );
 
 	if ( !pKV )
 	{
@@ -1110,25 +1230,170 @@ void CLightingEditor::LoadVmf( const char *pszVmf )
 	}
 
 	ParseVmfFile( pKV );
+
+	if ( m_pKVVmfLastSaved )
+		m_pKVVmfLastSaved->deleteThis();
+	// snapshot baseline for "Load" restore
+	m_pKVVmfLastSaved = pKV->MakeCopy();
+
 	pKV->deleteThis();
+}
+
+void CLightingEditor::EnsureVmfLoaded( const char *pszVmf )
+{
+	if ( m_pKVVmf != NULL )
+		return;
+
+	char szNorm[MAX_PATH * 4];
+	NormalizeVmfPath( pszVmf, szNorm, sizeof( szNorm ) );
+
+	KeyValues *pKV = VmfToKeyValues( szNorm );
+	if ( !pKV )
+		return;
+
+	m_pKVVmf = pKV;
+	// Don't touch m_pKVGlobalLight here — the global light entity
+	// lives inside m_pKVVmf and will be preserved on disk as-is.
+	// Keeping m_pKVGlobalLight == NULL lets the renderer keep using
+	// the live entity (env_timecycle) instead of a stale snapshot.
+}
+
+void CLightingEditor::AssignEditorIdsFromVmf()
+{
+	if ( m_pKVVmf == NULL )
+		return;
+
+	for ( KeyValues *pKey = m_pKVVmf->GetFirstTrueSubKey(); pKey; pKey = pKey->GetNextTrueSubKey() )
+	{
+		if ( Q_strcmp( pKey->GetName(), "entity" ) )
+			continue;
+
+		if ( Q_stricmp( pKey->GetString( "classname" ), "light_deferred" ) )
+			continue;
+
+		const int iVmfId = pKey->GetInt( "id", -1 );
+		if ( iVmfId < 0 )
+			continue;
+
+		const char *pszOrigin = pKey->GetString( "origin", NULL );
+		if ( !pszOrigin || !*pszOrigin )
+			continue;
+
+		Vector vmfPos;
+		if ( sscanf( pszOrigin, "%f %f %f", &vmfPos.x, &vmfPos.y, &vmfPos.z ) != 3 )
+			continue;
+
+		// Already assigned to an editor light?
+		bool bAlreadyAssigned = false;
+		FOR_EACH_VEC( m_hEditorLights, j )
+		{
+			def_light_editor_t *pE = static_cast<def_light_editor_t*>( m_hEditorLights[j] );
+			if ( pE && pE->iEditorId == iVmfId )
+			{
+				bAlreadyAssigned = true;
+				break;
+			}
+		}
+		if ( bAlreadyAssigned )
+			continue;
+
+		// Find the closest unassigned editor light by original position
+		float flBestDist = FLT_MAX;
+		int iBest = -1;
+
+		FOR_EACH_VEC( m_hEditorLights, i )
+		{
+			def_light_editor_t *pEditor = static_cast<def_light_editor_t*>( m_hEditorLights[i] );
+			if ( !pEditor || pEditor->iEditorId != -1 )
+				continue;
+
+			// Use pSourceLight original pos if available, otherwise current editor pos
+			Vector srcPos = pEditor->pos;
+			if ( pEditor->pSourceLight )
+				srcPos = pEditor->pSourceLight->pos;
+
+			float flDist = ( srcPos - vmfPos ).LengthSqr();
+			if ( flDist < flBestDist )
+			{
+				flBestDist = flDist;
+				iBest = i;
+			}
+		}
+
+		// Match if within 1 unit (accounts for float rounding)
+		if ( iBest >= 0 && flBestDist < 1.0f )
+		{
+			def_light_editor_t *pMatch = static_cast<def_light_editor_t*>( m_hEditorLights[iBest] );
+			pMatch->iEditorId = iVmfId;
+		}
+	}
+}
+
+void CLightingEditor::SaveToVmf( const char *pszVmf )
+{
+	NormalizeVmfPath( pszVmf, m_szCurrentVmf, sizeof( m_szCurrentVmf ) );
+
+	EnsureVmfLoaded( m_szCurrentVmf );
+
+	if ( m_pKVVmf == NULL )
+	{
+		Warning( "LightEditor: could not read VMF '%s'\n", m_szCurrentVmf );
+		return;
+	}
+
+	AssignEditorIdsFromVmf();
+	SaveCurrentVmf();
 }
 
 void CLightingEditor::SaveCurrentVmf()
 {
 	Assert( Q_strlen( m_szCurrentVmf ) > 0 );
 
-	if ( !g_pFullFileSystem->FileExists( m_szCurrentVmf ) )
+	bool bFileExists = g_pFullFileSystem->FileExists( m_szCurrentVmf );
+	if ( !bFileExists && !IsAbsolutePathSimple( m_szCurrentVmf ) )
+		bFileExists = g_pFullFileSystem->FileExists( m_szCurrentVmf, "MOD" );
+
+	if ( !bFileExists )
 	{
 		AssertMsg( 0, "Expected file unavailable (moved, deleted)." );
 		return;
 	}
 
+	if ( m_pKVVmf == NULL )
+	{
+		EnsureVmfLoaded( m_szCurrentVmf );
+		if ( m_pKVVmf == NULL )
+			return;
+	}
+
+	AssignEditorIdsFromVmf();
 	ApplyLightsToCurrentVmfFile();
 
 	CUtlBuffer buffer;
 	KeyValuesToVmf( m_pKVVmf, buffer );
 
-	g_pFullFileSystem->WriteFile( m_szCurrentVmf, NULL, buffer );
+	g_pFullFileSystem->WriteFile( m_szCurrentVmf, IsAbsolutePathSimple( m_szCurrentVmf ) ? NULL : "MOD", buffer );
+
+	if ( m_pKVVmfLastSaved )
+		m_pKVVmfLastSaved->deleteThis();
+	// After saving, update the "last saved" baseline to match what we just wrote.
+	if ( m_pKVVmf )
+		m_pKVVmfLastSaved = m_pKVVmf->MakeCopy();
+	else
+		m_pKVVmfLastSaved = NULL;
+}
+
+bool CLightingEditor::HasLastSavedState()
+{
+	return m_pKVVmfLastSaved != NULL;
+}
+
+void CLightingEditor::LoadLastSavedState()
+{
+	if ( m_pKVVmfLastSaved == NULL )
+		return;
+
+	ParseVmfFile( m_pKVVmfLastSaved );
 }
 
 const char *CLightingEditor::GetCurrentVmfPath()
@@ -1158,21 +1423,14 @@ void CLightingEditor::ParseVmfFile( KeyValues *pKeyValues )
 
 		if ( bGlobalLightEntity )
 		{
-			m_pKVGlobalLight = pKey;
-
-			ApplyKVToGlobalLight( m_pKVGlobalLight );
+			// Don't set m_pKVGlobalLight — the global light entity stays
+			// inside m_pKVVmf for disk serialization but we don't point at
+			// it so the renderer keeps using the live entity (env_timecycle).
 			continue;
 		}
 
+		// Only import editable light_deferred; ignore any other entities (incl. env_timecycle, light_deferred_global)
 		if ( !bLightEntity )
-			continue;
-
-		const char *pszDefault = "";
-		const char *pszTarget = pKey->GetString( "targetname", pszDefault );
-		const char *pszParent = pKey->GetString( "parentname", pszDefault );
-
-		if ( pszTarget != pszDefault && *pszTarget ||
-			pszParent != pszDefault && *pszParent )
 			continue;
 
 		def_light_editor_t *pLight = new def_light_editor_t();
@@ -1181,9 +1439,29 @@ void CLightingEditor::ParseVmfFile( KeyValues *pKeyValues )
 			continue;
 
 		pLight->ApplyKeyValueProperties( pKey );
-		pLight->iEditorId = pKey->GetInt( "id" );
+		pLight->iEditorId = pKey->GetInt( "id", -1 );
+		if ( pLight->iEditorId < 0 )
+		{
+			delete pLight;
+			continue;
+		}
 
 		AddEditorLight( pLight );
+	}
+
+	// If the loaded VMF contains no editable lights, keep rendering existing world lights.
+	// Otherwise, the editor can end up hiding world lights with nothing to display.
+	if ( m_bLightsActive && GetLightingManager() != NULL && m_hEditorLights.Count() == 0 )
+	{
+		m_bLightsActive = false;
+		GetLightingManager()->SetRenderWorldLights( true );
+		ApplyEditorLightsToWorld( false );
+	}
+	else if ( m_bLightsActive && GetLightingManager() != NULL && m_hEditorLights.Count() > 0 )
+	{
+		// Editor is active and we just created new lights from VMF — add them
+		// to the manager so they render in place of the old (flushed) editor lights.
+		ApplyEditorLightsToWorld( true );
 	}
 }
 
@@ -1228,17 +1506,19 @@ void CLightingEditor::ApplyLightsToCurrentVmfFile()
 		const char *pszTarget = pKey->GetString( "targetname", pszDefault );
 		const char *pszParent = pKey->GetString( "parentname", pszDefault );
 
+		// Only touch light_deferred entities; leave everything else intact
+		if ( !bIsDeferredLight )
+			continue;
+
 		if ( pSrcKey == NULL )
 		{
-			if ( bIsDeferredLight &&
-				(pszTarget == pszDefault || !*pszTarget) &&
+			if ( (pszTarget == pszDefault || !*pszTarget) &&
 				(pszParent == pszDefault || !*pszParent) )
 				listToRemove.AddToTail( pKey );
 			continue;
 		}
 
 		Assert( bIsDeferredLight );
-		Assert( (pszTarget == NULL || !*pszTarget) && (pszParent == NULL || !*pszParent) );
 
 		for ( KeyValues *pValue = pSrcKey->GetFirstValue(); pValue;
 			pValue = pValue->GetNextValue() )
@@ -1272,8 +1552,9 @@ void CLightingEditor::ApplyLightsToCurrentVmfFile()
 	FOR_EACH_VEC( listToRemove, i )
 		m_pKVVmf->RemoveSubKey( listToRemove[i] );
 
-	if ( GetKVGlobalLight() != NULL )
-		ApplyLightStateToKV( m_EditorGlobalState );
+	// Don't overwrite the VMF's light_deferred_global with runtime state.
+	// The VMF stores the mapper's intended global light; env_timecycle may
+	// have changed the live values at runtime and we shouldn't bake those in.
 
 	FOR_EACH_VEC( listKeyValues, i )
 		listKeyValues[ i ]->deleteThis();

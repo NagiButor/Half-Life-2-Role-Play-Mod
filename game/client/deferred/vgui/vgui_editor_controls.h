@@ -36,6 +36,8 @@ private:
 	void BuildVmfPath( char *pszOut, int maxlen, bool bMakeRelative = true );
 	bool BuildCurrentVmfPath( char *pszOut, int maxlen );
 	void OpenVmfFileDialog();
+	void OpenVmfFileDialogForSave();
+	bool m_bFileDialogForSave;
 	vgui::FileOpenDialog *m_pFileVmf;
 	vgui::DirectorySelectDialog *m_pDirVmf;
 	vgui::ComboBox *m_pCBoxDbg;
