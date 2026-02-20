@@ -52,7 +52,7 @@ CVGUIProjectable *CProjectableFactory::AllocateProjectableByName( const char *ps
 		}
 	}
 
-	return null;
+	return NULL;
 }
 
 CVGUIProjectable *CProjectableFactory::AllocateProjectableByScript( const char *pszFileName )

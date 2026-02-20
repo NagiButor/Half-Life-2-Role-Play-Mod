@@ -12,6 +12,7 @@
 #include "vgui_controls/ScrollBar.h"
 #include "vgui_controls/TextEntry.h"
 #include "matsys_controls/colorpickerpanel.h"
+#include "filesystem.h"
 
 #include "tier0/memdbgon.h"
 
@@ -672,6 +673,124 @@ private:
 	int		m_pOldValues[4];
 };
 
+class PropertyCookieComboBox : public ComboBox, public PropertyClient
+{
+public:
+	PropertyCookieComboBox( KeyValues *prop )
+		: ComboBox( NULL, "", 20, false ), PropertyClient( prop )
+	{
+		m_iLastActivated = 0;
+		PopulateCookieList();
+	};
+
+	void PopulateCookieList()
+	{
+		RemoveAll();
+		m_CookiePaths.RemoveAll();
+
+		// First entry: "(none)"
+		AddItem( "(none)", NULL );
+		m_CookiePaths.AddToTail();
+
+		// Scan materials/cookies/*.vtf for texture cookies
+		FileFindHandle_t findHandle;
+		const char *pFileName = g_pFullFileSystem->FindFirst( "materials/cookies/*.vtf", &findHandle );
+		while ( pFileName )
+		{
+			char szName[MAX_PATH];
+			Q_StripExtension( pFileName, szName, sizeof( szName ) );
+
+			char szPath[MAX_PATH];
+			Q_snprintf( szPath, sizeof( szPath ), "cookies/%s", szName );
+
+			char szLabel[MAX_PATH];
+			Q_snprintf( szLabel, sizeof( szLabel ), "[tex] %s", szName );
+
+			AddItem( szLabel, NULL );
+			m_CookiePaths.AddToTail();
+			Q_strncpy( m_CookiePaths.Tail().szPath, szPath, sizeof( m_CookiePaths.Tail().szPath ) );
+
+			pFileName = g_pFullFileSystem->FindNext( findHandle );
+		}
+		g_pFullFileSystem->FindClose( findHandle );
+
+		// Scan scripts/vguiprojected/*.txt for projectable cookies
+		pFileName = g_pFullFileSystem->FindFirst( "scripts/vguiprojected/*.txt", &findHandle );
+		while ( pFileName )
+		{
+			char szName[MAX_PATH];
+			Q_StripExtension( pFileName, szName, sizeof( szName ) );
+
+			char szLabel[MAX_PATH];
+			Q_snprintf( szLabel, sizeof( szLabel ), "[proj] %s", szName );
+
+			AddItem( szLabel, NULL );
+			m_CookiePaths.AddToTail();
+			Q_strncpy( m_CookiePaths.Tail().szPath, szName, sizeof( m_CookiePaths.Tail().szPath ) );
+
+			pFileName = g_pFullFileSystem->FindNext( findHandle );
+		}
+		g_pFullFileSystem->FindClose( findHandle );
+	};
+
+	virtual void ReadValue()
+	{
+		const char *pszCur = GetValue()->GetString();
+		int iFound = 0;
+		for ( int i = 0; i < m_CookiePaths.Count(); i++ )
+		{
+			if ( !Q_stricmp( m_CookiePaths[i].szPath, pszCur ) )
+			{
+				iFound = i;
+				break;
+			}
+		}
+		ActivateItem( iFound );
+		m_iLastActivated = iFound;
+	};
+
+	virtual void WriteValue()
+	{
+		int idx = GetActiveItem();
+		if ( idx >= 0 && idx < m_CookiePaths.Count() )
+			GetValue()->SetString( NULL, m_CookiePaths[idx].szPath );
+		else
+			GetValue()->SetString( NULL, "" );
+	};
+
+	void OnMenuItemSelected()
+	{
+		int id = GetActiveItem();
+		bool bUpdate = id != m_iLastActivated;
+
+		ComboBox::OnMenuItemSelected();
+
+		if ( bUpdate )
+		{
+			m_iLastActivated = id;
+			WriteValue();
+			OnPropertyChanged();
+		}
+	};
+
+	Color GetBgColor()
+	{
+		if ( IsMultiSelected() )
+			return GetWarningColor();
+		return ComboBox::GetBgColor();
+	};
+
+private:
+	int m_iLastActivated;
+
+	struct CookieEntry
+	{
+		CookieEntry() { szPath[0] = '\0'; }
+		char szPath[MAX_PATH];
+	};
+	CUtlVector< CookieEntry > m_CookiePaths;
+};
+
 CVGUILightEditor_Properties::CVGUILightEditor_Properties( Panel *pParent )
 	: BaseClass( pParent, "LightEditorProperties" )
 {
@@ -1018,21 +1137,21 @@ void CVGUILightEditor_Properties::CreateProperties_LightEntity()
 
 	Visibility_CheckButton vis_cookie( pCheckButton );
 
-	pTextEntry = new PropertyTextEntry(
-		MakeKey( GetLightParamName( LPARAM_COOKIETEX ), "" ),
-		PropertyTextEntry::PTENTRY_STRING, true );
-	pTextEntry->SetLabelName( "Spot cookie texture" );
-	pTextEntry->CopyVisiblityRule( &vis_cookie );
-	pTextEntry->CopyVisiblityRule( &vis_spotlight );
-	m_hProperties.AddToTail( pTextEntry );
+	PropertyCookieComboBox *pCookieCombo = NULL;
 
-	pTextEntry = new PropertyTextEntry(
-		MakeKey( GetLightParamName( LPARAM_COOKIETEX ), "" ),
-		PropertyTextEntry::PTENTRY_STRING, true );
-	pTextEntry->SetLabelName( "Point cookie texture" );
-	pTextEntry->CopyVisiblityRule( &vis_cookie );
-	pTextEntry->CopyVisiblityRule( &vis_pointlight );
-	m_hProperties.AddToTail( pTextEntry );
+	pCookieCombo = new PropertyCookieComboBox(
+		MakeKey( GetLightParamName( LPARAM_COOKIETEX ), "" ) );
+	pCookieCombo->SetLabelName( "Spot cookie" );
+	pCookieCombo->CopyVisiblityRule( &vis_cookie );
+	pCookieCombo->CopyVisiblityRule( &vis_spotlight );
+	m_hProperties.AddToTail( pCookieCombo );
+
+	pCookieCombo = new PropertyCookieComboBox(
+		MakeKey( GetLightParamName( LPARAM_COOKIETEX ), "" ) );
+	pCookieCombo->SetLabelName( "Point cookie" );
+	pCookieCombo->CopyVisiblityRule( &vis_cookie );
+	pCookieCombo->CopyVisiblityRule( &vis_pointlight );
+	m_hProperties.AddToTail( pCookieCombo );
 
 
 	pCheckButton = new PropertyCheckButton(
