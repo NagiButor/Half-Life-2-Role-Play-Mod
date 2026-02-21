@@ -56,6 +56,10 @@ extern void FinishCurrentView();
 extern void FlushWorldLists();
 
 static ConVar r_deferred_debug_shadow( "r_deferred_debug_shadow", "0", FCVAR_ARCHIVE, "Draw DEBUG_SHADOW (CSM debug) instead of global lighting pass." );
+
+// Entity index to exclude from current deferred shadow pass (e.g. flashlight owner)
+int g_iDeferredShadowExcludeEntIndex = -1;
+
 static ConVar r_deferred_skyatmo_lut( "r_deferred_skyatmo_lut", "1" );
 static ConVar r_deferred_skyatmo_lut_update_interval( "r_deferred_skyatmo_lut_update_interval", "0.0" );
 static ConVar r_deferred_skyatmo_transmittance_lut_update_interval( "r_deferred_skyatmo_transmittance_lut_update_interval", "30.0" );
@@ -474,7 +478,10 @@ public:
 	CBaseShadowView(CViewRender *pMainView) : CBaseWorldViewDeferred( pMainView )
 	{
 		m_bOutputRadiosity = false;
+		m_iShadowExcludeEntIndex = -1;
 	};
+
+	int m_iShadowExcludeEntIndex;
 
 	void			Setup( const CViewSetup &view,
 						ITexture *pDepthTexture,
@@ -538,6 +545,7 @@ public:
 	{
 			m_pLight = pLight;
 			m_bSecondary = bSecondary;
+			m_iShadowExcludeEntIndex = pLight->iShadowExcludeEntIndex;
 	}
 	virtual bool	AdjustView( float waterHeight );
 	virtual void	PushView( float waterHeight );
@@ -564,6 +572,7 @@ public:
 	{
 			m_pLight = pLight;
 			m_iIndex = index;
+			m_iShadowExcludeEntIndex = pLight->iShadowExcludeEntIndex;
 	}
 
 	virtual void	CalcShadowView();
@@ -1549,6 +1558,9 @@ void CBaseShadowView::Draw()
 	const QAngle oldAngles = CurrentViewAngles();
 	SetupCurrentView( origin, angles, VIEW_DEFERRED_SHADOW );
 
+	// Set the shadow exclude entity index for this shadow pass
+	g_iDeferredShadowExcludeEntIndex = m_iShadowExcludeEntIndex;
+
 	CMatRenderContextPtr pRenderContext( materials );
 	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_RENDER_STAGE,
 		DEFERRED_RENDER_STAGE_SHADOWPASS );
@@ -1566,6 +1578,9 @@ void CBaseShadowView::Draw()
 	pRenderContext->SetFloatRenderingParameter( FLOAT_RENDERPARM_DEFERRED_SHADOW_RADIOSITY, 0.0f );
 	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_RENDER_STAGE,
 		DEFERRED_RENDER_STAGE_INVALID );
+
+	// Clear the shadow exclude entity index
+	g_iDeferredShadowExcludeEntIndex = -1;
 
 	SetupCurrentView( oldOrigin, oldAngles, oldViewID );
 }

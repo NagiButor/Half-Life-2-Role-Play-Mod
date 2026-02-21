@@ -111,6 +111,8 @@ def_light_t::def_light_t( bool bWorld )
 	iVolumeSamples= 50;
 #endif
 
+	iShadowExcludeEntIndex = -1;
+
 	worldTransform.Identity();
 
 #if DEBUG

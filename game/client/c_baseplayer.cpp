@@ -1773,8 +1773,15 @@ bool C_BasePlayer::ShouldDraw()
 #endif
 }
 
+// Defined in viewrender_deferred.cpp - entity index to exclude from current deferred shadow pass
+extern int g_iDeferredShadowExcludeEntIndex;
+
 int C_BasePlayer::DrawModel( int flags )
 {
+	// Don't render this entity in the deferred shadow pass if it's the shadow-excluded entity (e.g. flashlight owner)
+	if ( CurrentViewID() == VIEW_DEFERRED_SHADOW && entindex() == g_iDeferredShadowExcludeEntIndex )
+		return 0;
+
 #ifdef MAPBASE
 	if (DrawingLegs() && InFirstPersonView() && InPerspectiveView())
 	{

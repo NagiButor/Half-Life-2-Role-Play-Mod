@@ -69,6 +69,8 @@ struct def_light_t
 	int	iVolumeSamples;
 #endif
 
+	int iShadowExcludeEntIndex; // Entity index to exclude from shadow rendering (e.g. flashlight owner), -1 = none
+
 	void BuildBox( IMesh *pMesh );
 	void BuildSphere( IMesh **pMesh );
 	void BuildCone( IMesh *pMesh );

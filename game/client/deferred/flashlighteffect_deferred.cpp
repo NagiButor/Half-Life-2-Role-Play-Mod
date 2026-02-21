@@ -51,6 +51,7 @@ void CFlashlightEffectDeferred::UpdateLight( const Vector &vecPos, const Vector 
     m_pDefLight->iShadow_Dist = visDist;
     m_pDefLight->iShadow_Range = visDist;
 	m_pDefLight->iLighttype = DEFLIGHTTYPE_SPOT;
+	m_pDefLight->iShadowExcludeEntIndex = m_nEntIndex;
 
 	ConVarRef flashlightFov( "r_flashlightfov" );
 	const float flFov = flashlightFov.IsValid() ? flashlightFov.GetFloat() : 45.0f;
