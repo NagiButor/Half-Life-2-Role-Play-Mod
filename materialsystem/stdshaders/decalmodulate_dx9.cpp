@@ -8,6 +8,7 @@
 
 #include "BaseVSShader.h"
 #include "cpp_shader_constant_register_map.h"
+#include "renderparm.h"
 
 #include "SDK_decalmodulate_vs20.inc"
 #include "SDK_decalmodulate_ps20.inc"
@@ -201,6 +202,16 @@ BEGIN_VS_SHADER( SDK_DecalModulate_dx9,
 		}
 		DYNAMIC_STATE
 		{
+			// Skip during deferred GBuffer and Shadow passes - DecalModulate is a forward
+			// shader that should only render during the composition stage (or non-deferred).
+			int iDeferredRenderStage = pShaderAPI->GetIntRenderingParameter( INT_RENDERPARM_DEFERRED_RENDER_STAGE );
+			if ( iDeferredRenderStage == DEFERRED_RENDER_STAGE_GBUFFER ||
+				 iDeferredRenderStage == DEFERRED_RENDER_STAGE_SHADOWPASS )
+			{
+				Draw( false );
+				return;
+			}
+
 #ifdef MAPBASE // This fixes blood decals, etc. not showing up under flashlights.
 			//bHasFlashlight = pShaderAPI->InFlashlightMode();
 			bool bFlashlightShadows = false;

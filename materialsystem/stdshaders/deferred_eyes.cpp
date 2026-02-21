@@ -43,6 +43,7 @@ BEGIN_VS_SHADER( DEFERRED_EYES, "Deferred lighting version of SDK_Eyes" )
 	void SetupParmsGBuffer( defParms_gBuffer &p )
 	{
 		p.bModel = true;
+		p.bDepthBias = true;
 		p.iAlbedo = BASETEXTURE;
 		p.iAlphatestRef = ALPHATESTREFERENCE;
 		p.iPhongExp = PHONG_EXP;
@@ -51,6 +52,7 @@ BEGIN_VS_SHADER( DEFERRED_EYES, "Deferred lighting version of SDK_Eyes" )
 	void SetupParmsShadow( defParms_shadow &p )
 	{
 		p.bModel = true;
+		p.bDepthBias = true;
 		p.iAlbedo = BASETEXTURE;
 		p.iAlphatestRef = ALPHATESTREFERENCE;
 	}
@@ -184,6 +186,9 @@ BEGIN_VS_SHADER( DEFERRED_EYES, "Deferred lighting version of SDK_Eyes" )
 
 			pShaderShadow->EnableAlphaWrites( true );
 			pShaderShadow->EnableDepthWrites( true );
+
+			// Push eye geometry slightly back to prevent z-fighting with eyelids
+			pShaderShadow->EnablePolyOffset( SHADER_POLYOFFSET_SHADOW_BIAS );
 
 			DefaultFog();
 

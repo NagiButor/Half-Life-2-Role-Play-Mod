@@ -843,9 +843,11 @@ void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, f
 	{
 		if ( m_DrawFlags & DF_DRAW_ENTITITES )
 		{
-			DrawTranslucentRenderables( false, false );
 			if (!bShadowDepth)
+			{
+				DrawTranslucentRenderables( false, false );
 				DrawNoZBufferTranslucentRenderables();
+			}
 		}
 		else
 		{

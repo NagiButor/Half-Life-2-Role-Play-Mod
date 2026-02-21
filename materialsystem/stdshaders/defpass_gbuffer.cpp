@@ -101,6 +101,11 @@ void DrawPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 
 		pShaderShadow->EnableSRGBWrite( false );
 
+		if ( info.bDepthBias )
+		{
+			pShaderShadow->EnablePolyOffset( SHADER_POLYOFFSET_SHADOW_BIAS );
+		}
+
 		if ( bNoCull )
 		{
 			pShaderShadow->EnableCulling( false );

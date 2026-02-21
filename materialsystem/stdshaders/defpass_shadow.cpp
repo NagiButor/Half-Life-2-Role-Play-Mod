@@ -56,6 +56,11 @@ void DrawPassShadowPass( const defParms_shadow &info, CBaseVSShader *pShader, IM
 
 		pShaderShadow->EnableSRGBWrite( false );
 
+		if ( info.bDepthBias )
+		{
+			pShaderShadow->EnablePolyOffset( SHADER_POLYOFFSET_SHADOW_BIAS );
+		}
+
 		if ( bNoCull )
 		{
 			pShaderShadow->EnableCulling( false );

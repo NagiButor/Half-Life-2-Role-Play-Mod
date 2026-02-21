@@ -10,6 +10,7 @@ struct defParms_gBuffer
 		Q_memset( this, 0xFF, sizeof( defParms_gBuffer ) );
 
 		bModel = false;
+		bDepthBias = false;
 	};
 
 	// textures
@@ -42,6 +43,7 @@ struct defParms_gBuffer
 
 	// config
 	bool bModel;
+	bool bDepthBias;
 };
 
 

@@ -10,6 +10,7 @@ struct defParms_shadow
 		Q_memset( this, 0xFF, sizeof( defParms_shadow ) );
 
 		bModel = false;
+		bDepthBias = false;
 	};
 
 	// textures
@@ -26,6 +27,7 @@ struct defParms_shadow
 
 	// config
 	bool bModel;
+	bool bDepthBias;
 };
 
 
