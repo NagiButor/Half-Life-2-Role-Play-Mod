@@ -36,6 +36,8 @@ static const char * const pszShaderReplaceDict[][2] = {
 	{ "multiblend",					"DEFERRED_BRUSH" },
 	{ "worldtwotextureblend",	"DEFERRED_BRUSH" },
 	{ "lightmapped_4wayblend",	"DEFERRED_BRUSH" },
+	{ "eyes",						"DEFERRED_EYES" },
+	{ "teeth",						"DEFERRED_TEETH" },
 	//{ "decalmodulate",					"DEFERRED_DECALMODULATE" }, //doesn't work
 };
 

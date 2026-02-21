@@ -253,6 +253,8 @@
     <ClCompile Include="depthwrite.cpp" />
     <ClCompile Include="deferred_brush.cpp" />
     <ClCompile Include="deferred_model.cpp" />
+    <ClCompile Include="deferred_eyes.cpp" />
+    <ClCompile Include="deferred_teeth.cpp" />
     <ClCompile Include="deferred_utility.cpp" />
     <ClCompile Include="defpass_composite.cpp" />
     <ClCompile Include="defpass_gbuffer.cpp" />

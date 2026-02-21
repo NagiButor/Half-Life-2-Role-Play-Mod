@@ -68,6 +68,9 @@ shadowpass_ps30.fxc
 composite_vs30.fxc
 composite_ps30.fxc
 
+deferred_eyes_composite_ps30.fxc
+deferred_teeth_composite_ps30.fxc
+
 defconstruct_vs30.fxc
 
 lightingpass_global_ps30.fxc

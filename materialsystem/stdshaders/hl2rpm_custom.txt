@@ -1,5 +1,7 @@
 composite_ps30.fxc
 composite_vs30.fxc
+deferred_eyes_composite_ps30.fxc
+deferred_teeth_composite_ps30.fxc
 debug_lighting_ctrl_ps30.fxc
 debug_radiosity_grid_ps30.fxc
 debug_radiosity_grid_vs30.fxc
