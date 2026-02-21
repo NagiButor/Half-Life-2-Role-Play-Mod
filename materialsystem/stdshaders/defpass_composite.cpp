@@ -129,6 +129,11 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 		pShaderShadow->SetDefaultState();
 		pShaderShadow->EnableSRGBWrite( bUseSRGB );
 
+		if ( bIsDecal )
+		{
+			pShaderShadow->EnablePolyOffset( SHADER_POLYOFFSET_DECAL );
+		}
+
 		if ( bNoCull )
 		{
 			pShaderShadow->EnableCulling( false );
@@ -407,10 +412,7 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 		if ( bGBufferNormal )
 			pShader->BindTexture( SHADER_SAMPLER1, GetDeferredExt()->GetTexture_Normals() );
 
-		if ( bIsDecal )
-			pShaderAPI->BindStandardTexture( SHADER_SAMPLER2, TEXTURE_WHITE );
-		else
-			pShader->BindTexture( SHADER_SAMPLER2, GetDeferredExt()->GetTexture_LightAccum() );
+		pShader->BindTexture( SHADER_SAMPLER2, GetDeferredExt()->GetTexture_LightAccum() );
 
 		CommitBaseDeferredConstants_Origin( pShaderAPI, 3 );
 

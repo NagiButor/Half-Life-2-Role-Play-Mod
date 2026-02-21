@@ -834,7 +834,17 @@ void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, f
 
 	//helper::bDisableDecalRendering = m_bDrawWorldNormal;
 
+	// During shadow pass, disable world decals to prevent engine-internal
+	// Subrect shader from writing decals into the shadow depth buffer.
+	static ConVarRef r_drawdecals( "r_drawdecals" );
+	const int iOldDrawDecals = r_drawdecals.IsValid() ? r_drawdecals.GetInt() : -1;
+	if ( bShadowDepth && r_drawdecals.IsValid() )
+		r_drawdecals.SetValue( 0 );
+
 	DrawWorldDeferred( waterZAdjust );
+
+	if ( bShadowDepth && iOldDrawDecals >= 0 )
+		r_drawdecals.SetValue( iOldDrawDecals );
 
 	//if ( m_DrawFlags & DF_DRAW_ENTITITES )
 	DrawOpaqueRenderablesDeferred( false );
