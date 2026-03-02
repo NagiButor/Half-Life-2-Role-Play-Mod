@@ -543,6 +543,13 @@ float3 ToShadowSpace_Ortho( float3 worldPos, float viewFwdDot, float3 vecNormal,
 	return shadowPos.xyz;
 }
 
+float ApplyCSMReceiverDepthBias( float shadowDepth, float viewFwdDot )
+{
+	float a = 0.00015f;
+	float b = 0.00035f;
+	return shadowDepth - ( a + b * ( 1.0f - saturate( abs( viewFwdDot ) ) ) );
+}
+
 float PerformCascadedShadowEx( sampler sShadowMap, float3 worldPos,
 	float4x3 viewProjOrtho[SHADOW_NUM_CASCADES], float4 vecUVTransform[SHADOW_NUM_CASCADES], float3 vecSlopeData[SHADOW_NUM_CASCADES],
 	float4 vecFilterConfig_A[SHADOW_NUM_CASCADES], float4 vecFilterConfig_B[SHADOW_NUM_CASCADES],
@@ -589,6 +596,7 @@ float PerformCascadedShadowEx( sampler sShadowMap, float3 worldPos,
 
 	float3 uvzCur = shadow_uvz_base;
 	uvzCur.xy = uvzCur.xy * vecUVTransform[curCascade].zw + vecUVTransform[curCascade].xy;
+	uvzCur.z = ApplyCSMReceiverDepthBias( uvzCur.z, viewFwdDot );
 	float shadowCur = PerformShadowMapping( sShadowMap, uvzCur, vecFilterConfig_A[curCascade], vecFilterConfig_B[curCascade] );
 
 	if ( blendFactor > 0.0f && curCascade < ( SHADOW_NUM_CASCADES - 1 ) )
@@ -605,6 +613,7 @@ float PerformCascadedShadowEx( sampler sShadowMap, float3 worldPos,
 		{
 			float3 uvzNext = shadow_uvz_next;
 			uvzNext.xy = uvzNext.xy * vecUVTransform[curCascade + 1].zw + vecUVTransform[curCascade + 1].xy;
+			uvzNext.z = ApplyCSMReceiverDepthBias( uvzNext.z, viewFwdDot );
 			float shadowNext = PerformShadowMapping( sShadowMap, uvzNext, vecFilterConfig_A[curCascade + 1], vecFilterConfig_B[curCascade + 1] );
 			return lerp( shadowCur, shadowNext, blendFactor );
 		}
