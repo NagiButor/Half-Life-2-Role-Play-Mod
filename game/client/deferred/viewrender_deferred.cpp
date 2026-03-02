@@ -1662,6 +1662,19 @@ void COrthoShadowView::CalcShadowView()
 {
 	const cascade_t &m_data = GetCascadeInfo( iCascadeIndex );
 
+	C_BasePlayer *pPlayer = C_BasePlayer::GetLocalPlayer();
+	if ( pPlayer )
+	{
+		Vector anchor = pPlayer->GetAbsOrigin();
+
+		trace_t tr;
+		UTIL_TraceLine( anchor + Vector( 0, 0, 64 ), anchor - Vector( 0, 0, 8192 ), MASK_SOLID, pPlayer, COLLISION_GROUP_NONE, &tr );
+		if ( tr.fraction < 1.0f )
+			anchor = tr.endpos;
+
+		origin = anchor;
+	}
+
 	const lightData_Global_t& state = GetActiveGlobalLightState();
 	QAngle lightAng;
 	VectorAngles( -state.vecLight.AsVector3D(), lightAng );

@@ -557,11 +557,11 @@ float PerformCascadedShadowEx( sampler sShadowMap, float3 worldPos,
 	{
 		float3 candidate_uvz = ToShadowSpace_Ortho( worldPos, viewFwdDot, flNormal, vecSlopeData[i], viewProjOrtho[i] );
 #if VENDOR == VENDOR_FXC_AMD
-		float3 AMDVec = abs( floor( (candidate_uvz.xyz - 0.0015f) * 1.003f ) );
-		float AMDAmt = AMDVec.x + AMDVec.y + AMDVec.z;
+		float2 AMDVec = abs( floor( (candidate_uvz.xy - 0.0015f) * 1.003f ) );
+		float AMDAmt = AMDVec.x + AMDVec.y;
 		int outside = step( 0.0001f, AMDAmt );
 #else
-		int outside = (int)any( floor( (candidate_uvz.xyz - 0.0015f) * 1.003f ) );
+		int outside = (int)any( floor( (candidate_uvz.xy - 0.0015f) * 1.003f ) );
 #endif
 		if ( outside == 0 )
 		{
@@ -583,10 +583,10 @@ float PerformCascadedShadowEx( sampler sShadowMap, float3 worldPos,
 	const float3 worldPosBiased = worldPos + flNormal * ( 1.0f - abs( viewFwdDot ) ) * vecSlopeData[curCascade].z;
 	const float3 shadow_uvz_base = mul( float4( worldPosBiased, 1 ), viewProjOrtho[curCascade] );
 
-	const float blendStart = 0.85f;
+	const float blendStart = 0.65f;
 	float2 centered = abs( shadow_uvz_base.xy * 2.0f - 1.0f );
 	float maxCoord = max( centered.x, centered.y );
-	float blendFactor = saturate( ( maxCoord - blendStart ) / ( 1.0f - blendStart ) );
+	float blendFactor = smoothstep( blendStart, 1.0f, maxCoord );
 
 	float3 uvzCur = shadow_uvz_base;
 	uvzCur.xy = uvzCur.xy * vecUVTransform[curCascade].zw + vecUVTransform[curCascade].xy;
@@ -596,11 +596,11 @@ float PerformCascadedShadowEx( sampler sShadowMap, float3 worldPos,
 	{
 		float3 shadow_uvz_next = mul( float4( worldPosBiased, 1 ), viewProjOrtho[curCascade + 1] );
 #if VENDOR == VENDOR_FXC_AMD
-		float3 AMDVecN = abs( floor( (shadow_uvz_next.xyz - 0.0015f) * 1.003f ) );
-		float AMDAmtN = AMDVecN.x + AMDVecN.y + AMDVecN.z;
+		float2 AMDVecN = abs( floor( (shadow_uvz_next.xy - 0.0015f) * 1.003f ) );
+		float AMDAmtN = AMDVecN.x + AMDVecN.y;
 		int outsideNext = step( 0.0001f, AMDAmtN );
 #else
-		int outsideNext = (int)any( floor( (shadow_uvz_next.xyz - 0.0015f) * 1.003f ) );
+		int outsideNext = (int)any( floor( (shadow_uvz_next.xy - 0.0015f) * 1.003f ) );
 #endif
 		if ( outsideNext == 0 )
 		{
