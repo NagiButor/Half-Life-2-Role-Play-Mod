@@ -548,57 +548,47 @@ float PerformCascadedShadow( sampler sShadowMap, float3 worldPos,
 	float4 vecFilterConfig_A[SHADOW_NUM_CASCADES], float4 vecFilterConfig_B[SHADOW_NUM_CASCADES],
 	float3 flNormal, float viewFwdDot )
 {
-#if 1
-	float3 shadow_uvz = ToShadowSpace_Ortho( worldPos, viewFwdDot, flNormal, vecSlopeData[0], viewProjOrtho[0] );
-	float3 shadow_uvz_2 = ToShadowSpace_Ortho( worldPos, viewFwdDot, flNormal, vecSlopeData[1], viewProjOrtho[1] );
-
-#if VENDOR == VENDOR_FXC_AMD
-	float3 AMDVec = abs( floor( (shadow_uvz.xyz - 0.0015f) * 1.003f ) );
-	float AMDAmt = AMDVec.x + AMDVec.y + AMDVec.z;
-	int flLerpTo1 = step( 0.0001f, AMDAmt );
-#else
-	float flLerpTo1 = any( floor( (shadow_uvz.xyz - 0.0015f) * 1.003f) );
-#endif
-
-	shadow_uvz = lerp( shadow_uvz, shadow_uvz_2, flLerpTo1 );
-
-#if VENDOR == VENDOR_FXC_AMD
-	AMDVec = abs( floor( (shadow_uvz_2.xyz - 0.003f) * 1.006f ) );
-	AMDAmt = AMDVec.x + AMDVec.y + AMDVec.z;
-	int flLerpTo2 = step( 0.0001f, AMDAmt );
-#else
-	float flLerpTo2 = any( floor( (shadow_uvz_2.xyz - 0.003f) * 1.006f) );
-#endif
-
-	shadow_uvz.xy = shadow_uvz.xy * vecUVTransform[flLerpTo1].zw + vecUVTransform[flLerpTo1].xy;
-
-	float flLight = lerp( PerformShadowMapping( sShadowMap, shadow_uvz,
-				vecFilterConfig_A[flLerpTo1], vecFilterConfig_B[flLerpTo1] ), 1, flLerpTo2 );
-#else
 	int curCascade = 0;
-	bool bDoShadowmapping = true;
-	float flLight = 1.0f;
+	bool bDoShadowmapping = false;
+	float3 shadow_uvz = 0;
 
-	float3 shadow_uvz = ToShadowSpace_Ortho( worldPos, viewFwdDot, flNormal, vecSlopeData[curCascade], viewProjOrtho[curCascade] );
-
-	if ( any( floor( (shadow_uvz.xyz - 0.0015f) * 1.003f) ) )
+	[unroll]
+	for ( int i = 0; i < SHADOW_NUM_CASCADES; i++ )
 	{
-		curCascade++;
-		shadow_uvz = ToShadowSpace_Ortho( worldPos, viewFwdDot, flNormal, vecSlopeData[curCascade], viewProjOrtho[curCascade] );
-
-		bDoShadowmapping = !any( floor( (shadow_uvz.xyz - 0.003f) * 1.006f ) );
+		float3 candidate_uvz = ToShadowSpace_Ortho( worldPos, viewFwdDot, flNormal, vecSlopeData[i], viewProjOrtho[i] );
+#if VENDOR == VENDOR_FXC_AMD
+		float3 AMDVec = abs( floor( (candidate_uvz.xyz - 0.0015f) * 1.003f ) );
+		float AMDAmt = AMDVec.x + AMDVec.y + AMDVec.z;
+		int outside = step( 0.0001f, AMDAmt );
+#else
+		int outside = (int)any( floor( (candidate_uvz.xyz - 0.0015f) * 1.003f ) );
+#endif
+		if ( outside == 0 )
+		{
+			curCascade = i;
+			shadow_uvz = candidate_uvz;
+			bDoShadowmapping = true;
+			break;
+		}
 	}
 
-	if ( bDoShadowmapping )
-	{
-		shadow_uvz.xy = shadow_uvz.xy * vecUVTransform[curCascade].zw + vecUVTransform[curCascade].xy;
+	if ( !bDoShadowmapping )
+		return 1.0f;
 
-		flLight *= PerformShadowMapping( sShadowMap, shadow_uvz,
-				vecFilterConfig_A[curCascade], vecFilterConfig_B[curCascade] );
-	}
+#if VENDOR == VENDOR_FXC_AMD
+	float3 AMDVec2 = abs( floor( (shadow_uvz.xyz - 0.003f) * 1.006f ) );
+	float AMDAmt2 = AMDVec2.x + AMDVec2.y + AMDVec2.z;
+	int outside2 = step( 0.0001f, AMDAmt2 );
+#else
+	int outside2 = (int)any( floor( (shadow_uvz.xyz - 0.003f) * 1.006f ) );
 #endif
 
-	return flLight;
+	if ( outside2 != 0 )
+		return 1.0f;
+
+	shadow_uvz.xy = shadow_uvz.xy * vecUVTransform[curCascade].zw + vecUVTransform[curCascade].xy;
+
+	return PerformShadowMapping( sShadowMap, shadow_uvz, vecFilterConfig_A[curCascade], vecFilterConfig_B[curCascade] );
 }
 
 float PerformDualParaboloidShadow( sampler shadowSampler, float3 vecLightToGeometry,

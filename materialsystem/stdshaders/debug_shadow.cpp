@@ -62,10 +62,9 @@ BEGIN_VS_SHADER( DEBUG_SHADOW, "" )
 			CommitBaseDeferredConstants_Origin( pShaderAPI, 0 );
 
 			COMPILE_TIME_ASSERT( CSM_USE_COMPOSITED_TARGET == 1 );
-			COMPILE_TIME_ASSERT( SHADOW_NUM_CASCADES == 2 );
 
 			CommitGlobalLightForward( pShaderAPI, 1 );
-			CommitShadowProjectionConstants_Ortho_Composite( pShaderAPI, 2, 2 );
+			CommitShadowProjectionConstants_Ortho_Composite( pShaderAPI, SHADOW_NUM_CASCADES, 2 );
 		}
 
 		Draw();

@@ -123,7 +123,7 @@
 /* Composited resolution
  */
 #	define CSM_COMP_RES_X 8192
-#	define CSM_COMP_RES_Y 4096
+#	define CSM_COMP_RES_Y 8192
 #endif
 
 
@@ -156,7 +156,7 @@
 /* Amount of RTs (or views for composited cascades) allocated per shadow type
  * Not the max amount of shadows in total!
  */
-#define MAX_SHADOW_ORTHO 2
+#define MAX_SHADOW_ORTHO 4
 #define MAX_SHADOW_PROJ 5
 #define MAX_SHADOW_DP 5
 

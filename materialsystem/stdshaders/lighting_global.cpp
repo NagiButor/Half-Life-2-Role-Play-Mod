@@ -74,9 +74,8 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 				BindTexture( SHADER_SAMPLER2, GetDeferredExt()->GetTexture_ShadowDepth_Ortho( 0 ) );
 
 				COMPILE_TIME_ASSERT( CSM_USE_COMPOSITED_TARGET == 1 );
-				COMPILE_TIME_ASSERT( SHADOW_NUM_CASCADES == 2 );
 
-				CommitShadowProjectionConstants_Ortho_Composite( pShaderAPI, 2, 2 );
+				CommitShadowProjectionConstants_Ortho_Composite( pShaderAPI, SHADOW_NUM_CASCADES, 2 );
 			}
 
 			CommitGlobalLightForward( pShaderAPI, 1 );
@@ -84,9 +83,9 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 			CommitBaseDeferredConstants_Frustum( pShaderAPI, VERTEX_SHADER_SHADER_SPECIFIC_CONST_0 );
 			CommitBaseDeferredConstants_Origin( pShaderAPI, 0 );
 
-			pShaderAPI->SetPixelShaderConstant( 16, data.diff.Base() );
-			pShaderAPI->SetPixelShaderConstant( 17, data.ambh.Base() );
-			pShaderAPI->SetPixelShaderConstant( 18, MakeHalfAmbient( data.ambl, data.ambh ).Base() );
+			pShaderAPI->SetPixelShaderConstant( 30, data.diff.Base() );
+			pShaderAPI->SetPixelShaderConstant( 31, data.ambh.Base() );
+			pShaderAPI->SetPixelShaderConstant( 32, MakeHalfAmbient( data.ambl, data.ambh ).Base() );
 		}
 
 		Draw();
