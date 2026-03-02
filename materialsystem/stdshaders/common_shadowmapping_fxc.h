@@ -543,10 +543,10 @@ float3 ToShadowSpace_Ortho( float3 worldPos, float viewFwdDot, float3 vecNormal,
 	return shadowPos.xyz;
 }
 
-float PerformCascadedShadow( sampler sShadowMap, float3 worldPos,
+float PerformCascadedShadowEx( sampler sShadowMap, float3 worldPos,
 	float4x3 viewProjOrtho[SHADOW_NUM_CASCADES], float4 vecUVTransform[SHADOW_NUM_CASCADES], float3 vecSlopeData[SHADOW_NUM_CASCADES],
 	float4 vecFilterConfig_A[SHADOW_NUM_CASCADES], float4 vecFilterConfig_B[SHADOW_NUM_CASCADES],
-	float3 flNormal, float viewFwdDot )
+	float3 flNormal, float viewFwdDot, out int outCascade )
 {
 	int curCascade = 0;
 	bool bDoShadowmapping = false;
@@ -573,22 +573,26 @@ float PerformCascadedShadow( sampler sShadowMap, float3 worldPos,
 	}
 
 	if ( !bDoShadowmapping )
+	{
+		outCascade = -1;
 		return 1.0f;
+	}
 
-#if VENDOR == VENDOR_FXC_AMD
-	float3 AMDVec2 = abs( floor( (shadow_uvz.xyz - 0.003f) * 1.006f ) );
-	float AMDAmt2 = AMDVec2.x + AMDVec2.y + AMDVec2.z;
-	int outside2 = step( 0.0001f, AMDAmt2 );
-#else
-	int outside2 = (int)any( floor( (shadow_uvz.xyz - 0.003f) * 1.006f ) );
-#endif
-
-	if ( outside2 != 0 )
-		return 1.0f;
+	outCascade = curCascade;
 
 	shadow_uvz.xy = shadow_uvz.xy * vecUVTransform[curCascade].zw + vecUVTransform[curCascade].xy;
 
 	return PerformShadowMapping( sShadowMap, shadow_uvz, vecFilterConfig_A[curCascade], vecFilterConfig_B[curCascade] );
+}
+
+float PerformCascadedShadow( sampler sShadowMap, float3 worldPos,
+	float4x3 viewProjOrtho[SHADOW_NUM_CASCADES], float4 vecUVTransform[SHADOW_NUM_CASCADES], float3 vecSlopeData[SHADOW_NUM_CASCADES],
+	float4 vecFilterConfig_A[SHADOW_NUM_CASCADES], float4 vecFilterConfig_B[SHADOW_NUM_CASCADES],
+	float3 flNormal, float viewFwdDot )
+{
+	int cascadeIndex = 0;
+	return PerformCascadedShadowEx( sShadowMap, worldPos, viewProjOrtho, vecUVTransform, vecSlopeData,
+		vecFilterConfig_A, vecFilterConfig_B, flNormal, viewFwdDot, cascadeIndex );
 }
 
 float PerformDualParaboloidShadow( sampler shadowSampler, float3 vecLightToGeometry,

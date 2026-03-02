@@ -77,30 +77,25 @@ FORCEINLINE void CommitShadowProjectionConstants_Ortho_Single( IShaderDynamicAPI
 FORCEINLINE void CommitShadowProjectionConstants_Ortho_Composite( IShaderDynamicAPI *pShaderAPI,
 	const int numCascades, int iFirstRegister )
 {
-	int stepsLeft = numCascades;
+	const int iMatBase = iFirstRegister;
+	const int iUVBase = iMatBase + numCascades * 3;
+	const int iSlopeBase = iUVBase + numCascades;
+	const int iFilterABase = iSlopeBase + numCascades;
+	const int iFilterBBase = iFilterABase + numCascades;
+
 	for ( int i = 0; i < numCascades; i++ )
 	{
 		const shadowData_ortho_t &data = GetDeferredExt()->GetShadowData_Ortho( i );
-		int iCurRegister = iFirstRegister + i * 3;
 
-		pShaderAPI->SetPixelShaderConstant( iCurRegister, data.matWorldToTexture.Base(), 3 );
-		iCurRegister += i;
-		iCurRegister += stepsLeft * 3;
-		pShaderAPI->SetPixelShaderConstant( iCurRegister, data.vecUVTransform.Base() );
-		iCurRegister += numCascades;
-		pShaderAPI->SetPixelShaderConstant( iCurRegister, data.vecSlopeSettings.Base() );
-		iCurRegister += numCascades;
+		pShaderAPI->SetPixelShaderConstant( iMatBase + i * 3, data.matWorldToTexture.Base(), 3 );
+		pShaderAPI->SetPixelShaderConstant( iUVBase + i, data.vecUVTransform.Base() );
+		pShaderAPI->SetPixelShaderConstant( iSlopeBase + i, data.vecSlopeSettings.Base() );
 
 		float fl_0[4] = { 0, 0, 0, 0 };
 		float fl_1[4] = { 0, 0, 0, 0 };
-
 		MakeShadowProjectionConstants( fl_0, fl_1, data.iRes_x, data.iRes_y );
-
-		pShaderAPI->SetPixelShaderConstant( iCurRegister, fl_0 );
-		iCurRegister += numCascades;
-		pShaderAPI->SetPixelShaderConstant( iCurRegister, fl_1 );
-
-		stepsLeft--;
+		pShaderAPI->SetPixelShaderConstant( iFilterABase + i, fl_0 );
+		pShaderAPI->SetPixelShaderConstant( iFilterBBase + i, fl_1 );
 	}
 }
 

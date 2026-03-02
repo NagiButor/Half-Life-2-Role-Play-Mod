@@ -4,6 +4,8 @@
 #include "defconstruct_vs30.inc"
 #include "lightingpass_global_ps30.inc"
 
+static ConVar r_csm_color( "r_csm_color", "0", FCVAR_ARCHIVE );
+
 BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 	BEGIN_SHADER_PARAMS
 
@@ -86,6 +88,9 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 			pShaderAPI->SetPixelShaderConstant( 30, data.diff.Base() );
 			pShaderAPI->SetPixelShaderConstant( 31, data.ambh.Base() );
 			pShaderAPI->SetPixelShaderConstant( 32, MakeHalfAmbient( data.ambl, data.ambh ).Base() );
+
+			float flCSMColorize[4] = { r_csm_color.GetBool() ? 1.0f : 0.0f, 0, 0, 0 };
+			pShaderAPI->SetPixelShaderConstant( 33, flCSMColorize );
 		}
 
 		Draw();
