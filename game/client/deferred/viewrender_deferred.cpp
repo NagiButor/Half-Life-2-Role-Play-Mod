@@ -1708,7 +1708,7 @@ void COrthoShadowView::CalcShadowView()
 
 	zNear = zNearViewmodel = 0;
 	zFar = zFarViewmodel = m_data.flFarZ;
-	m_flAspectRatio = 0;
+	m_flAspectRatio = 1.0f;
 
 	float mapping_world = m_data.flProjectionSize / m_data.iResolution;
 	origin -= fmod( DotProduct( viewRight, origin ), mapping_world ) * viewRight;
