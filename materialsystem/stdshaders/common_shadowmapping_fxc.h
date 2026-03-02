@@ -580,9 +580,37 @@ float PerformCascadedShadowEx( sampler sShadowMap, float3 worldPos,
 
 	outCascade = curCascade;
 
-	shadow_uvz.xy = shadow_uvz.xy * vecUVTransform[curCascade].zw + vecUVTransform[curCascade].xy;
+	const float3 shadow_uvz_base = shadow_uvz;
 
-	return PerformShadowMapping( sShadowMap, shadow_uvz, vecFilterConfig_A[curCascade], vecFilterConfig_B[curCascade] );
+	const float blendStart = 0.95f;
+	float2 centered = abs( shadow_uvz_base.xy * 2.0f - 1.0f );
+	float maxCoord = max( centered.x, centered.y );
+	float blendFactor = saturate( ( maxCoord - blendStart ) / ( 1.0f - blendStart ) );
+
+	float3 uvzCur = shadow_uvz_base;
+	uvzCur.xy = uvzCur.xy * vecUVTransform[curCascade].zw + vecUVTransform[curCascade].xy;
+	float shadowCur = PerformShadowMapping( sShadowMap, uvzCur, vecFilterConfig_A[curCascade], vecFilterConfig_B[curCascade] );
+
+	if ( blendFactor > 0.0f && curCascade < ( SHADOW_NUM_CASCADES - 1 ) )
+	{
+		float3 shadow_uvz_next = ToShadowSpace_Ortho( worldPos, viewFwdDot, flNormal, vecSlopeData[curCascade + 1], viewProjOrtho[curCascade + 1] );
+#if VENDOR == VENDOR_FXC_AMD
+		float3 AMDVecN = abs( floor( (shadow_uvz_next.xyz - 0.0015f) * 1.003f ) );
+		float AMDAmtN = AMDVecN.x + AMDVecN.y + AMDVecN.z;
+		int outsideNext = step( 0.0001f, AMDAmtN );
+#else
+		int outsideNext = (int)any( floor( (shadow_uvz_next.xyz - 0.0015f) * 1.003f ) );
+#endif
+		if ( outsideNext == 0 )
+		{
+			float3 uvzNext = shadow_uvz_next;
+			uvzNext.xy = uvzNext.xy * vecUVTransform[curCascade + 1].zw + vecUVTransform[curCascade + 1].xy;
+			float shadowNext = PerformShadowMapping( sShadowMap, uvzNext, vecFilterConfig_A[curCascade + 1], vecFilterConfig_B[curCascade + 1] );
+			return lerp( shadowCur, shadowNext, blendFactor );
+		}
+	}
+
+	return shadowCur;
 }
 
 float PerformCascadedShadow( sampler sShadowMap, float3 worldPos,

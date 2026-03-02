@@ -1661,8 +1661,6 @@ static lightData_Global_t& GetActiveGlobalLightState()
 void COrthoShadowView::CalcShadowView()
 {
 	const cascade_t &m_data = GetCascadeInfo( iCascadeIndex );
-	Vector mainFwd;
-	AngleVectors( angles, &mainFwd );
 
 	const lightData_Global_t& state = GetActiveGlobalLightState();
 	QAngle lightAng;
@@ -1693,10 +1691,7 @@ void COrthoShadowView::CalcShadowView()
 
 	const float halfOrthoSize = m_data.flProjectionSize * 0.5f;
 
-	origin += -viewFwd * m_data.flOriginOffset +
-		viewUp * halfOrthoSize -
-		viewRight * halfOrthoSize +
-		mainFwd * halfOrthoSize;
+	origin += -viewFwd * m_data.flOriginOffset;
 
 	angles = lightAng;
 
@@ -1706,10 +1701,10 @@ void COrthoShadowView::CalcShadowView()
 	width = m_data.iResolution;
 
 	m_bOrtho = true;
-	m_OrthoLeft = 0;
-	m_OrthoTop = -m_data.flProjectionSize;
-	m_OrthoRight = m_data.flProjectionSize;
-	m_OrthoBottom = 0;
+	m_OrthoLeft = -halfOrthoSize;
+	m_OrthoTop = -halfOrthoSize;
+	m_OrthoRight = halfOrthoSize;
+	m_OrthoBottom = halfOrthoSize;
 
 	zNear = zNearViewmodel = 0;
 	zFar = zFarViewmodel = m_data.flFarZ;
