@@ -154,7 +154,7 @@ VS_OUTPUT main( const VS_INPUT In )
 #if SHADOW_MODE == DEFERRED_SHADOW_MODE_ORTHO
 
 	float viewFwdDot = abs( dot( g_vecShadowForward, worldNormal ) );
-	worldPos += g_vecShadowForward * lerp( SLOPESCALE_MAX, SLOPESCALE_MIN, viewFwdDot );
+	worldPos += g_vecShadowForward * 0.0f;
 
 	Out.vProjPos = mul( float4( worldPos, 1 ), cViewProj );
 
@@ -176,7 +176,7 @@ VS_OUTPUT main( const VS_INPUT In )
 #else
 
 	float viewFwdDot = abs( dot( g_vecShadowForward, worldNormal ) );
-	worldPos += ( worldPos - g_vecOrigin ) * lerp( SLOPESCALE_MAX, SLOPESCALE_MIN, viewFwdDot );
+	worldPos += ( worldPos - g_vecOrigin ) * 0.0f;
 
 	Out.vProjPos = mul( float4( worldPos, 1 ), cViewProj );
 

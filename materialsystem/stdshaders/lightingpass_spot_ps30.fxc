@@ -198,8 +198,7 @@ PS_OUTPUT main( const PS_INPUT In )
 			g_flMixedData[ iDataIndex + 7 ],
 			g_flMixedData[ iDataIndex + 8 ] );
 
-		float viewDot = 1.0f - abs( dot( vecDelta / dist, flNormal ) );
-		float3 worldPosLocal = worldPos + flNormal * ( viewDot + dist * 0.0075f );
+		float3 worldPosLocal = worldPos;
 
 		float4 depthPos = mul( float4( worldPosLocal, 1 ), spotWorldToTexture );
 		depthPos.xyz /= depthPos.w;
@@ -240,8 +239,7 @@ PS_OUTPUT main( const PS_INPUT In )
 			g_flMixedData[ iDataIndex + 7 ],
 			g_flMixedData[ iDataIndex + 8 ] );
 
-		float viewDot = 1.0f - abs( dot( vecDelta / dist, flNormal ) );
-		float3 worldPosLocal = worldPos + flNormal * ( viewDot + dist * 0.0075f );
+		float3 worldPosLocal = worldPos;
 
 		float4 depthPos = mul( float4( worldPosLocal, 1 ), spotWorldToTexture );
 		depthPos.xyz /= depthPos.w;

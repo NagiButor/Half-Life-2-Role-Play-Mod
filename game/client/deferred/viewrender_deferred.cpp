@@ -1874,7 +1874,7 @@ void CSpotLightShadowView::CommitData()
 	data.vecOrigin.Init( origin, 1.0f );
 	// slope min, slope max, normal max, depth
 	//data.data.vecSlopeSettings.Init( 0.005f, 0.02f, 3, zFar );
-	data.vecSlopeSettings.Init( 0.001f, 0.005f, 3, 0 );
+	data.vecSlopeSettings.Init( 0.00065f, 0.0030f, 2.2f, 0 );
 
 	QUEUE_FIRE( CommitShadowData_Proj, m_iIndex, data );
 

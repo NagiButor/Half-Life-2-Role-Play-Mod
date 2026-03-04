@@ -536,7 +536,7 @@ float PerformShadowMapping( sampler depthMap, float3 uvw, float4 offsets_0, floa
 float3 ToShadowSpace_Ortho( float3 worldPos, float viewFwdDot, float3 vecNormal,
 	float3 vecSlopeData, float4x3 viewProjOrtho )
 {
-	worldPos += vecNormal * ( 1.0f - abs( viewFwdDot ) ) * vecSlopeData.z;
+	worldPos += vecNormal * ( 1.0f - abs( viewFwdDot ) ) * vecSlopeData.z * 0.0f;
 
 	float3 shadowPos = mul( float4( worldPos, 1 ), viewProjOrtho );
 
@@ -545,9 +545,7 @@ float3 ToShadowSpace_Ortho( float3 worldPos, float viewFwdDot, float3 vecNormal,
 
 float ApplyCSMReceiverDepthBias( float shadowDepth, float viewFwdDot )
 {
-	float a = 0.00015f;
-	float b = 0.00035f;
-	return shadowDepth - ( a + b * ( 1.0f - saturate( abs( viewFwdDot ) ) ) );
+	return shadowDepth;
 }
 
 float PerformCascadedShadowEx( sampler sShadowMap, float3 worldPos,
