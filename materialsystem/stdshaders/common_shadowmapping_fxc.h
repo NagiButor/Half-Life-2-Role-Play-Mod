@@ -536,16 +536,36 @@ float PerformShadowMapping( sampler depthMap, float3 uvw, float4 offsets_0, floa
 float3 ToShadowSpace_Ortho( float3 worldPos, float viewFwdDot, float3 vecNormal,
 	float3 vecSlopeData, float4x3 viewProjOrtho )
 {
-	worldPos += vecNormal * ( 1.0f - abs( viewFwdDot ) ) * vecSlopeData.z * 0.0f;
+	// Normal Offset Bias (GPU Pro 1 / Microsoft CSM technique):
+	// Shift the shadow lookup position along the surface normal by a fraction
+	// of one shadow-map texel. This prevents texel-boundary quantization acne.
+	// vecSlopeData.z = half texel world size for this cascade.
+	// sinAngle = sin(angle between surface and light); at grazing angles offset
+	// is maximal, for surfaces facing the light the offset is near zero.
+	float cosAngle = abs( viewFwdDot );
+	float sinAngle = sqrt( saturate( 1.0f - cosAngle * cosAngle ) );
+	worldPos += vecNormal * ( sinAngle * vecSlopeData.z );
 
 	float3 shadowPos = mul( float4( worldPos, 1 ), viewProjOrtho );
 
 	return shadowPos.xyz;
 }
 
-float ApplyCSMReceiverDepthBias( float shadowDepth, float viewFwdDot )
+float ApplyCSMReceiverDepthBias( float shadowDepth, float viewFwdDot, float3 vecSlopeData )
 {
-	return shadowDepth;
+	// Receiver Plane Depth Bias (adaptive slope-scaled):
+	// Biases the depth comparison value on the receiver side so that
+	// the surface does not falsely shadow itself.
+	// vecSlopeData.x = small constant bias   (in normalised depth, ~0.5 texel)
+	// vecSlopeData.y = slope bias factor      (in normalised depth, ~3 texels per tan-unit)
+	// The bias ramps up with tan(angle) to match the actual depth variation
+	// across shadow-map texels; it is clamped to prevent light leaks at silhouettes.
+	float cosA = max( abs( viewFwdDot ), 0.01f );
+	float tanA = sqrt( 1.0f - cosA * cosA ) / cosA;
+	tanA = min( tanA, 10.0f ); // cap at ~84 degrees
+
+	float bias = vecSlopeData.x + vecSlopeData.y * tanA;
+	return shadowDepth - bias;
 }
 
 float PerformCascadedShadowEx( sampler sShadowMap, float3 worldPos,
@@ -594,7 +614,7 @@ float PerformCascadedShadowEx( sampler sShadowMap, float3 worldPos,
 
 	float3 uvzCur = shadow_uvz_base;
 	uvzCur.xy = uvzCur.xy * vecUVTransform[curCascade].zw + vecUVTransform[curCascade].xy;
-	uvzCur.z = ApplyCSMReceiverDepthBias( uvzCur.z, viewFwdDot );
+	uvzCur.z = ApplyCSMReceiverDepthBias( uvzCur.z, viewFwdDot, vecSlopeData[curCascade] );
 	float shadowCur = PerformShadowMapping( sShadowMap, uvzCur, vecFilterConfig_A[curCascade], vecFilterConfig_B[curCascade] );
 
 	if ( blendFactor > 0.0f && curCascade < ( SHADOW_NUM_CASCADES - 1 ) )
@@ -611,7 +631,7 @@ float PerformCascadedShadowEx( sampler sShadowMap, float3 worldPos,
 		{
 			float3 uvzNext = shadow_uvz_next;
 			uvzNext.xy = uvzNext.xy * vecUVTransform[curCascade + 1].zw + vecUVTransform[curCascade + 1].xy;
-			uvzNext.z = ApplyCSMReceiverDepthBias( uvzNext.z, viewFwdDot );
+			uvzNext.z = ApplyCSMReceiverDepthBias( uvzNext.z, viewFwdDot, vecSlopeData[curCascade + 1] );
 			float shadowNext = PerformShadowMapping( sShadowMap, uvzNext, vecFilterConfig_A[curCascade + 1], vecFilterConfig_B[curCascade + 1] );
 			return lerp( shadowCur, shadowNext, blendFactor );
 		}

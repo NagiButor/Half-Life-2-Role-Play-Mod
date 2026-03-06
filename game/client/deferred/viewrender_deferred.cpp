@@ -1763,8 +1763,16 @@ void COrthoShadowView::CommitData()
 	shadowData.iRes_y = height;
 #endif
 
+	// Compute adaptive per-cascade bias parameters from texel size & depth range.
+	// These replace the old hand-tuned flSlopeScaleMin / flSlopeScaleMax / flNormalScaleMax.
+	const float texelWorldSize = data.flProjectionSize / (float)data.iResolution;
+	const float oneTexelDepth  = texelWorldSize / zFar;   // one-texel depth in [0,1] range
+
 	shadowData.vecSlopeSettings.Init(
-		data.flSlopeScaleMin, data.flSlopeScaleMax, data.flNormalScaleMax, 1.0f / zFar
+		oneTexelDepth * 0.5f,        // .x = constant depth bias (half texel depth)
+		oneTexelDepth * 3.0f,        // .y = slope bias factor  (3 texels per tan unit)
+		texelWorldSize * 0.5f,       // .z = normal offset (half texel in world units)
+		1.0f / zFar                  // .w = projection depth (used by VS)
 		);
 	shadowData.vecOrigin.Init( origin, 1.0f );
 
@@ -2679,6 +2687,15 @@ void CDeferredViewRender::DebugRadiosity( const CViewSetup &view )
 
 void CDeferredViewRender::RenderCascadedShadows( const CViewSetup &view, const bool bEnableRadiosity )
 {
+	// Set minimal hardware depth bias for cascade shadow maps.
+	// The receiver-side shader bias (Normal Offset + Slope Depth Bias) handles
+	// shadow acne adaptively per-pixel, so we only need a tiny rasteriser bias
+	// as a safety net against floating-point coincidence on perfectly flat surfaces.
+	{
+		CMatRenderContextPtr pRenderContext( materials );
+		pRenderContext->SetShadowDepthBiasFactors( 0.5f, 0.000005f );
+	}
+
 	for ( int i = 0; i < SHADOW_NUM_CASCADES; i++ )
 	{
 		const cascade_t &cascade = GetCascadeInfo(i);
@@ -2703,6 +2720,12 @@ void CDeferredViewRender::RenderCascadedShadows( const CViewSetup &view, const b
 
 		if ( bDoRadiosity )
 			PerformRadiosityGlobal( iRadTarget, view );
+	}
+
+	// Restore default hardware bias for other shadow types (spot lights, etc.)
+	{
+		CMatRenderContextPtr pRenderContext( materials );
+		pRenderContext->SetShadowDepthBiasFactors( 16.0f, 0.00005f );
 	}
 }
 
