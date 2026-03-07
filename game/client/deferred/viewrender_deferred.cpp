@@ -2256,9 +2256,7 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 			UTIL_StringToVector( lightDataState.ambh.AsVector3D().Base(), r_deferred_light_global_override_ambient_high.GetString() );
 			UTIL_StringToVector( lightDataState.ambl.AsVector3D().Base(), r_deferred_light_global_override_ambient_low.GetString() );
 
-			lightDataState.bEnabled = ( lightDataState.diff.LengthSqr() > 0.01f ||
-				lightDataState.ambh.LengthSqr() > 0.01f ||
-				lightDataState.ambl.LengthSqr() > 0.01f );
+			lightDataState.bEnabled = true;
 		}
 
 		if ( r_deferred_light_global_smooth.GetBool() )
@@ -2945,6 +2943,17 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 		{
 			nClearFlags |= VIEW_CLEAR_COLOR;
 		}
+	}
+
+	// Force tone-mapping scale to neutral before the deferred pipeline.
+	// The deferred system manages its own ambient / brightness through CDefLightGlobal
+	// and does not rely on the engine's auto-exposure (cLightScale register c30).
+	// Leaving the engine's auto-exposure active would multiply the composite output
+	// by a frame-lagged HDR scalar, which is incorrect for the deferred pipeline and
+	// causes the scene to go black at night.
+	{
+		CMatRenderContextPtr pRC( materials );
+		pRC->SetToneMappingScaleLinear( Vector( 1.0f, 1.0f, 1.0f ) );
 	}
 
 	// Render world and all entities, particles, etc.

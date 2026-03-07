@@ -171,7 +171,7 @@ lightData_Global_t CDeferredLightGlobal::GetState()
 		float nightFade = DeferredSaturate( ( -sunAltDeg - 6.0f ) / 12.0f );
 		nightFade = nightFade * nightFade * ( 3.0f - 2.0f * nightFade );
 
-		const float nightAmbScale = Lerp( nightFade, 0.008f, 0.003f );
+		const float nightAmbScale = Lerp( nightFade, 0.04f, 0.015f );
 
 		Vector nightAmbH = baseAmbH * nightAmbScale;
 		nightAmbH.x *= 0.40f;
@@ -200,10 +200,7 @@ lightData_Global_t CDeferredLightGlobal::GetState()
 		data.ambl.Init( ambL, 1.0f );
 	}
 
-	if ( IsEnabled() &&
-		( data.diff.LengthSqr() > 0.01f ||
-		data.ambh.LengthSqr() > 0.01f ||
-		data.ambl.LengthSqr() > 0.01f ) )
+	if ( IsEnabled() )
 	{
 		data.bEnabled = true;
 		const float sunAltDeg = RAD2DEG( asinf( clamp( data.vecLight.z, -1.0f, 1.0f ) ) );

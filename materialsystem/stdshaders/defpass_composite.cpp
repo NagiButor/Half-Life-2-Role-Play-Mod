@@ -432,6 +432,18 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 		{
 			pShaderAPI->SetPixelShaderConstant( 10, params[ info.iSelfIllumTint ]->GetVecValue() );
 		}
+
+		// FIX: The deferred global-light shader (lightingpass_global_ps30) writes
+		// g_light_diffuse to pixel shader register c30, which is the same register
+		// as cLightScale (PSREG_LIGHT_SCALE / TONE_MAPPING_SCALE_PSH_CONSTANT).
+		// After the global-light pass finishes, c30 still holds the diffuse colour.
+		// At night the diffuse is ~(0,0,0), so LINEAR_LIGHT_SCALE becomes 0 and the
+		// entire composition multiplies to black.
+		// Fix: explicitly write a neutral light-scale into c30 before every composite draw.
+		{
+			float flNeutralLightScale[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+			pShaderAPI->SetPixelShaderConstant( 30, flNeutralLightScale );
+		}
 	}
 
 	pShader->Draw();
