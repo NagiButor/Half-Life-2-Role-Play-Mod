@@ -79,6 +79,30 @@ struct PS_OUTPUT
 	float4 vColor_0				:	COLOR0;
 };
 
+#define SPOT_SHADOW_RECEIVER_CONST_TEXELS 0.05f
+#define SPOT_SHADOW_RECEIVER_BIAS_MAX 0.006f
+
+float4 GetBiasedSpotShadowCoord( float4 shadowPos )
+{
+	float2 dShadowUVDX = ddx( shadowPos.xy );
+	float2 dShadowUVDY = ddy( shadowPos.xy );
+	float dShadowZDX = ddx( shadowPos.z );
+	float dShadowZDY = ddy( shadowPos.z );
+
+	float det = dShadowUVDX.x * dShadowUVDY.y - dShadowUVDX.y * dShadowUVDY.x;
+	float invDet = 1.0f / max( abs( det ), 0.00001f );
+
+	float2 depthGradient = float2(
+		abs( dShadowZDX * dShadowUVDY.y - dShadowZDY * dShadowUVDX.y ),
+		abs( dShadowZDY * dShadowUVDX.x - dShadowZDX * dShadowUVDY.x ) ) * invDet;
+
+	float receiverBias = dot( depthGradient, g_vecShadowMappingTweaks_0.zw );
+	receiverBias = min( receiverBias, SPOT_SHADOW_RECEIVER_BIAS_MAX );
+
+	shadowPos.z -= receiverBias + SPOT_SHADOW_RECEIVER_CONST_TEXELS * g_vecShadowMappingTweaks_0.x;
+
+	return shadowPos;
+}
 
 
 float4 DoSpotLightBasic( const int index, float3 normal,
@@ -202,13 +226,14 @@ PS_OUTPUT main( const PS_INPUT In )
 
 		float4 depthPos = mul( float4( worldPosLocal, 1 ), spotWorldToTexture );
 		depthPos.xyz /= depthPos.w;
+		float4 shadowDepthPos = GetBiasedSpotShadowCoord( depthPos );
 
 		float4 localLight = DoSpotLightBasic( iDataIndex, flNormal,
 									-vecDelta, dist, worldRayInv,
 									litface, half_lambert, phong_exp, false );
 
 		localLight.y *= PerformProjectedShadow( sMixedSampler[ iSamplerIndex ],
-			depthPos, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
+			shadowDepthPos, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
 			g_flMixedData[ iDataIndex + 4 ].x );
 
 #if VENDOR == VENDOR_FXC_AMD
@@ -243,13 +268,14 @@ PS_OUTPUT main( const PS_INPUT In )
 
 		float4 depthPos = mul( float4( worldPosLocal, 1 ), spotWorldToTexture );
 		depthPos.xyz /= depthPos.w;
+		float4 shadowDepthPos = GetBiasedSpotShadowCoord( depthPos );
 
 		float4 localLight = DoSpotLightBasic( iDataIndex, flNormal,
 									-vecDelta, dist, worldRayInv,
 									litface, half_lambert, phong_exp, true );
 
 		localLight.y *= PerformProjectedShadow( sMixedSampler[ iSamplerIndex ],
-			depthPos, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
+			shadowDepthPos, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
 			g_flMixedData[ iDataIndex + 4 ].x );
 
 		flLight += DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,
