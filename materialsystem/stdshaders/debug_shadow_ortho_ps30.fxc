@@ -10,11 +10,12 @@ sampler sShadowDepth						: register( s2 );
 const float3 g_vecViewOrigin					: register( c0 );
 const float3 g_vecWorldToLight					: register( c1 );
 
-const float4x3 g_matOrtho[4]					: register( c2 );
-const float4 g_vecUVTransform[4]				: register( c14 );
-const float3 g_vecSlopeData[4]					: register( c18 );
-const float4 g_vecFilterConfig_A[4]				: register( c22 );
-const float4 g_vecFilterConfig_B[4]				: register( c26 );
+// ---- cascade shadow arrays (SHADOW_NUM_CASCADES = 8) ----
+const float4x3 g_matOrtho[8]					: register( c2 );
+const float4 g_vecUVTransform[8]				: register( c26 );
+const float3 g_vecSlopeData[8]					: register( c34 );
+const float4 g_vecFilterConfig_A[8]				: register( c42 );
+const float4 g_vecFilterConfig_B[8]				: register( c50 );
 
 
 struct PS_INPUT

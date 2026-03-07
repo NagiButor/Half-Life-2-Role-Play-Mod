@@ -80,9 +80,12 @@ struct PS_OUTPUT
 };
 
 #define SPOT_SHADOW_RECEIVER_CONST_TEXELS 0.05f
+#define SPOT_SHADOW_RECEIVER_SLOPE_TEXELS 0.25f
+#define SPOT_SHADOW_RECEIVER_SLOPE_MAX_TEXELS 1.0f
 #define SPOT_SHADOW_RECEIVER_BIAS_MAX 0.006f
 
-float4 GetBiasedSpotShadowCoord( float4 shadowPos )
+float4 GetBiasedSpotShadowCoord( float4 shadowPos, float3 normal,
+	float3 vecWorldToLight, float lightToWorldDist )
 {
 	float2 dShadowUVDX = ddx( shadowPos.xy );
 	float2 dShadowUVDY = ddy( shadowPos.xy );
@@ -99,7 +102,13 @@ float4 GetBiasedSpotShadowCoord( float4 shadowPos )
 	float receiverBias = dot( depthGradient, g_vecShadowMappingTweaks_0.zw );
 	receiverBias = min( receiverBias, SPOT_SHADOW_RECEIVER_BIAS_MAX );
 
-	shadowPos.z -= receiverBias + SPOT_SHADOW_RECEIVER_CONST_TEXELS * g_vecShadowMappingTweaks_0.x;
+	float3 lightDir = vecWorldToLight / max( lightToWorldDist, 0.0001f );
+	float cosA = max( abs( dot( lightDir, normal ) ), 0.01f );
+	float tanA = sqrt( saturate( 1.0f - cosA * cosA ) ) / cosA;
+	float slopeBias = min( tanA * SPOT_SHADOW_RECEIVER_SLOPE_TEXELS,
+		SPOT_SHADOW_RECEIVER_SLOPE_MAX_TEXELS ) * g_vecShadowMappingTweaks_0.x;
+
+	shadowPos.z -= receiverBias + slopeBias + SPOT_SHADOW_RECEIVER_CONST_TEXELS * g_vecShadowMappingTweaks_0.x;
 
 	return shadowPos;
 }
@@ -226,7 +235,7 @@ PS_OUTPUT main( const PS_INPUT In )
 
 		float4 depthPos = mul( float4( worldPosLocal, 1 ), spotWorldToTexture );
 		depthPos.xyz /= depthPos.w;
-		float4 shadowDepthPos = GetBiasedSpotShadowCoord( depthPos );
+		float4 shadowDepthPos = GetBiasedSpotShadowCoord( depthPos, flNormal, -vecDelta, dist );
 
 		float4 localLight = DoSpotLightBasic( iDataIndex, flNormal,
 									-vecDelta, dist, worldRayInv,
@@ -268,7 +277,7 @@ PS_OUTPUT main( const PS_INPUT In )
 
 		float4 depthPos = mul( float4( worldPosLocal, 1 ), spotWorldToTexture );
 		depthPos.xyz /= depthPos.w;
-		float4 shadowDepthPos = GetBiasedSpotShadowCoord( depthPos );
+		float4 shadowDepthPos = GetBiasedSpotShadowCoord( depthPos, flNormal, -vecDelta, dist );
 
 		float4 localLight = DoSpotLightBasic( iDataIndex, flNormal,
 									-vecDelta, dist, worldRayInv,

@@ -123,7 +123,7 @@
 /* Composited resolution
  */
 #	define CSM_COMP_RES_X 8192
-#	define CSM_COMP_RES_Y 8192
+#	define CSM_COMP_RES_Y 4096
 #endif
 
 
@@ -156,7 +156,7 @@
 /* Amount of RTs (or views for composited cascades) allocated per shadow type
  * Not the max amount of shadows in total!
  */
-#define MAX_SHADOW_ORTHO 4
+#define MAX_SHADOW_ORTHO 8
 #define MAX_SHADOW_PROJ 5
 #define MAX_SHADOW_DP 5
 
@@ -250,8 +250,8 @@
 /* Maximal depth that can be reconstructed
  * Fullscreen version for fullscreen world lights
  */
-#define DEPTH_RECONSTRUCTION_LIMIT 7000.0f
-#define DEPTH_RECONSTRUCTION_LIMIT_FULLSCREEN 8192.0f
+#define DEPTH_RECONSTRUCTION_LIMIT 16000.0f
+#define DEPTH_RECONSTRUCTION_LIMIT_FULLSCREEN 16384.0f
 
 
 /* Compression scale for integer light buff
@@ -286,6 +286,14 @@
 /* DON'T TOUCH THE STUFF BELOW
  */
 static const int SHADOW_NUM_CASCADES = MAX_SHADOW_ORTHO;
+
+/* Pixel-shader register where global-light data (diffuse, ambH, ambL, colorize)
+ * starts inside lightingpass_global_ps30.  Computed from cascade array layout.
+ * Layout: c2 + N*3 (matOrtho) + N (UV) + N (slope) + N (filterA) + N (filterB)
+ * Must be a const int (not a #define) so it captures the value of
+ * SHADOW_NUM_CASCADES BEFORE the MAX_SHADOW_ORTHO #undef below.
+ */
+static const int CSM_PSREG_LIGHTDATA = 2 + SHADOW_NUM_CASCADES * 7;
 
 #if DEFCFG_DEFERRED_SHADING && DEFCFG_LIGHTCTRL_PACKING == 0
 #error "can't use deferred shading and unpacked lighting controls at the same time"

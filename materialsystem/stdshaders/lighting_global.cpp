@@ -85,12 +85,12 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 			CommitBaseDeferredConstants_Frustum( pShaderAPI, VERTEX_SHADER_SHADER_SPECIFIC_CONST_0 );
 			CommitBaseDeferredConstants_Origin( pShaderAPI, 0 );
 
-			pShaderAPI->SetPixelShaderConstant( 30, data.diff.Base() );
-			pShaderAPI->SetPixelShaderConstant( 31, data.ambh.Base() );
-			pShaderAPI->SetPixelShaderConstant( 32, MakeHalfAmbient( data.ambl, data.ambh ).Base() );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA, data.diff.Base() );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 1, data.ambh.Base() );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 2, MakeHalfAmbient( data.ambl, data.ambh ).Base() );
 
 			float flCSMColorize[4] = { r_csm_color.GetBool() ? 1.0f : 0.0f, 0, 0, 0 };
-			pShaderAPI->SetPixelShaderConstant( 33, flCSMColorize );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 3, flCSMColorize );
 		}
 
 		Draw();
