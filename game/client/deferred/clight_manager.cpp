@@ -11,6 +11,8 @@
 #include "tier0/fasttimer.h"
 #include "tier1/callqueue.h"
 
+#include "deferred/deferred_rt.h"
+
 #include "tier0/memdbgon.h"
 
 ConVar r_deferred_light_visleaf_cull( "r_deferred_light_visleaf_cull", "1", 0, "Culling based on map visleaves - buggy, improves performance" );
@@ -827,6 +829,18 @@ FORCEINLINE int CLightingManager::WriteLight( def_light_t* l, float* pfl4 )
 				pfl4 += 4;
 
 				Q_memcpy( pfl4, l->spotWorldToTex.Base(), iFloatSize * 16 );
+				pfl4 += 16;
+
+				const float zNear = DEFLIGHT_SPOT_ZNEAR;
+				const float zFar = Max( l->flRadius, zNear + 1.0f );
+				const float res = (float)Max( 1, GetShadowResolution_Spot() );
+				const float tanHalfFov = tanf( DEG2RAD( l->flFOV ) * 0.5f );
+				const float depthDerivScale = ( zNear * zFar ) / ( zFar - zNear );
+
+				pfl4[0] = ( 2.0f * tanHalfFov / res ) * depthDerivScale;
+				pfl4[1] = tanHalfFov / res;
+				pfl4[2] = zNear;
+				pfl4[3] = zFar;
 			}
 		}
 		break;

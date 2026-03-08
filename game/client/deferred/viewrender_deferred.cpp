@@ -1857,7 +1857,7 @@ void CSpotLightShadowView::CalcShadowView()
 	height = spotRes;
 
 	zNear = zNearViewmodel = DEFLIGHT_SPOT_ZNEAR;
-	zFar = zFarViewmodel = flRadius;
+	zFar = zFarViewmodel = Max( flRadius, DEFLIGHT_SPOT_ZNEAR + 1.0f );
 
 	fov = fovViewmodel = m_pLight->GetFOV();
 }
@@ -1880,9 +1880,12 @@ void CSpotLightShadowView::CommitData()
 	shadowData_proj_t data;
 	data.vecForward.Init( fwd, 0.0f );
 	data.vecOrigin.Init( origin, 1.0f );
-	// slope min, slope max, normal max, depth
-	//data.data.vecSlopeSettings.Init( 0.005f, 0.02f, 3, zFar );
-	data.vecSlopeSettings.Init( 0.00065f, 0.0030f, 2.2f, 0 );
+	const float zNear = DEFLIGHT_SPOT_ZNEAR;
+	const float zFar = Max( m_pLight->flRadius, zNear + 1.0f );
+	const float res = (float)Max( 1, GetShadowResolution_Spot() );
+	const float tanHalfFov = tanf( DEG2RAD( fov ) * 0.5f );
+	const float depthDerivScale = ( zNear * zFar ) / ( zFar - zNear );
+	data.vecSlopeSettings.Init( ( 2.0f * tanHalfFov / res ) * depthDerivScale, tanHalfFov / res, zNear, zFar );
 
 	QUEUE_FIRE( CommitShadowData_Proj, m_iIndex, data );
 
