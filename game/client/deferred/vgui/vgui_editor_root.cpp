@@ -2,6 +2,7 @@
 #include "cbase.h"
 #include "deferred/deferred_shared_common.h"
 #include "deferred/vgui/vgui_deferred.h"
+#include "deferred/vgui/vgui_editor_timecycle.h"
 
 #include "clientmode.h"
 #include "ienginevgui.h"
@@ -54,6 +55,7 @@ public:
 	void Paint();
 
 	MESSAGE_FUNC( OnEditGlobalLight, "EditGlobalLight" );
+	MESSAGE_FUNC( OnEditTimecycleWeather, "EditTimecycleWeather" );
 	MESSAGE_FUNC( OnToggleEditorProperties, "ToggleEditorProperties" );
 	MESSAGE_FUNC_PARAMS( OnPropertiesChanged_Light, "PropertiesChanged_Light", pKV );
 
@@ -97,6 +99,7 @@ private:
 	Vector GetDragWorldPos( int x, int y );
 
 	CVGUILightEditor_Properties *m_pEditorProps;
+	CVGUILightEditor_Timecycle *m_pTimecycleEditor;
 #if DEFCG_LIGHTEDITOR_ALTERNATESETUP
 	MenuBar*	m_pMenuBar;
 #else
@@ -213,6 +216,8 @@ CVGUILightEditor::CVGUILightEditor( VPANEL pParent )
 	m_pEditorProps->AddActionSignalTarget( this );
 	AddActionSignalTarget( m_pEditorProps );
 
+	m_pTimecycleEditor = new CVGUILightEditor_Timecycle( this );
+
 	m_pCurrentProperties = NULL;
 	m_pEditorProps->SendPropertiesToRoot();
 }
@@ -245,6 +250,11 @@ void CVGUILightEditor::OnEditGlobalLight()
 	GetLightingEditor()->SetEditorActive( true, true, true );
 	m_pEditorProps->OnRequestPropertyLayout( CVGUILightEditor_Properties::PROPERTYMODE_GLOBAL );
 	m_pEditorProps->Activate();
+}
+
+void CVGUILightEditor::OnEditTimecycleWeather()
+{
+	m_pTimecycleEditor->OpenEditor();
 }
 
 void CVGUILightEditor::OnToggleEditorProperties()
@@ -1009,37 +1019,40 @@ CON_COMMAND( r_deferred_light_editor_toggle, "" )
 	CVGUILightEditor::ToggleEditor();
 }
 
-// FIXME: do not hijack tab until this is working - mouse not captured when frame on top
-// static class CLightEditorHelper : public CAutoGameSystemPerFrame
-// {
-// 	void LevelShutdownPostEntity()
-// 	{
-// 		CVGUILightEditor::DestroyEditor();
-// 	};
+static class CLightEditorHelper : public CAutoGameSystemPerFrame
+{
+public:
+	CLightEditorHelper()
+		: CAutoGameSystemPerFrame( "CLightEditorHelper" )
+		, m_bWasF1Down( false )
+	{
+	}
 
-// 	void Update( float ft )
-// 	{
-// 		if ( !engine->IsInGame() || engine->Con_IsVisible() )
-// 		{
-// 			if ( g_EditorInstance && CVGUILightEditor::IsEditorVisible() )
-// 				CVGUILightEditor::ToggleEditor();
+	void LevelShutdownPostEntity()
+	{
+		CVGUILightEditor::DestroyEditor();
+		m_bWasF1Down = false;
+	}
 
-// 			return;
-// 		}
+	void Update( float ft )
+	{
+		if ( !engine->IsInGame() || engine->Con_IsVisible() )
+		{
+			if ( g_EditorInstance && CVGUILightEditor::IsEditorVisible() )
+				CVGUILightEditor::ToggleEditor();
 
-// 		static bool bWasTabDown = false;
-// 		bool bIsTabDown = vgui::input()->IsKeyDown( KEY_TAB );
+			m_bWasF1Down = false;
+			return;
+		}
 
-// 		VPANEL focusedPanel = input()->GetFocus();
+		const bool bIsF1Down = vgui::input()->IsKeyDown( KEY_F1 );
 
-// 		if ( bIsTabDown != bWasTabDown )
-// 		{
-// 			if ( bIsTabDown &&
-// 				( focusedPanel == 0 || CVGUILightEditor::GetEditorPanel() == 0 ||
-// 				ipanel()->HasParent( focusedPanel, CVGUILightEditor::GetEditorPanel() ) ) )
-// 				CVGUILightEditor::ToggleEditor();
+		if ( bIsF1Down && !m_bWasF1Down )
+			CVGUILightEditor::ToggleEditor();
 
-// 			bWasTabDown = bIsTabDown;
-// 		}
-// 	};
-// } __g_lightEditorHelper;
+		m_bWasF1Down = bIsF1Down;
+	}
+
+private:
+	bool m_bWasF1Down;
+} __g_lightEditorHelper;

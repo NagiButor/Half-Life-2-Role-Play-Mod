@@ -4,6 +4,14 @@
 
 #include "vgui_controls/Frame.h"
 
+namespace vgui
+{
+	class Button;
+	class ComboBox;
+	class DirectorySelectDialog;
+	class FileOpenDialog;
+}
+
 
 class CVGUILightEditor_Controls : public vgui::Frame
 {
@@ -41,6 +49,7 @@ private:
 	vgui::FileOpenDialog *m_pFileVmf;
 	vgui::DirectorySelectDialog *m_pDirVmf;
 	vgui::ComboBox *m_pCBoxDbg;
+	vgui::Button *m_pButtonTimecycleWeather;
 };
 
 #endif

@@ -4,6 +4,7 @@
 #include "deferred/vgui/vgui_deferred.h"
 #include "deferred/deferred_verbose.h"
 
+#include "vgui_controls/Button.h"
 #include "vgui_controls/RadioButton.h"
 #include "vgui_controls/CheckButton.h"
 #include "vgui_controls/FileOpenDialog.h"
@@ -18,11 +19,22 @@ using namespace vgui;
 
 ConVar r_deferred_light_editor_defaultvmfpath( "r_deferred_light_editor_defaultvmfpath", "", FCVAR_ARCHIVE );
 
+namespace
+{
+	void SetChildBoundsIfFound( Panel *pParent, const char *pszName, int x, int y, int w, int h )
+	{
+		Panel *pChild = pParent->FindChildByName( pszName );
+		if ( pChild != NULL )
+			pChild->SetBounds( x, y, w, h );
+	}
+}
+
 CVGUILightEditor_Controls::CVGUILightEditor_Controls( Panel *pParent )
 	: BaseClass( pParent, "LightEditorControls" )
 {
 	m_pFileVmf = NULL;
 	m_bFileDialogForSave = false;
+	m_pButtonTimecycleWeather = NULL;
 
 	m_pCBoxDbg = new ComboBox( this, "cboxdbg", 6, false );
 	m_pCBoxDbg->AddItem( "None", NULL );
@@ -32,6 +44,9 @@ CVGUILightEditor_Controls::CVGUILightEditor_Controls( Panel *pParent )
 
 	LoadControlSettings( "resource/deferred/lighteditor_controls.res" );
 
+	m_pButtonTimecycleWeather = new Button( this, "button_timecycle_weather", "Timecycle and weather editor", this, "edittimecycleweather" );
+
+	SetSize( 220, 446 );
 	SetCloseButtonVisible( false );
 	SetSizeable( false );
 	SetTitle( "Main controls", false );
@@ -62,7 +77,35 @@ void CVGUILightEditor_Controls::OnLevelSpawn()
 
 void CVGUILightEditor_Controls::PerformLayout()
 {
+	const int iFrameWide = 220;
+	const int iFrameTall = 446;
+	const int iControlX = 10;
+	const int iControlWide = iFrameWide - iControlX * 2;
+	const int iControlTall = 24;
+
+	if ( GetWide() != iFrameWide || GetTall() != iFrameTall )
+		SetSize( iFrameWide, iFrameTall );
+
 	BaseClass::PerformLayout();
+
+	SetChildBoundsIfFound( this, "check_editor_enable", iControlX, 25, iControlWide, iControlTall );
+	SetChildBoundsIfFound( this, "Label1", iControlX, 45, iControlWide, iControlTall );
+	SetChildBoundsIfFound( this, "action_select", iControlX, 65, iControlWide, iControlTall );
+	SetChildBoundsIfFound( this, "action_add", iControlX, 85, iControlWide, iControlTall );
+	SetChildBoundsIfFound( this, "action_translate", iControlX, 105, iControlWide, iControlTall );
+	SetChildBoundsIfFound( this, "action_rotate", iControlX, 125, iControlWide, iControlTall );
+	SetChildBoundsIfFound( this, "Button3", iControlX, 165, iControlWide, iControlTall );
+	SetChildBoundsIfFound( this, "Button4", iControlX, 195, iControlWide, iControlTall );
+
+	if ( m_pButtonTimecycleWeather != NULL )
+		m_pButtonTimecycleWeather->SetBounds( iControlX, 225, iControlWide, iControlTall );
+
+	SetChildBoundsIfFound( this, "Label2", iControlX, 265, iControlWide, iControlTall );
+	SetChildBoundsIfFound( this, "Button1", iControlX, 295, iControlWide, iControlTall );
+	SetChildBoundsIfFound( this, "Button2", iControlX, 325, iControlWide, iControlTall );
+	SetChildBoundsIfFound( this, "Label3", iControlX, 360, iControlWide, iControlTall );
+	SetChildBoundsIfFound( this, "check_def_stats", iControlX, 385, iControlWide, iControlTall );
+	m_pCBoxDbg->SetBounds( iControlX, 410, iControlWide, iControlTall );
 
 	int sw, sh;
 	engine->GetScreenSize( sw, sh );
@@ -198,6 +241,10 @@ void CVGUILightEditor_Controls::OnCommand( const char *pCmd )
 	else if ( !Q_stricmp( pCmd, "editglobal" ) )
 	{
 		PostActionSignal( new KeyValues( "EditGlobalLight" ) );
+	}
+	else if ( !Q_stricmp( pCmd, "edittimecycleweather" ) )
+	{
+		PostActionSignal( new KeyValues( "EditTimecycleWeather" ) );
 	}
 	else if ( !Q_stricmp( pCmd, "select" ) ||
 		!Q_stricmp( pCmd, "add" ) ||
