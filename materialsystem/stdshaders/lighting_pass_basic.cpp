@@ -8,6 +8,13 @@
 
 #include "tier0/memdbgon.h"
 
+// Debug modes for spot shadow bias visualisation (cheat-protected):
+//  0 = off (normal rendering)
+//  1 = visualise total bias magnitude (greyscale)
+//  2 = visualise bias components: R = constant, G = slope, B = rpdb
+static ConVar def_spot_shadow_debug( "def_spot_shadow_debug", "0", FCVAR_CHEAT,
+	"Spot-light shadow bias debug: 0=off, 1=total bias, 2=components" );
+
 
 void InitParmsLightPass( const lightPassParms &info, CBaseVSShader *pShader, IMaterialVar **params )
 {
@@ -196,6 +203,11 @@ void DrawPassLightPass( const lightPassParms &info, CBaseVSShader *pShader, IMat
 			break;
 		case DEFLIGHTTYPE_SPOT:
 				CommitShadowProjectionConstants_Proj( pShaderAPI, 1 );
+				// Pack debug flag into a spare pixel shader constant (c7)
+				{
+					float flDebugConst[4] = { def_spot_shadow_debug.GetFloat(), 0, 0, 0 };
+					pShaderAPI->SetPixelShaderConstant( 7, flDebugConst );
+				}
 			break;
 		}
 

@@ -2723,10 +2723,16 @@ void CDeferredViewRender::RenderCascadedShadows( const CViewSetup &view, const b
 			PerformRadiosityGlobal( iRadTarget, view );
 	}
 
-	// Restore default hardware bias for other shadow types (spot lights, etc.)
+	// Restore hardware bias for spot-light shadow maps.
+	// Reduced from (16.0, 0.00005) now that spot lights use a proper
+	// receiver-side adaptive bias.  The old aggressive slope-scale of 16
+	// was a caster-only workaround; it over-biased angled surfaces while
+	// barely helping face-on geometry where the slope term is near-zero.
+	// (2.0, 0.00001) acts as a thin safety-net without conflicting with
+	// the receiver-side system.
 	{
 		CMatRenderContextPtr pRenderContext( materials );
-		pRenderContext->SetShadowDepthBiasFactors( 16.0f, 0.00005f );
+		pRenderContext->SetShadowDepthBiasFactors( 2.0f, 0.00001f );
 	}
 }
 

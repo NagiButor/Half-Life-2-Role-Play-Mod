@@ -53,6 +53,12 @@ const float3 g_vecViewOrigin				: register( c0 );
 const float4 g_vecShadowMappingTweaks_0		: register( c1 );
 const float4 g_vecShadowMappingTweaks_1		: register( c2 );
 
+// Debug bias visualisation flag (c7.x):
+//  0 = normal rendering
+//  1 = greyscale total bias magnitude
+//  2 = RGB bias components (R=constant, G=slope, B=rpdb)
+const float4 g_vecSpotBiasDebug				: register( c7 );
+
 #if USEWORLDTRANSFORM
 const float3 g_vecFrustumCenter		: register( c3 );
 const float3 g_vecFrustumRight		: register( c4 );
@@ -97,7 +103,15 @@ float SpotReceiverPlaneDepthBias( float3 shadowProj )
 			dZdx * dUVdy.y - dZdy * dUVdx.y,
 			dZdy * dUVdx.x - dZdx * dUVdy.x ) * invDet;
 
-		bias = ( abs( dZduv.x ) + abs( dZduv.y ) ) * g_vecShadowMappingTweaks_0.z;
+		float rawBias = ( abs( dZduv.x ) + abs( dZduv.y ) ) * g_vecShadowMappingTweaks_0.z;
+
+		// Smoothly fade RPDB when the screen-space Jacobian determinant is
+		// very small (camera close to surface).  The 1/det amplifies FP
+		// noise in that regime, creating per-pixel bias fluctuations that
+		// manifest as shadow-acne stripes.  Fading prevents the binary
+		// RPDB on/off pattern at the old hard 1e-7 threshold.
+		float rpdbConfidence = smoothstep( 1e-6f, 1e-4f, absDet );
+		bias = rawBias * rpdbConfidence;
 	}
 
 	return bias;
@@ -113,12 +127,44 @@ float ApplySpotReceiverDepthBias( float shadowDepth, float viewFwdDot, float vie
 	float tanA = sqrt( 1.0f - cosA * cosA ) / cosA;
 	tanA = min( tanA, 10.0f );
 
-	float biasTexels = 0.5f + 3.0f * tanA;
+	// Constant raised from 0.5 to 0.75 texels: the extra quarter-texel
+	// covers the perspective depth margin that linear (CSM) does not need.
+	// Close-range stabiliser: +0.25 * cosA adds another quarter-texel on
+	// face-on surfaces (where normal-offset is near-zero and the constant
+	// bias is the only defence).  At grazing angles the slope term already
+	// dominates, so the stabiliser tapers to near-zero via cosA weighting.
+	float biasTexels = 0.75f + cosA * 0.25f + 3.0f * tanA;
 
 	float rpdbDepth = SpotReceiverPlaneDepthBias( shadowProj );
 	float rpdbTexels = rpdbDepth / max( oneTexelDepth, 1e-7f );
 	biasTexels = max( biasTexels, rpdbTexels );
 	biasTexels = min( biasTexels, 12.0f );
+
+	return shadowDepth - oneTexelDepth * biasTexels;
+}
+
+// Debug variant: also outputs per-component bias info for visualisation
+float ApplySpotReceiverDepthBias_Debug( float shadowDepth, float viewFwdDot, float viewZ, float3 shadowProj, float4 spotBias,
+	out float3 dbgComponents )  // R=constant, G=slope, B=rpdb  (in texels, /12 normalised)
+{
+	viewZ = max( viewZ, spotBias.z );
+	float oneTexelDepth = spotBias.x / max( viewZ, 0.001f );
+
+	float cosA = max( abs( viewFwdDot ), 0.01f );
+	float tanA = sqrt( 1.0f - cosA * cosA ) / cosA;
+	tanA = min( tanA, 10.0f );
+
+	float constTerm = 0.75f + cosA * 0.25f;
+	float slopeTerm = 3.0f * tanA;
+	float biasTexels = constTerm + slopeTerm;
+
+	float rpdbDepth  = SpotReceiverPlaneDepthBias( shadowProj );
+	float rpdbTexels = rpdbDepth / max( oneTexelDepth, 1e-7f );
+	float rpdbUsed   = max( rpdbTexels - biasTexels, 0.0f );  // extra from rpdb
+	biasTexels = max( biasTexels, rpdbTexels );
+	biasTexels = min( biasTexels, 12.0f );
+
+	dbgComponents = float3( constTerm, slopeTerm, rpdbUsed ) / 12.0f;
 
 	return shadowDepth - oneTexelDepth * biasTexels;
 }
@@ -242,6 +288,8 @@ PS_OUTPUT main( const PS_INPUT In )
 #endif
 
 	float4 flLight = 0;
+	float3 dbgBiasComponents = 0;  // for debug visualisation (first shadowed light only)
+	float  dbgBiasTotal = 0;
 
 	for ( int i = 0; i < NUM_SHADOWED_COOKIE; i++ )
 	{
@@ -306,7 +354,19 @@ PS_OUTPUT main( const PS_INPUT In )
 
 		float spotViewZ;
 		float3 depthPos = ToShadowSpace_Spot( worldPos, viewFwdDot, flNormal, spotBias, spotWorldToTexture, spotViewZ );
-		float depthBiased = ApplySpotReceiverDepthBias( depthPos.z, viewFwdDot, spotViewZ, depthPos, spotBias );
+
+		float depthBiased;
+		if ( i == 0 && g_vecSpotBiasDebug.x > 0.5f )
+		{
+			float3 dbgComp;
+			depthBiased = ApplySpotReceiverDepthBias_Debug( depthPos.z, viewFwdDot, spotViewZ, depthPos, spotBias, dbgComp );
+			dbgBiasComponents = dbgComp;
+			dbgBiasTotal = ( depthPos.z - depthBiased ) / max( spotBias.x / max( spotViewZ, 0.001f ), 1e-7f ) / 12.0f;
+		}
+		else
+		{
+			depthBiased = ApplySpotReceiverDepthBias( depthPos.z, viewFwdDot, spotViewZ, depthPos, spotBias );
+		}
 
 		float4 localLight = DoSpotLightBasic( iDataIndex, flNormal,
 									-vecDelta, dist, worldRayInv,
@@ -377,6 +437,20 @@ PS_OUTPUT main( const PS_INPUT In )
 	}
 
 	PS_OUTPUT Out;
+
+	// Debug bias visualisation (def_spot_shadow_debug cvar)
+	if ( g_vecSpotBiasDebug.x > 1.5f )
+	{
+		// Mode 2: per-component  R=constant  G=slope  B=rpdb
+		Out.vColor_0 = float4( dbgBiasComponents, 1 );
+		return Out;
+	}
+	else if ( g_vecSpotBiasDebug.x > 0.5f )
+	{
+		// Mode 1: greyscale total bias (texels / 12)
+		Out.vColor_0 = float4( dbgBiasTotal.xxx, 1 );
+		return Out;
+	}
 
 	Out.vColor_0 = WriteLighting( flLight );
 
