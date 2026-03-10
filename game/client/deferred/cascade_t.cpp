@@ -7,7 +7,7 @@
 
 // ---------------------------------------------------------------
 // r_csm_quality  –  Sun shadow quality preset
-//   0 = Very Low, 1 = Low, 2 = Medium, 3 = High, 4 = Ultra
+//   0 = Very Low, 1 = Low, 2 = Medium, 3 = High, 4 = Very High, 5 = Ultra
 //
 // 8 cascades @ 2048 per-cascade, composited into 8192×4096 (4×2).
 // Texels-per-unit for Ultra cascade-0: 2048/64 = 32.0
@@ -47,7 +47,12 @@ static const csm_quality_preset_t g_CSMPresets[] = {
 	  { 0.22f, 0.22f, 0.22f, 0.26f, 0.26f, 0.26f, 0.26f, 0.26f },
 	  { 0.80f, 0.80f, 0.80f, 0.95f, 0.95f, 0.95f, 0.95f, 0.95f },
 	  { 0.75f, 0.75f, 0.75f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f } },
-	// Ultra (4) – tightest near cascade, sharpest shadows
+	// Very High (4)
+	{ {   96.0f,  224.0f,  560.0f, 1408.0f, 3328.0f, 7168.0f, 15360.0f, 24576.0f },
+	  { 0.17f, 0.17f, 0.17f, 0.20f, 0.20f, 0.20f, 0.20f, 0.20f },
+	  { 0.62f, 0.62f, 0.62f, 0.74f, 0.74f, 0.74f, 0.74f, 0.74f },
+	  { 0.56f, 0.56f, 0.56f, 0.74f, 0.74f, 0.74f, 0.74f, 0.74f } },
+	// Ultra (5) – tightest near cascade, sharpest shadows
 	{ {   64.0f,  160.0f,  400.0f, 1024.0f, 2560.0f, 6144.0f, 14336.0f, 24576.0f },
 	  { 0.12f, 0.12f, 0.12f, 0.14f, 0.14f, 0.14f, 0.14f, 0.14f },
 	  { 0.46f, 0.46f, 0.46f, 0.55f, 0.55f, 0.55f, 0.55f, 0.55f },
@@ -88,9 +93,9 @@ static void ApplyCSMQuality( int quality )
 }
 
 static void OnCSMQualityChanged( IConVar *var, const char *pOldValue, float flOldValue );
-ConVar r_csm_quality( "r_csm_quality", "4", FCVAR_ARCHIVE,
-	"Sun shadow quality preset (0=Very Low, 1=Low, 2=Medium, 3=High, 4=Ultra)",
-	true, 0.0f, true, 4.0f, OnCSMQualityChanged );
+ConVar r_csm_quality( "r_csm_quality", "5", FCVAR_ARCHIVE,
+	"Sun shadow quality preset (0=Very Low, 1=Low, 2=Medium, 3=High, 4=Very High, 5=Ultra)",
+	true, 0.0f, true, 5.0f, OnCSMQualityChanged );
 
 static void OnCSMQualityChanged( IConVar *var, const char *pOldValue, float flOldValue )
 {

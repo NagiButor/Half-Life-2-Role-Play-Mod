@@ -74,6 +74,7 @@ public:
 	void DebugLights_Draw_DebugMeshes();
 #endif
 	void DumpLights() const;
+	void ProfileShadowPresets() const;
 
 private:
 

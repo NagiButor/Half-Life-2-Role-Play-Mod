@@ -60,6 +60,7 @@ struct shadowData_general_t
 		iDPSM_Res_x = 256;
 		iDPSM_Res_y = 256;
 		iPROJ_Res = 256;
+		iPointShadowMode = 0;
 
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
 		iDPSM_Res_x_LOD1 = 128;
@@ -74,6 +75,7 @@ struct shadowData_general_t
 	int iDPSM_Res_y;
 
 	int iPROJ_Res;
+	int iPointShadowMode;
 
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
 	int iDPSM_Res_x_LOD1;

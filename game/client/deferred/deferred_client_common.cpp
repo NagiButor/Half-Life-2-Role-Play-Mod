@@ -5,14 +5,71 @@
 
 ConVar r_deferred_rt_shadowspot_res( "r_deferred_rt_shadowspot_res", "2048", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
-ConVar r_deferred_rt_shadowspot_lod1_res( "r_deferred_rt_shadowspot_lod1_res", "512", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
-ConVar r_deferred_rt_shadowspot_lod2_res( "r_deferred_rt_shadowspot_lod2_res", "256", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
+ConVar r_deferred_rt_shadowspot_lod1_res( "r_deferred_rt_shadowspot_lod1_res", "1024", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
+ConVar r_deferred_rt_shadowspot_lod2_res( "r_deferred_rt_shadowspot_lod2_res", "512", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
 #endif
 ConVar r_deferred_rt_shadowpoint_res( "r_deferred_rt_shadowpoint_res", "2048", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
-ConVar r_deferred_rt_shadowpoint_lod1_res( "r_deferred_rt_shadowpoint_lod1_res", "512", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
-ConVar r_deferred_rt_shadowpoint_lod2_res( "r_deferred_rt_shadowpoint_lod2_res", "256", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
+ConVar r_deferred_rt_shadowpoint_lod1_res( "r_deferred_rt_shadowpoint_lod1_res", "1024", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
+ConVar r_deferred_rt_shadowpoint_lod2_res( "r_deferred_rt_shadowpoint_lod2_res", "512", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
 #endif
+
+struct pointspot_shadow_quality_preset_t
+{
+	int iMainRes;
+	int iLod1Res;
+	int iLod2Res;
+};
+
+static const pointspot_shadow_quality_preset_t g_PointSpotShadowPresets[] =
+{
+	{  128,   64,   32 },
+	{  256,  128,   64 },
+	{  512,  256,  128 },
+	{ 1024,  512,  256 },
+	{ 1536,  768,  384 },
+	{ 2048, 1024,  512 },
+};
+
+static void ApplyPointSpotShadowQualityPreset( int quality )
+{
+	quality = clamp( quality, 0, ARRAYSIZE( g_PointSpotShadowPresets ) - 1 );
+	const pointspot_shadow_quality_preset_t &preset = g_PointSpotShadowPresets[quality];
+
+	r_deferred_rt_shadowspot_res.SetValue( preset.iMainRes );
+	r_deferred_rt_shadowpoint_res.SetValue( preset.iMainRes );
+
+#if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
+	r_deferred_rt_shadowspot_lod1_res.SetValue( preset.iLod1Res );
+	r_deferred_rt_shadowspot_lod2_res.SetValue( preset.iLod2Res );
+	r_deferred_rt_shadowpoint_lod1_res.SetValue( preset.iLod1Res );
+	r_deferred_rt_shadowpoint_lod2_res.SetValue( preset.iLod2Res );
+#endif
+}
+
+static void OnPointSpotShadowQualityChanged( IConVar *var, const char *pOldValue, float flOldValue );
+ConVar r_deferred_shadow_quality_pointspot( "r_deferred_shadow_quality_pointspot", "5", FCVAR_ARCHIVE,
+	"Point/Spot shadow quality preset (0=Very Low, 1=Low, 2=Medium, 3=High, 4=Very High, 5=Ultra)",
+	true, 0.0f, true, 5.0f, OnPointSpotShadowQualityChanged );
+
+ConVar r_deferred_shadowpoint_legacy( "r_deferred_shadowpoint_legacy", "0", FCVAR_ARCHIVE,
+	"A/B test switch for point shadows (0=Cube atlas, 1=Dual paraboloid)" );
+
+static void OnPointSpotShadowQualityChanged( IConVar *var, const char *pOldValue, float flOldValue )
+{
+	ConVar *pConVar = static_cast<ConVar *>( var );
+	ApplyPointSpotShadowQualityPreset( pConVar->GetInt() );
+}
+
+static bool g_bPointSpotQualityInitialized = false;
+void EnsurePointSpotShadowQualityInitialized()
+{
+	if ( g_bPointSpotQualityInitialized )
+		return;
+
+	ApplyPointSpotShadowQualityPreset( r_deferred_shadow_quality_pointspot.GetInt() );
+	g_bPointSpotQualityInitialized = true;
+}
 
 ConVar r_deferred_light_stats( "r_deferred_light_stats", "0", 0, "Shows stats panel for rendered lights, shadows, etc." );
 

@@ -172,18 +172,24 @@ PS_OUTPUT main( const PS_INPUT In )
 			g_flMixedData[ 4 ].xyz,
 			g_flMixedData[ 5 ].xyz );
 
-	float3 vecStart = vecWorld - g_flMixedData[ 0 ].xyz;
-	float3 vecEnd = vecWorld + vecMarchingRay - g_flMixedData[ 0 ].xyz;
+	float3 vecStartWorld = vecWorld - g_flMixedData[ 0 ].xyz;
+	float3 vecEndWorld = vecWorld + vecMarchingRay - g_flMixedData[ 0 ].xyz;
 
-	vecStart = mul3x3( vecStart, matRotation );
-	vecEnd = mul3x3( vecEnd, matRotation );
+	float3 vecStartRot = mul3x3( vecStartWorld, matRotation );
+	float3 vecEndRot = mul3x3( vecEndWorld, matRotation );
 
-	vecMarchingRay = vecEnd - vecStart;
-	vecMarchingRay /= iNumSamples;
+	bool bLegacyShadow = g_flMixedData[ 2 ].w < 0.0f;
+
+	float3 vecStartShadow = bLegacyShadow ? vecStartRot : vecStartWorld;
+	float3 vecEndShadow = bLegacyShadow ? vecEndRot : vecEndWorld;
+	float3 vecMarchingShadow = ( vecEndShadow - vecStartShadow ) / iNumSamples;
+
+	float3 vecStartCookie = vecStartRot;
+	float3 vecMarchingCookie = ( vecEndRot - vecStartRot ) / iNumSamples;
 
 	for ( int itr = iNumSamples; itr > 0; itr-- )
 	{
-		float dist = length( vecStart );
+		float dist = length( vecStartShadow );
 
 		float flRadiusFalloff = 1.0f - min( 1, dist / g_flMixedData[ 0 ].w );
 
@@ -192,17 +198,18 @@ PS_OUTPUT main( const PS_INPUT In )
 		float3 sample = 1.0f.xxx;
 #if NUM_SHADOWED || NUM_SHADOWED_COOKIE
 		sample = PerformDualParaboloidShadow( sMixedSampler[ 0 ],
-				vecStart, float4( 0, 0, 0, 0 ), float4( 0, 0, 0, 0 ),
-				dist, g_flMixedData[ 0 ].w, g_flMixedData[ 2 ].w );
+				vecStartShadow, float4( 0, 0, 0, 0 ), float4( 0, 0, 0, 0 ),
+				dist, g_flMixedData[ 0 ].w, g_flMixedData[ 2 ].w, 1.0f );
 #endif
 
 #if NUM_SHADOWED_COOKIE
-		sample *= DoCubemapCookie( sMixedSampler[ 1 ], vecStart );
+		sample *= DoCubemapCookie( sMixedSampler[ 1 ], vecStartCookie );
 #endif
 
 		flShadowPeeling += sample * step( dist, g_flMixedData[ 0 ].w ) * flRadiusFalloff;
 
-		vecStart += vecMarchingRay;
+		vecStartShadow += vecMarchingShadow;
+		vecStartCookie += vecMarchingCookie;
 	}
 
 	flLight.xyz = flShadowPeeling / iNumSamples * flDiameterIntensityAdjust;

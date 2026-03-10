@@ -179,26 +179,30 @@ PS_OUTPUT main( const PS_INPUT In )
 		int iDataIndex = i * NUM_CONSTS_POINT_ADVANCED;
 		int iSamplerIndex = i * 2;
 
-		float3 vecDelta = worldPos - g_flMixedData[ iDataIndex ].xyz;
-		float dist = length( vecDelta );
+		float3 vecDeltaWorld = worldPos - g_flMixedData[ iDataIndex ].xyz;
+		float dist = length( vecDeltaWorld );
 
 		float3x3 matRotation = float3x3( g_flMixedData[ iDataIndex + 3 ].xyz,
 			g_flMixedData[ iDataIndex + 4 ].xyz,
 			g_flMixedData[ iDataIndex + 5 ].xyz );
 
 		float4 localLight = DoPointLightBasic( iDataIndex, flNormal,
-									-vecDelta, dist, worldRayInv,
+									-vecDeltaWorld, dist, worldRayInv,
 									litface, half_lambert, phong_exp );
 
-		vecDelta = mul3x3( vecDelta, matRotation );
+		float3 vecDeltaRotated = mul3x3( vecDeltaWorld, matRotation );
+		float3 vecDeltaShadow = vecDeltaWorld;
+		if ( g_flMixedData[ iDataIndex + 2 ].w < 0.0f )
+			vecDeltaShadow = vecDeltaRotated;
 
+		float normalDotLight = dot( normalize( -vecDeltaWorld ), flNormal );
 		localLight.y *= PerformDualParaboloidShadow( sMixedSampler[ iSamplerIndex ],
-			vecDelta, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
-			dist, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w );
+			vecDeltaShadow, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
+			dist, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
 
 		flLight += DoLightFinalCookied( g_flMixedData[ iDataIndex + 1 ].xyz,
 			g_flMixedData[ iDataIndex + 2 ].xyz,
-			localLight, DoCubemapCookie( sMixedSampler[ iSamplerIndex + 1 ], vecDelta ) );
+			localLight, DoCubemapCookie( sMixedSampler[ iSamplerIndex + 1 ], vecDeltaRotated ) );
 	}
 
 	for ( int i = 0; i < NUM_SHADOWED; i++ )
@@ -207,22 +211,26 @@ PS_OUTPUT main( const PS_INPUT In )
 			+ i * NUM_CONSTS_POINT_ADVANCED;
 		int iSamplerIndex = NUM_SHADOWED_COOKIE * 2 + i;
 
-		float3 vecDelta = worldPos - g_flMixedData[ iDataIndex ].xyz;
-		float dist = length( vecDelta );
+		float3 vecDeltaWorld = worldPos - g_flMixedData[ iDataIndex ].xyz;
+		float dist = length( vecDeltaWorld );
 
 		float3x3 matRotation = float3x3( g_flMixedData[ iDataIndex + 3 ].xyz,
 			g_flMixedData[ iDataIndex + 4 ].xyz,
 			g_flMixedData[ iDataIndex + 5 ].xyz );
 
 		float4 localLight = DoPointLightBasic( iDataIndex, flNormal,
-									-vecDelta, dist, worldRayInv,
+									-vecDeltaWorld, dist, worldRayInv,
 									litface, half_lambert, phong_exp );
 
-		vecDelta = mul3x3( vecDelta, matRotation );
+		float3 vecDeltaRotated = mul3x3( vecDeltaWorld, matRotation );
+		float3 vecDeltaShadow = vecDeltaWorld;
+		if ( g_flMixedData[ iDataIndex + 2 ].w < 0.0f )
+			vecDeltaShadow = vecDeltaRotated;
 
+		float normalDotLight = dot( normalize( -vecDeltaWorld ), flNormal );
 		localLight.y *= PerformDualParaboloidShadow( sMixedSampler[ iSamplerIndex ],
-			vecDelta, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
-			dist, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w );
+			vecDeltaShadow, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
+			dist, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
 
 		flLight += DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,
 			g_flMixedData[ iDataIndex + 2 ].xyz,
@@ -236,22 +244,22 @@ PS_OUTPUT main( const PS_INPUT In )
 			+ i * NUM_CONSTS_POINT_ADVANCED;
 		int iSamplerIndex = NUM_SHADOWED_COOKIE * 2 + NUM_SHADOWED + i;
 
-		float3 vecDelta = worldPos - g_flMixedData[ iDataIndex ].xyz;
-		float dist = length( vecDelta );
+		float3 vecDeltaWorld = worldPos - g_flMixedData[ iDataIndex ].xyz;
+		float dist = length( vecDeltaWorld );
 
 		float3x3 matRotation = float3x3( g_flMixedData[ iDataIndex + 3 ].xyz,
 			g_flMixedData[ iDataIndex + 4 ].xyz,
 			g_flMixedData[ iDataIndex + 5 ].xyz );
 
 		float4 localLight = DoPointLightBasic( iDataIndex, flNormal,
-									-vecDelta, dist, worldRayInv,
+									-vecDeltaWorld, dist, worldRayInv,
 									litface, half_lambert, phong_exp );
 
-		vecDelta = mul3x3( vecDelta, matRotation );
+		float3 vecDeltaRotated = mul3x3( vecDeltaWorld, matRotation );
 
 		flLight += DoLightFinalCookied( g_flMixedData[ iDataIndex + 1 ].xyz,
 			g_flMixedData[ iDataIndex + 2 ].xyz,
-			localLight, DoCubemapCookie( sMixedSampler[ iSamplerIndex ], vecDelta ) );
+			localLight, DoCubemapCookie( sMixedSampler[ iSamplerIndex ], vecDeltaRotated ) );
 	}
 
 	for ( int i = 0; i < NUM_SIMPLE; i++ )

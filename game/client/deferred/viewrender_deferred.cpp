@@ -587,6 +587,33 @@ private:
 	int m_iIndex;
 };
 
+class CPointCubeShadowView : public CBaseShadowView
+{
+	DECLARE_CLASS( CPointCubeShadowView, CBaseShadowView );
+public:
+	CPointCubeShadowView( CViewRender *pMainView, def_light_t *pLight, int iFace, int iIndex )
+		: CBaseShadowView( pMainView )
+	{
+		m_pLight = pLight;
+		m_iFace = iFace;
+		m_iIndex = iIndex;
+		m_iShadowExcludeEntIndex = pLight->iShadowExcludeEntIndex;
+	}
+
+	virtual void CalcShadowView();
+	virtual void CommitData();
+
+	virtual int GetShadowMode()
+	{
+		return DEFERRED_SHADOW_MODE_PROJECTED;
+	}
+
+private:
+	def_light_t *m_pLight;
+	int m_iFace;
+	int m_iIndex;
+};
+
 //-----------------------------------------------------------------------------
 // Base class for scenes with water
 //-----------------------------------------------------------------------------
@@ -1893,6 +1920,62 @@ void CSpotLightShadowView::CommitData()
 	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_SHADOW_INDEX, m_iIndex );
 }
 
+void CPointCubeShadowView::CalcShadowView()
+{
+	static const QAngle s_angFace[6] = {
+		QAngle( 0, 0, 0 ),
+		QAngle( 0, 180, 0 ),
+		QAngle( 0, 90, 0 ),
+		QAngle( 0, 270, 0 ),
+		QAngle( -90, 0, 0 ),
+		QAngle( 90, 0, 0 ),
+	};
+
+	const int faceRes = GetShadowResolution_Point();
+	width = faceRes;
+	height = faceRes;
+	x = ( m_iFace % 3 ) * faceRes;
+	y = ( m_iFace / 3 ) * faceRes;
+
+	zNear = zNearViewmodel = DEFLIGHT_SPOT_ZNEAR;
+	zFar = zFarViewmodel = Max( m_pLight->flRadius, zNear + 1.0f );
+	fov = fovViewmodel = 90.0f;
+
+	angles = s_angFace[m_iFace];
+}
+
+void CPointCubeShadowView::CommitData()
+{
+	struct sendShadowDataProj
+	{
+		shadowData_proj_t data;
+		int index;
+		static void Fire( sendShadowDataProj d )
+		{
+			GetDeferredExt()->CommitShadowData_Proj( d.index, d.data );
+		};
+	};
+
+	Vector fwd;
+	AngleVectors( angles, &fwd );
+
+	shadowData_proj_t data;
+	data.vecForward.Init( fwd, 0.0f );
+	data.vecOrigin.Init( origin, 1.0f );
+
+	const float zNearLocal = DEFLIGHT_SPOT_ZNEAR;
+	const float zFarLocal = Max( m_pLight->flRadius, zNearLocal + 1.0f );
+	const float res = (float)Max( 1, GetShadowResolution_Point() );
+	const float tanHalfFov = 1.0f;
+	const float depthDerivScale = ( zNearLocal * zFarLocal ) / ( zFarLocal - zNearLocal );
+	data.vecSlopeSettings.Init( ( 2.0f * tanHalfFov / res ) * depthDerivScale, tanHalfFov / res, zNearLocal, zFarLocal );
+
+	QUEUE_FIRE( CommitShadowData_Proj, m_iIndex, data );
+
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_SHADOW_INDEX, m_iIndex );
+}
+
 CDeferredViewRender::CDeferredViewRender()
 {
 	m_pMesh_RadiosityScreenGrid[0] = NULL;
@@ -2755,13 +2838,25 @@ void CDeferredViewRender::DrawLightShadowView( const CViewSetup &view, int iDesi
 		break;
 	case DEFLIGHTTYPE_POINT:
 		{
-			CRefPtr<CDualParaboloidShadowView> pDPView0 = new CDualParaboloidShadowView( this, l, false );
-			pDPView0->Setup( setup, GetShadowDepthRT_DP( iDesiredShadowmap ), GetShadowColorRT_DP( iDesiredShadowmap ) );
-			AddViewToScene( pDPView0 );
+			if ( r_deferred_shadowpoint_legacy.GetBool() )
+			{
+				CRefPtr<CDualParaboloidShadowView> pDPView0 = new CDualParaboloidShadowView( this, l, false );
+				pDPView0->Setup( setup, GetShadowDepthRT_DP( iDesiredShadowmap ), GetShadowColorRT_DP( iDesiredShadowmap ) );
+				AddViewToScene( pDPView0 );
 
-			CRefPtr<CDualParaboloidShadowView> pDPView1 = new CDualParaboloidShadowView( this, l, true );
-			pDPView1->Setup( setup, GetShadowDepthRT_DP( iDesiredShadowmap ), GetShadowColorRT_DP( iDesiredShadowmap ) );
-			AddViewToScene( pDPView1 );
+				CRefPtr<CDualParaboloidShadowView> pDPView1 = new CDualParaboloidShadowView( this, l, true );
+				pDPView1->Setup( setup, GetShadowDepthRT_DP( iDesiredShadowmap ), GetShadowColorRT_DP( iDesiredShadowmap ) );
+				AddViewToScene( pDPView1 );
+			}
+			else
+			{
+				for ( int iFace = 0; iFace < 6; ++iFace )
+				{
+					CRefPtr<CPointCubeShadowView> pCubeFace = new CPointCubeShadowView( this, l, iFace, iDesiredShadowmap );
+					pCubeFace->Setup( setup, GetShadowDepthRT_DP( iDesiredShadowmap ), GetShadowColorRT_DP( iDesiredShadowmap ) );
+					AddViewToScene( pCubeFace );
+				}
+			}
 		}
 		break;
 	case DEFLIGHTTYPE_SPOT:

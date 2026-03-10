@@ -650,10 +650,95 @@ float PerformCascadedShadow( sampler sShadowMap, float3 worldPos,
 		vecFilterConfig_A, vecFilterConfig_B, flNormal, viewFwdDot, cascadeIndex );
 }
 
+float4 BuildPointShadowCubeAtlasUVZ( float3 vecLightToGeometry, float lightToGeoDistance, float radius )
+{
+	float3 dir = vecLightToGeometry / max( lightToGeoDistance, 0.0001f );
+
+	const float3 faceForward[6] = {
+		float3( 1, 0, 0 ),
+		float3( -1, 0, 0 ),
+		float3( 0, 1, 0 ),
+		float3( 0, -1, 0 ),
+		float3( 0, 0, 1 ),
+		float3( 0, 0, -1 ),
+	};
+	const float3 faceRight[6] = {
+		float3( 0, -1, 0 ),
+		float3( 0, 1, 0 ),
+		float3( 1, 0, 0 ),
+		float3( -1, 0, 0 ),
+		float3( 0, -1, 0 ),
+		float3( 0, -1, 0 ),
+	};
+	const float3 faceUp[6] = {
+		float3( 0, 0, 1 ),
+		float3( 0, 0, 1 ),
+		float3( 0, 0, 1 ),
+		float3( 0, 0, 1 ),
+		float3( -1, 0, 0 ),
+		float3( 1, 0, 0 ),
+	};
+
+	int faceIndex = 0;
+	float bestForward = dot( dir, faceForward[0] );
+	[unroll]
+	for ( int i = 1; i < 6; ++i )
+	{
+		float d = dot( dir, faceForward[i] );
+		if ( d > bestForward )
+		{
+			bestForward = d;
+			faceIndex = i;
+		}
+	}
+
+	float ma = max( bestForward, 0.0001f );
+	float2 uvFace;
+	uvFace.x = dot( dir, faceRight[faceIndex] ) / ma;
+	uvFace.y = -dot( dir, faceUp[faceIndex] ) / ma;
+
+	float2 uvLocal = uvFace * 0.5f + 0.5f;
+
+	float face = (float)faceIndex;
+	float2 tileScale = float2( 1.0f / 3.0f, 1.0f / 2.0f );
+	float2 tileOffset = float2( fmod( face, 3.0f ), floor( face / 3.0f ) );
+	float2 uvAtlas = ( uvLocal + tileOffset ) * tileScale;
+
+	const float zNear = 5.0f;
+	const float zFar = max( radius, zNear + 1.0f );
+	const float zView = max( lightToGeoDistance * ma, zNear );
+	const float projA = zFar / ( zFar - zNear );
+	const float projB = zFar * zNear / ( zFar - zNear );
+	const float depthProjected = saturate( projA - projB / zView );
+
+	return float4( uvAtlas, depthProjected, face );
+}
+
 float PerformDualParaboloidShadow( sampler shadowSampler, float3 vecLightToGeometry,
 	float4 offsets_0, float4 offset_1,
-	float lightToGeoDistance, float radius, float shadowMin )
+	float lightToGeoDistance, float radius, float shadowMin, float normalDotLight )
 {
+	const float shadowMode = ( shadowMin < 0.0f ) ? 0.0f : 1.0f;
+	shadowMin = abs( shadowMin );
+	shadowMin += normalDotLight * 0.0f;
+
+	if ( shadowMode > 0.5f )
+	{
+		offsets_0.xy *= float2( 3.0f, 2.0f );
+		offsets_0.zw *= float2( 3.0f, 2.0f );
+		offset_1.xy *= float2( 1.0f / 3.0f, 1.0f / 2.0f );
+
+		float4 uvwfAtlas = BuildPointShadowCubeAtlasUVZ( vecLightToGeometry, lightToGeoDistance, radius );
+		float2 tileScale = float2( 1.0f / 3.0f, 1.0f / 2.0f );
+		float2 tileOffset = float2( fmod( uvwfAtlas.w, 3.0f ), floor( uvwfAtlas.w / 3.0f ) );
+		float2 tileMin = tileOffset * tileScale;
+		float2 tileMax = tileMin + tileScale;
+		float2 edgeBias = offsets_0.zw + offsets_0.xy;
+		uvwfAtlas.xy = clamp( uvwfAtlas.xy, tileMin + edgeBias, tileMax - edgeBias );
+		uvwfAtlas.z = max( shadowMin, uvwfAtlas.z );
+		return max( shadowMin, PerformShadowMapping( shadowSampler, uvwfAtlas.xyz, offsets_0, offset_1 ) );
+	}
+
 	vecLightToGeometry = vecLightToGeometry / lightToGeoDistance;
 
 	bool bBack = vecLightToGeometry.z < 0;
@@ -666,7 +751,8 @@ float PerformDualParaboloidShadow( sampler shadowSampler, float3 vecLightToGeome
 	vecLightToGeometry.y = vecLightToGeometry.y * 0.2475f + lerp( 0.25f, 0.75f, bBack );
 	vecLightToGeometry.x = vecLightToGeometry.x * lerp( -0.495f, 0.495f, bBack ) + 0.5f;
 
-	float3 uvw = float3( vecLightToGeometry.xy, lightToGeoDistance );
+	float3 uvw = float3( vecLightToGeometry.xy, lightToGeoDistance );	
+	uvw.z = max( shadowMin, uvw.z );
 
 	return max( shadowMin, PerformShadowMapping( shadowSampler, uvw, offsets_0, offset_1 ) );
 }

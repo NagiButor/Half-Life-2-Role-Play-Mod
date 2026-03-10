@@ -26,6 +26,8 @@ ConVar r_deferred_sun_rays_intensity( "r_deferred_sun_rays_intensity", "0.25" );
 ConVar r_deferred_sun_rays_radius( "r_deferred_sun_rays_radius", "0.85" );
 ConVar r_deferred_volumetrics_blur( "r_deferred_volumetrics_blur", "1" );
 
+extern ConVar r_csm_quality;
+
 static CLightingManager __g_lightingMan;
 
 CLightingManager* GetLightingManager()
@@ -782,7 +784,10 @@ FORCEINLINE int CLightingManager::WriteLight( def_light_t* l, float* pfl4 )
 
 			if ( bAdvanced )
 			{
-				*pfl4 = l->flShadowFade;
+				float flShadowScalar = l->flShadowFade;
+				if ( r_deferred_shadowpoint_legacy.GetBool() )
+					flShadowScalar = -( l->flShadowFade + 0.0001f );
+				*pfl4 = flShadowScalar;
 				pfl4++;
 
 				VMatrix rotMatrix, rotMatrixit;
@@ -1760,10 +1765,61 @@ void CLightingManager::DumpLights() const
 	Msg( "Deferred lights summary: point=%d spot=%d shadow=%d cookie=%d\n", numPoint, numSpot, numShadow, numCookie );
 }
 
+void CLightingManager::ProfileShadowPresets() const
+{
+	static const char *s_QualityNames[] = { "Very Low", "Low", "Medium", "High", "Very High", "Ultra" };
+	const int pointSpotQuality = clamp( r_deferred_shadow_quality_pointspot.GetInt(), 0, 5 );
+	const int csmQuality = clamp( r_csm_quality.GetInt(), 0, 5 );
+
+	const int spotRes = GetShadowResolution_Spot();
+	const int pointFaceRes = GetShadowResolution_Point();
+	const bool bLegacyPoint = r_deferred_shadowpoint_legacy.GetBool();
+	const int pointAtlasW = bLegacyPoint ? pointFaceRes : pointFaceRes * 3;
+	const int pointAtlasH = pointFaceRes * 2;
+
+	int numShadowPoint = 0;
+	int numShadowSpot = 0;
+
+	FOR_EACH_VEC_FAST( def_light_t* const, m_hRenderLights, l )
+	{
+		if ( !l->ShouldRenderShadow() )
+			continue;
+
+		if ( l->iLighttype == DEFLIGHTTYPE_POINT )
+			numShadowPoint++;
+		else if ( l->iLighttype == DEFLIGHTTYPE_SPOT )
+			numShadowSpot++;
+	}
+	FOR_EACH_VEC_FAST_END
+
+	const int64 texelsSpotPerLight = (int64)spotRes * (int64)spotRes;
+	const int64 texelsPointPerLight = (int64)pointAtlasW * (int64)pointAtlasH;
+	const int64 texelsSpotTotal = texelsSpotPerLight * numShadowSpot;
+	const int64 texelsPointTotal = texelsPointPerLight * numShadowPoint;
+
+	Msg( "Shadow profile:\n" );
+	Msg( "  CSM quality=%d (%s)\n", csmQuality, s_QualityNames[csmQuality] );
+	Msg( "  Point/Spot quality=%d (%s)\n", pointSpotQuality, s_QualityNames[pointSpotQuality] );
+	Msg( "  Point shadow mode=%s\n", bLegacyPoint ? "legacy_dual_paraboloid" : "cube_atlas" );
+	Msg( "  Spot shadow map=%dx%d, texels/light=%I64d\n", spotRes, spotRes, texelsSpotPerLight );
+	Msg( "  Point shadow map=%dx%d, texels/light=%I64d\n", pointAtlasW, pointAtlasH, texelsPointPerLight );
+	Msg( "  Active shadowed point=%d, spot=%d\n", numShadowPoint, numShadowSpot );
+	Msg( "  Total texels this frame: point=%I64d, spot=%I64d, combined=%I64d\n",
+		texelsPointTotal,
+		texelsSpotTotal,
+		texelsPointTotal + texelsSpotTotal );
+}
+
 CON_COMMAND( r_deferred_dump_lights, "" )
 {
 	if ( GetLightingManager() )
 		GetLightingManager()->DumpLights();
+}
+
+CON_COMMAND( r_deferred_shadow_profile_pointspot, "" )
+{
+	if ( GetLightingManager() )
+		GetLightingManager()->ProfileShadowPresets();
 }
 
 CON_COMMAND( r_deferred_dump_global, "" )

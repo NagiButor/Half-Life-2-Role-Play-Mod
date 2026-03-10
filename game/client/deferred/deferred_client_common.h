@@ -11,6 +11,8 @@
 
 extern ConVar r_deferred_rt_shadowspot_res;
 extern ConVar r_deferred_rt_shadowpoint_res;
+extern ConVar r_deferred_shadow_quality_pointspot;
+extern ConVar r_deferred_shadowpoint_legacy;
 
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
 extern ConVar r_deferred_rt_shadowspot_lod1_res;
@@ -64,6 +66,7 @@ extern ConVar r_deferred_radiosity_nodes;
 #include "deferred/materialsystem_passthru.h"
 
 void OnCookieTableChanged( void *object, INetworkStringTable *stringTable, int stringNumber, const char *newString, void const *newData );
+void EnsurePointSpotShadowQualityInitialized();
 
 
 #define QUEUE_FIRE( functionName, ... ){\

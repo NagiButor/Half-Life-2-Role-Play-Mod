@@ -59,6 +59,8 @@ void DefRTsOnModeChanged()
 
 void InitDeferredRTs( bool bInitial )
 {
+	EnsurePointSpotShadowQualityInitialized();
+
 	if ( !bInitial )
 		materials->BeginRenderTargetAllocation(); // HAHAHAHA. No.
 
@@ -126,6 +128,8 @@ const ImageFormat fmt_gbuffer0 =
 	materials->BeginRenderTargetAllocation();
 
 	shadowData_general_t generalShadowData;
+	const bool bPointShadowLegacy = r_deferred_shadowpoint_legacy.GetBool();
+	generalShadowData.iPointShadowMode = bPointShadowLegacy ? 0 : 1;
 
 	if ( bInitial )
 	{
@@ -413,8 +417,9 @@ const ImageFormat fmt_gbuffer0 =
 
 	for ( int i = 0; i < MAX_SHADOW_DP; i++ )
 	{
-		int res_x = GetShadowResolution_Point();
-		int res_y = res_x * 2;
+		int res_face = GetShadowResolution_Point();
+		int res_x = bPointShadowLegacy ? res_face : res_face * 3;
+		int res_y = res_face * 2;
 
 		generalShadowData.iDPSM_Res_x = res_x;
 		generalShadowData.iDPSM_Res_y = res_y;
