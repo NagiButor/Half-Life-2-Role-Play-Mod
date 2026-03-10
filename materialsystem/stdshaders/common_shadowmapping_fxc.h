@@ -720,25 +720,57 @@ float PerformDualParaboloidShadow( sampler shadowSampler, float3 vecLightToGeome
 {
 	const float shadowMode = ( shadowMin < 0.0f ) ? 0.0f : 1.0f;
 	shadowMin = abs( shadowMin );
-	shadowMin += normalDotLight * 0.0f;
 
 	if ( shadowMode > 0.5f )
 	{
+		// ------ Cube-atlas path (6-face perspective shadow map) ------
 		offsets_0.xy *= float2( 3.0f, 2.0f );
 		offsets_0.zw *= float2( 3.0f, 2.0f );
 		offset_1.xy *= float2( 1.0f / 3.0f, 1.0f / 2.0f );
 
 		float4 uvwfAtlas = BuildPointShadowCubeAtlasUVZ( vecLightToGeometry, lightToGeoDistance, radius );
+
+		// Clamp UVs within tile to prevent PCF bleeding across faces
 		float2 tileScale = float2( 1.0f / 3.0f, 1.0f / 2.0f );
 		float2 tileOffset = float2( fmod( uvwfAtlas.w, 3.0f ), floor( uvwfAtlas.w / 3.0f ) );
 		float2 tileMin = tileOffset * tileScale;
 		float2 tileMax = tileMin + tileScale;
 		float2 edgeBias = offsets_0.zw + offsets_0.xy;
 		uvwfAtlas.xy = clamp( uvwfAtlas.xy, tileMin + edgeBias, tileMax - edgeBias );
-		uvwfAtlas.z = max( shadowMin, uvwfAtlas.z );
+
+		// Receiver-side slope-dependent depth bias
+		// Only apply when valid filter config is provided (volumetric passes send zeroes)
+		float faceRes = offset_1.x;  // per-face resolution after adjustment
+		if ( faceRes > 0.5f )
+		{
+			// Compute the dominant-axis cosine (same value as 'ma' in BuildPointShadowCubeAtlasUVZ)
+			float3 absDir = abs( vecLightToGeometry / max( lightToGeoDistance, 0.0001f ) );
+			float ma = max( max( absDir.x, absDir.y ), absDir.z );
+
+			const float zNear = 5.0f;
+			const float zFar  = max( radius, zNear + 1.0f );
+			float zView = max( lightToGeoDistance * ma, zNear );
+
+			// How much perspective depth one shadow texel represents at this distance
+			float depthDerivScale = ( zNear * zFar ) / ( zFar - zNear );
+			float oneTexelDepth = ( 2.0f / faceRes ) * depthDerivScale / max( zView, 0.001f );
+
+			// Slope-based texel bias  (matches the spot-light approach)
+			float cosAngle = max( abs( normalDotLight ), 0.01f );
+			float tanAngle = sqrt( 1.0f - cosAngle * cosAngle ) / cosAngle;
+			tanAngle = min( tanAngle, 10.0f );
+
+			float biasTexels = 0.75f + 3.0f * tanAngle;
+			biasTexels = min( biasTexels, 12.0f );
+
+			uvwfAtlas.z -= oneTexelDepth * biasTexels;
+		}
+		uvwfAtlas.z  = max( shadowMin, uvwfAtlas.z );
+
 		return max( shadowMin, PerformShadowMapping( shadowSampler, uvwfAtlas.xyz, offsets_0, offset_1 ) );
 	}
 
+	// ------ Legacy dual-paraboloid path ------
 	vecLightToGeometry = vecLightToGeometry / lightToGeoDistance;
 
 	bool bBack = vecLightToGeometry.z < 0;

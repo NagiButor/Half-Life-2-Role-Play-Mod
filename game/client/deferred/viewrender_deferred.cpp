@@ -562,6 +562,33 @@ private:
 	def_light_t *m_pLight;
 };
 
+class CPointLightCubeFaceShadowView : public CBaseShadowView
+{
+	DECLARE_CLASS( CPointLightCubeFaceShadowView, CBaseShadowView );
+public:
+	CPointLightCubeFaceShadowView( CViewRender *pMainView,
+		def_light_t *pLight, int faceIndex, int shadowMapIndex )
+		: CBaseShadowView( pMainView )
+	{
+		m_pLight = pLight;
+		m_iFaceIndex = faceIndex;
+		m_iShadowMapIndex = shadowMapIndex;
+		m_iShadowExcludeEntIndex = pLight->iShadowExcludeEntIndex;
+	}
+
+	virtual void	CalcShadowView();
+	virtual void	CommitData();
+
+	virtual int		GetShadowMode(){
+		return DEFERRED_SHADOW_MODE_PROJECTED;
+	};
+
+private:
+	def_light_t *m_pLight;
+	int m_iFaceIndex;
+	int m_iShadowMapIndex;
+};
+
 class CSpotLightShadowView : public CBaseShadowView
 {
 	DECLARE_CLASS( CSpotLightShadowView, CBaseShadowView );
@@ -584,33 +611,6 @@ public:
 
 private:
 	def_light_t *m_pLight;
-	int m_iIndex;
-};
-
-class CPointCubeShadowView : public CBaseShadowView
-{
-	DECLARE_CLASS( CPointCubeShadowView, CBaseShadowView );
-public:
-	CPointCubeShadowView( CViewRender *pMainView, def_light_t *pLight, int iFace, int iIndex )
-		: CBaseShadowView( pMainView )
-	{
-		m_pLight = pLight;
-		m_iFace = iFace;
-		m_iIndex = iIndex;
-		m_iShadowExcludeEntIndex = pLight->iShadowExcludeEntIndex;
-	}
-
-	virtual void CalcShadowView();
-	virtual void CommitData();
-
-	virtual int GetShadowMode()
-	{
-		return DEFERRED_SHADOW_MODE_PROJECTED;
-	}
-
-private:
-	def_light_t *m_pLight;
-	int m_iFace;
 	int m_iIndex;
 };
 
@@ -1874,6 +1874,64 @@ void CDualParaboloidShadowView::CalcShadowView()
 	}
 }
 
+void CPointLightCubeFaceShadowView::CalcShadowView()
+{
+	static const QAngle s_faceAngles[6] = {
+		QAngle( 0, 0, 0 ),       // Face 0: +X
+		QAngle( 0, 180, 0 ),     // Face 1: -X
+		QAngle( 0, 90, 0 ),      // Face 2: +Y
+		QAngle( 0, -90, 0 ),     // Face 3: -Y
+		QAngle( -90, 0, 0 ),     // Face 4: +Z
+		QAngle( 90, 0, 0 ),      // Face 5: -Z
+	};
+
+	const float flRadius = m_pLight->flRadius;
+	const int faceRes = GetShadowResolution_Point();
+
+	angles = s_faceAngles[m_iFaceIndex];
+
+	const int col = m_iFaceIndex % 3;
+	const int row = m_iFaceIndex / 3;
+	x = col * faceRes;
+	y = row * faceRes;
+	width = faceRes;
+	height = faceRes;
+
+	m_bOrtho = false;
+	m_flAspectRatio = 1.0f;
+	fov = fovViewmodel = 90.0f;
+	zNear = zNearViewmodel = DEFLIGHT_SPOT_ZNEAR;
+	zFar = zFarViewmodel = Max( flRadius, DEFLIGHT_SPOT_ZNEAR + 1.0f );
+}
+
+void CPointLightCubeFaceShadowView::CommitData()
+{
+	struct sendShadowDataProj
+	{
+		shadowData_proj_t data;
+		int index;
+		static void Fire( sendShadowDataProj d )
+		{
+			GetDeferredExt()->CommitShadowData_Proj( d.index, d.data );
+		};
+	};
+
+	Vector fwd;
+	AngleVectors( angles, &fwd );
+
+	shadowData_proj_t data;
+	data.vecForward.Init( fwd, 0.0f );
+	data.vecOrigin.Init( origin, 1.0f );
+	data.vecSlopeSettings.Init( 0.0f, 0.0f,
+		DEFLIGHT_SPOT_ZNEAR,
+		Max( m_pLight->flRadius, DEFLIGHT_SPOT_ZNEAR + 1.0f ) );
+
+	QUEUE_FIRE( CommitShadowData_Proj, m_iShadowMapIndex, data );
+
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_SHADOW_INDEX, m_iShadowMapIndex );
+}
+
 void CSpotLightShadowView::CalcShadowView()
 {
 	float flRadius = m_pLight->flRadius;
@@ -1913,62 +1971,6 @@ void CSpotLightShadowView::CommitData()
 	const float tanHalfFov = tanf( DEG2RAD( fov ) * 0.5f );
 	const float depthDerivScale = ( zNear * zFar ) / ( zFar - zNear );
 	data.vecSlopeSettings.Init( ( 2.0f * tanHalfFov / res ) * depthDerivScale, tanHalfFov / res, zNear, zFar );
-
-	QUEUE_FIRE( CommitShadowData_Proj, m_iIndex, data );
-
-	CMatRenderContextPtr pRenderContext( materials );
-	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_SHADOW_INDEX, m_iIndex );
-}
-
-void CPointCubeShadowView::CalcShadowView()
-{
-	static const QAngle s_angFace[6] = {
-		QAngle( 0, 0, 0 ),
-		QAngle( 0, 180, 0 ),
-		QAngle( 0, 90, 0 ),
-		QAngle( 0, 270, 0 ),
-		QAngle( -90, 0, 0 ),
-		QAngle( 90, 0, 0 ),
-	};
-
-	const int faceRes = GetShadowResolution_Point();
-	width = faceRes;
-	height = faceRes;
-	x = ( m_iFace % 3 ) * faceRes;
-	y = ( m_iFace / 3 ) * faceRes;
-
-	zNear = zNearViewmodel = DEFLIGHT_SPOT_ZNEAR;
-	zFar = zFarViewmodel = Max( m_pLight->flRadius, zNear + 1.0f );
-	fov = fovViewmodel = 90.0f;
-
-	angles = s_angFace[m_iFace];
-}
-
-void CPointCubeShadowView::CommitData()
-{
-	struct sendShadowDataProj
-	{
-		shadowData_proj_t data;
-		int index;
-		static void Fire( sendShadowDataProj d )
-		{
-			GetDeferredExt()->CommitShadowData_Proj( d.index, d.data );
-		};
-	};
-
-	Vector fwd;
-	AngleVectors( angles, &fwd );
-
-	shadowData_proj_t data;
-	data.vecForward.Init( fwd, 0.0f );
-	data.vecOrigin.Init( origin, 1.0f );
-
-	const float zNearLocal = DEFLIGHT_SPOT_ZNEAR;
-	const float zFarLocal = Max( m_pLight->flRadius, zNearLocal + 1.0f );
-	const float res = (float)Max( 1, GetShadowResolution_Point() );
-	const float tanHalfFov = 1.0f;
-	const float depthDerivScale = ( zNearLocal * zFarLocal ) / ( zFarLocal - zNearLocal );
-	data.vecSlopeSettings.Init( ( 2.0f * tanHalfFov / res ) * depthDerivScale, tanHalfFov / res, zNearLocal, zFarLocal );
 
 	QUEUE_FIRE( CommitShadowData_Proj, m_iIndex, data );
 
@@ -2850,11 +2852,12 @@ void CDeferredViewRender::DrawLightShadowView( const CViewSetup &view, int iDesi
 			}
 			else
 			{
-				for ( int iFace = 0; iFace < 6; ++iFace )
+				for ( int face = 0; face < 6; face++ )
 				{
-					CRefPtr<CPointCubeShadowView> pCubeFace = new CPointCubeShadowView( this, l, iFace, iDesiredShadowmap );
-					pCubeFace->Setup( setup, GetShadowDepthRT_DP( iDesiredShadowmap ), GetShadowColorRT_DP( iDesiredShadowmap ) );
-					AddViewToScene( pCubeFace );
+					CRefPtr<CPointLightCubeFaceShadowView> pFaceView =
+						new CPointLightCubeFaceShadowView( this, l, face, iDesiredShadowmap );
+					pFaceView->Setup( setup, GetShadowDepthRT_DP( iDesiredShadowmap ), GetShadowColorRT_DP( iDesiredShadowmap ) );
+					AddViewToScene( pFaceView );
 				}
 			}
 		}
