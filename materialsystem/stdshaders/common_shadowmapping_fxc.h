@@ -564,7 +564,8 @@ float ApplyCSMReceiverDepthBias( float shadowDepth, float viewFwdDot, float3 vec
 	float tanA = sqrt( 1.0f - cosA * cosA ) / cosA;
 	tanA = min( tanA, 10.0f ); // cap at ~84 degrees
 
-	float bias = vecSlopeData.x + vecSlopeData.y * tanA;
+	// Reduced for Bias Free fwidth logic (original: vecSlopeData.x + vecSlopeData.y * tanA)
+	float bias = (vecSlopeData.x * 0.25f) + (vecSlopeData.y * 0.25f) * tanA;
 	return shadowDepth - bias;
 }
 
@@ -755,13 +756,15 @@ float PerformDualParaboloidShadow( sampler shadowSampler, float3 vecLightToGeome
 			float depthDerivScale = ( zNear * zFar ) / ( zFar - zNear );
 			float oneTexelDepth = ( 2.0f / faceRes ) * depthDerivScale / max( zView, 0.001f );
 
-			// Slope-based texel bias  (matches the spot-light approach)
-			float cosAngle = max( abs( normalDotLight ), 0.01f );
+			float cosAngle = max( abs( normalDotLight ), 0.05f );
 			float tanAngle = sqrt( 1.0f - cosAngle * cosAngle ) / cosAngle;
-			tanAngle = min( tanAngle, 10.0f );
+			tanAngle = min( tanAngle, 6.0f );
 
-			float biasTexels = 0.75f + 3.0f * tanAngle;
-			biasTexels = min( biasTexels, 12.0f );
+			float slopeWeight = saturate( tanAngle * 0.2f );
+			float biasTexels = 0.45f + 0.9f * slopeWeight;
+			float distWeight = saturate( zView / max( radius, 1.0f ) );
+			biasTexels *= lerp( 0.85f, 1.15f, distWeight );
+			biasTexels = clamp( biasTexels, 0.35f, 1.8f );
 
 			uvwfAtlas.z -= oneTexelDepth * biasTexels;
 		}

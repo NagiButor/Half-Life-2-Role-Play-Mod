@@ -1,0 +1,58 @@
+// Deferred composite pixel shader for Teeth
+// Replaces forward per-vertex lighting (vertAtten) with deferred lighting from _rt_LightAccum
+//
+// DYNAMIC: "PIXELFOGTYPE"             "0..1"
+// DYNAMIC: "WRITE_DEPTH_TO_DESTALPHA" "0..1" [ps30]
+
+#include "common_ps_fxc.h"
+#include "common_deferred_fxc.h"
+#include "shader_constant_register_map.h"
+
+sampler BaseTextureSampler          : register( s0 );
+sampler sLightAccum                 : register( s3 );
+
+const float2 g_vecFullScreenTexel   : register( c0 );
+
+const float4 g_FogParams            : register( PSREG_FOG_PARAMS );
+const float4 g_EyePos_SpecExponent  : register( PSREG_EYEPOS_SPEC_EXPONENT );
+
+struct PS_INPUT
+{
+	float2 baseTexCoord         : TEXCOORD0;
+	float3 vertAtten            : TEXCOORD1;   // ignored - we use deferred lighting instead
+	float4 worldPos_projPosZ    : TEXCOORD7;
+	float2 vScreenPos           : VPOS;
+};
+
+float4 main( PS_INPUT i ) : COLOR
+{
+	float4 baseSample = tex2D( BaseTextureSampler, i.baseTexCoord );
+
+	// Sample deferred light accumulation buffer at this pixel's screen position
+	float2 screenPos = ( i.vScreenPos + 0.5f ) * g_vecFullScreenTexel;
+	float4 flLighting = ReadLighting( tex2D( sLightAccum, screenPos ) );
+
+	float4 result;
+	result.xyz = baseSample.xyz * flLighting.rgb;
+	result.a = baseSample.a;
+
+	// Apply light scale to match composite_ps30 output range
+	float flLightScale =
+#if DEFCFG_USE_SRGB_CONVERSION
+		LINEAR_LIGHT_SCALE;
+#else
+		GAMMA_LIGHT_SCALE;
+#endif
+	result.rgb *= flLightScale;
+
+	bool bWriteDepthToAlpha = ( WRITE_DEPTH_TO_DESTALPHA != 0 );
+
+	float fogFactor = CalcPixelFogFactor( PIXELFOGTYPE, g_FogParams, g_EyePos_SpecExponent.z, i.worldPos_projPosZ.z, i.worldPos_projPosZ.w );
+
+#if PIXELFOGTYPE == 0
+	result.rgb = lerp( result.rgb, g_LinearFogColor.rgb, fogFactor );
+	return FinalOutput( result, 0, PIXELFOGTYPE, TONEMAP_SCALE_NONE, bWriteDepthToAlpha, i.worldPos_projPosZ.w );
+#else
+	return FinalOutput( result, fogFactor, PIXELFOGTYPE, TONEMAP_SCALE_NONE, bWriteDepthToAlpha, i.worldPos_projPosZ.w );
+#endif
+}

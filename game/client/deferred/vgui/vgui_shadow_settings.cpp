@@ -9,6 +9,7 @@
 #include <vgui_controls/ComboBox.h>
 #include <vgui_controls/Button.h>
 #include <vgui_controls/Label.h>
+#include <vgui_controls/MessageBox.h>
 
 #include "tier0/memdbgon.h"
 
@@ -111,12 +112,15 @@ void CDeferredShadowSettings::OnCommand( const char *command )
 {
 	if ( !Q_stricmp( command, "OK" ) )
 	{
+		int newCSMQuality = m_iOrigCSMQuality;
+		int newPointSpotQuality = m_iOrigPointSpotQuality;
+
 		int idx = m_pCSMQuality->GetActiveItem();
 		if ( idx >= 0 )
 		{
 			KeyValues *pKV = m_pCSMQuality->GetItemUserData( idx );
 			if ( pKV )
-				r_csm_quality.SetValue( pKV->GetInt( "val", 5 ) );
+				newCSMQuality = pKV->GetInt( "val", 5 );
 		}
 
 		idx = m_pPointSpotQuality->GetActiveItem();
@@ -124,8 +128,29 @@ void CDeferredShadowSettings::OnCommand( const char *command )
 		{
 			KeyValues *pKV = m_pPointSpotQuality->GetItemUserData( idx );
 			if ( pKV )
-				r_deferred_shadow_quality_pointspot.SetValue( pKV->GetInt( "val", 5 ) );
+				newPointSpotQuality = pKV->GetInt( "val", 5 );
 		}
+
+		r_csm_quality.SetValue( newCSMQuality );
+		r_deferred_shadow_quality_pointspot.SetValue( newPointSpotQuality );
+
+		const bool bSettingsChanged = newCSMQuality != m_iOrigCSMQuality || newPointSpotQuality != m_iOrigPointSpotQuality;
+		if ( bSettingsChanged )
+		{
+			vgui::MessageBox *pRestartWarning = new vgui::MessageBox(
+				"Restart Required",
+				"For full shadow quality changes to take effect, restart the game.",
+				this );
+			pRestartWarning->AddActionSignalTarget( this );
+			pRestartWarning->SetCommand( "ShadowRestartWarningAck" );
+			pRestartWarning->DoModal();
+			return;
+		}
+
+		Close();
+	}
+	else if ( !Q_stricmp( command, "ShadowRestartWarningAck" ) )
+	{
 		Close();
 	}
 	else if ( !Q_stricmp( command, "Cancel" ) )

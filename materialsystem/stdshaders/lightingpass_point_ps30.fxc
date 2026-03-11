@@ -190,15 +190,21 @@ PS_OUTPUT main( const PS_INPUT In )
 									-vecDeltaWorld, dist, worldRayInv,
 									litface, half_lambert, phong_exp );
 
-		float3 vecDeltaRotated = mul3x3( vecDeltaWorld, matRotation );
-		float3 vecDeltaShadow = vecDeltaWorld;
+		float cosAngle = abs( dot( normalize( -vecDeltaWorld ), flNormal ) );
+		float sinAngle = sqrt( saturate( 1.0f - cosAngle * cosAngle ) );
+		float normalOffsetScale = 0.25f + 1.25f * sinAngle;
+		float3 vecDeltaOffset = vecDeltaWorld + flNormal * normalOffsetScale;
+		float distOffset = length( vecDeltaOffset );
+
+		float3 vecDeltaRotated = mul3x3( vecDeltaOffset, matRotation );
+		float3 vecDeltaShadow = vecDeltaOffset;
 		if ( g_flMixedData[ iDataIndex + 2 ].w < 0.0f )
 			vecDeltaShadow = vecDeltaRotated;
 
 		float normalDotLight = dot( normalize( -vecDeltaWorld ), flNormal );
 		localLight.y *= PerformDualParaboloidShadow( sMixedSampler[ iSamplerIndex ],
 			vecDeltaShadow, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
-			dist, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
+			distOffset, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
 
 		flLight += DoLightFinalCookied( g_flMixedData[ iDataIndex + 1 ].xyz,
 			g_flMixedData[ iDataIndex + 2 ].xyz,
@@ -222,15 +228,21 @@ PS_OUTPUT main( const PS_INPUT In )
 									-vecDeltaWorld, dist, worldRayInv,
 									litface, half_lambert, phong_exp );
 
-		float3 vecDeltaRotated = mul3x3( vecDeltaWorld, matRotation );
-		float3 vecDeltaShadow = vecDeltaWorld;
+		float cosAngle = abs( dot( normalize( -vecDeltaWorld ), flNormal ) );
+		float sinAngle = sqrt( saturate( 1.0f - cosAngle * cosAngle ) );
+		float normalOffsetScale = 0.25f + 1.25f * sinAngle;
+		float3 vecDeltaOffset = vecDeltaWorld + flNormal * normalOffsetScale;
+		float distOffset = length( vecDeltaOffset );
+
+		float3 vecDeltaRotated = mul3x3( vecDeltaOffset, matRotation );
+		float3 vecDeltaShadow = vecDeltaOffset;
 		if ( g_flMixedData[ iDataIndex + 2 ].w < 0.0f )
 			vecDeltaShadow = vecDeltaRotated;
 
 		float normalDotLight = dot( normalize( -vecDeltaWorld ), flNormal );
 		localLight.y *= PerformDualParaboloidShadow( sMixedSampler[ iSamplerIndex ],
 			vecDeltaShadow, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
-			dist, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
+			distOffset, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
 
 		flLight += DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,
 			g_flMixedData[ iDataIndex + 2 ].xyz,

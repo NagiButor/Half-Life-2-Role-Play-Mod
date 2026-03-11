@@ -3,15 +3,17 @@
 
 #include "tier0/memdbgon.h"
 
-ConVar r_deferred_rt_shadowspot_res( "r_deferred_rt_shadowspot_res", "2048", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
+static void OnShadowRTResolutionChanged( IConVar *var, const char *pOldValue, float flOldValue );
+
+ConVar r_deferred_rt_shadowspot_res( "r_deferred_rt_shadowspot_res", "2048", 0, "", OnShadowRTResolutionChanged );
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
-ConVar r_deferred_rt_shadowspot_lod1_res( "r_deferred_rt_shadowspot_lod1_res", "1024", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
-ConVar r_deferred_rt_shadowspot_lod2_res( "r_deferred_rt_shadowspot_lod2_res", "512", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
+ConVar r_deferred_rt_shadowspot_lod1_res( "r_deferred_rt_shadowspot_lod1_res", "1024", 0, "", OnShadowRTResolutionChanged );
+ConVar r_deferred_rt_shadowspot_lod2_res( "r_deferred_rt_shadowspot_lod2_res", "512", 0, "", OnShadowRTResolutionChanged );
 #endif
-ConVar r_deferred_rt_shadowpoint_res( "r_deferred_rt_shadowpoint_res", "2048", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
+ConVar r_deferred_rt_shadowpoint_res( "r_deferred_rt_shadowpoint_res", "2048", 0, "", OnShadowRTResolutionChanged );
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
-ConVar r_deferred_rt_shadowpoint_lod1_res( "r_deferred_rt_shadowpoint_lod1_res", "1024", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
-ConVar r_deferred_rt_shadowpoint_lod2_res( "r_deferred_rt_shadowpoint_lod2_res", "512", FCVAR_RELOAD_TEXTURES | FCVAR_RELOAD_MATERIALS );
+ConVar r_deferred_rt_shadowpoint_lod1_res( "r_deferred_rt_shadowpoint_lod1_res", "1024", 0, "", OnShadowRTResolutionChanged );
+ConVar r_deferred_rt_shadowpoint_lod2_res( "r_deferred_rt_shadowpoint_lod2_res", "512", 0, "", OnShadowRTResolutionChanged );
 #endif
 
 struct pointspot_shadow_quality_preset_t
@@ -55,10 +57,35 @@ ConVar r_deferred_shadow_quality_pointspot( "r_deferred_shadow_quality_pointspot
 ConVar r_deferred_shadowpoint_legacy( "r_deferred_shadowpoint_legacy", "0", FCVAR_ARCHIVE,
 	"A/B test switch for point shadows (0=Cube atlas, 1=Dual paraboloid)" );
 
+static void OnShadowRTResolutionChanged( IConVar *var, const char *pOldValue, float flOldValue )
+{
+	static float s_flLastRestartWarningTime = -1000.0f;
+	const int oldValue = (int)flOldValue;
+	const int newValue = static_cast<ConVar *>( var )->GetInt();
+
+	if ( oldValue == newValue )
+		return;
+
+	RequestDeferredRTRefresh();
+
+	if ( engine->IsInGame() && gpGlobals && gpGlobals->curtime - s_flLastRestartWarningTime > 1.0f )
+	{
+		Warning( "Shadow quality changes will fully apply after restarting the game.\n" );
+		s_flLastRestartWarningTime = gpGlobals->curtime;
+	}
+}
+
 static void OnPointSpotShadowQualityChanged( IConVar *var, const char *pOldValue, float flOldValue )
 {
 	ConVar *pConVar = static_cast<ConVar *>( var );
-	ApplyPointSpotShadowQualityPreset( pConVar->GetInt() );
+	const int oldQuality = clamp( (int)flOldValue, 0, ARRAYSIZE( g_PointSpotShadowPresets ) - 1 );
+	const int newQuality = clamp( pConVar->GetInt(), 0, ARRAYSIZE( g_PointSpotShadowPresets ) - 1 );
+
+	if ( oldQuality == newQuality )
+		return;
+
+	ApplyPointSpotShadowQualityPreset( newQuality );
+	RequestDeferredRTRefresh();
 }
 
 static bool g_bPointSpotQualityInitialized = false;

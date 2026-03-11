@@ -44,25 +44,77 @@ static CTextureReference g_tex_SkyAtmoMultiScatteringLUT;
 static CTextureReference g_tex_SkyAtmoSkyViewLUT;
 
 static float g_flDepthScalar = 65536.0f;
+static bool g_bDeferredRTRefreshPending = false;
+static bool g_bInDeferredRTInit = false;
+static int g_iShadowSpotResActive = 2048;
+static int g_iShadowPointResActive = 2048;
+#if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
+static int g_iShadowSpotResLod1Active = 1024;
+static int g_iShadowSpotResLod2Active = 512;
+static int g_iShadowPointResLod1Active = 1024;
+static int g_iShadowPointResLod2Active = 512;
+#endif
+
+static void LatchShadowResolutionsFromConVars()
+{
+	g_iShadowSpotResActive = Max( 1, r_deferred_rt_shadowspot_res.GetInt() );
+	g_iShadowPointResActive = Max( 1, r_deferred_rt_shadowpoint_res.GetInt() );
+#if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
+	g_iShadowSpotResLod1Active = Max( 1, r_deferred_rt_shadowspot_lod1_res.GetInt() );
+	g_iShadowSpotResLod2Active = Max( 1, r_deferred_rt_shadowspot_lod2_res.GetInt() );
+	g_iShadowPointResLod1Active = Max( 1, r_deferred_rt_shadowpoint_lod1_res.GetInt() );
+	g_iShadowPointResLod2Active = Max( 1, r_deferred_rt_shadowpoint_lod2_res.GetInt() );
+#endif
+}
 
 float GetDepthMapDepthResolution( float zDelta )
 {
 	return zDelta / g_flDepthScalar;
 }
 
+void RequestDeferredRTRefresh()
+{
+	if ( g_bInDeferredRTInit )
+		return;
+
+	if ( !engine->IsInGame() )
+	{
+		InitDeferredRTs();
+		g_bDeferredRTRefreshPending = false;
+		return;
+	}
+
+	g_bDeferredRTRefreshPending = true;
+}
+
+void ServiceDeferredRTRefresh()
+{
+	if ( !g_bDeferredRTRefreshPending )
+		return;
+
+	if ( engine->IsInGame() )
+		return;
+
+	InitDeferredRTs();
+	g_bDeferredRTRefreshPending = false;
+}
+
 void DefRTsOnModeChanged()
 {
-	// Causes a crash ingame, so only allow in main menu
-	if ( !engine->IsInGame() )
-		InitDeferredRTs();
+	if ( engine->IsInGame() )
+	{
+		RequestDeferredRTRefresh();
+		return;
+	}
+
+	InitDeferredRTs();
 }
 
 void InitDeferredRTs( bool bInitial )
 {
+	g_bInDeferredRTInit = true;
 	EnsurePointSpotShadowQualityInitialized();
-
-	if ( !bInitial )
-		materials->BeginRenderTargetAllocation(); // HAHAHAHA. No.
+	LatchShadowResolutionsFromConVars();
 
 	//int screen_w, screen_h;
 	int dummy = 128;
@@ -493,39 +545,40 @@ const ImageFormat fmt_gbuffer0 =
 	GetDeferredExt()->CommitTexture_Radiosity( g_tex_RadiosityBuffer[0], g_tex_RadiosityBuffer[1],
 		g_tex_RadiosityNormal[0], g_tex_RadiosityNormal[1] );
 #endif
+	g_bInDeferredRTInit = false;
 }
 
 int GetShadowResolution_Spot()
 {
-	return r_deferred_rt_shadowspot_res.GetInt();
+	return g_iShadowSpotResActive;
 }
 
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
 int GetShadowResolution_Spot_LOD1()
 {
-	return r_deferred_rt_shadowspot_lod1_res.GetInt();
+	return g_iShadowSpotResLod1Active;
 }
 
 int GetShadowResolution_Spot_LOD2()
 {
-	return r_deferred_rt_shadowspot_lod2_res.GetInt();
+	return g_iShadowSpotResLod2Active;
 }
 #endif
 
 int GetShadowResolution_Point()
 {
-	return r_deferred_rt_shadowpoint_res.GetInt();
+	return g_iShadowPointResActive;
 }
 
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
 int GetShadowResolution_Point_LOD1()
 {
-	return r_deferred_rt_shadowpoint_lod1_res.GetInt();
+	return g_iShadowPointResLod1Active;
 }
 
 int GetShadowResolution_Point_LOD2()
 {
-	return r_deferred_rt_shadowpoint_lod2_res.GetInt();
+	return g_iShadowPointResLod2Active;
 }
 #endif
 

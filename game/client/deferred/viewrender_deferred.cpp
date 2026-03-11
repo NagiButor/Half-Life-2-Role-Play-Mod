@@ -3024,6 +3024,7 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	pRenderContext.SafeRelease(); // don't want to hold for long periods in case in a locking active share thread mode
 
 	g_pClientShadowMgr->AdvanceFrame();
+	ServiceDeferredRTRefresh();
 
 	// Must be first
 	render->SceneBegin();

@@ -12,6 +12,12 @@ CDeferredExtension::CDeferredExtension()
 	m_vecForward.Init();
 	m_flZDists[0] = m_flZDists[1] = m_flZDists[2] = 0;
 	m_matTFrustumD.Identity();
+	Q_memset( m_dataOrtho, 0, sizeof( m_dataOrtho ) );
+	Q_memset( m_dataProj, 0, sizeof( m_dataProj ) );
+	Q_memset( &m_dataGeneral, 0, sizeof( m_dataGeneral ) );
+	Q_memset( &m_dataVolume, 0, sizeof( m_dataVolume ) );
+	Q_memset( &m_dataRadiosity, 0, sizeof( m_dataRadiosity ) );
+	Q_memset( &m_globalLight, 0, sizeof( m_globalLight ) );
 
 	m_pTexNormals = NULL;
 	m_pTexDepth = NULL;

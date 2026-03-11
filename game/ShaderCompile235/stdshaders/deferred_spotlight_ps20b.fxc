@@ -1,0 +1,100 @@
+#include "common_ps_fxc.h"
+
+sampler2D AlbedoSampler : register( s0 );
+sampler2D NormalSampler : register( s1 );
+sampler2D PositionSampler : register( s2 );
+sampler2D ShadowDepthSampler : register( s3 );
+
+float4 g_LightPos_Radius : register( c0 );
+float4 g_LightColor_Intensity : register( c1 );
+float4 g_SpotDir_CosOuter : register( c2 );
+float4 g_SpotParams : register( c3 ); // x=cosInner
+row_major float4x4 g_ShadowWorldToTexture : register( c4 );
+float4 g_ShadowEps_Bias : register( c8 ); // x=texelEps, y=bias, z=enabled
+
+struct PS_INPUT
+{
+	float2 baseTexCoord : TEXCOORD0;
+	float2 ZeroTexCoord : TEXCOORD1;
+	float2 OneTexCoord  : TEXCOORD2;
+};
+
+float DoShadowPCF4Tap( sampler2D DepthSampler, float4 shadowMapPos, float texelEps, float bias )
+{
+	float3 proj = shadowMapPos.xyz / shadowMapPos.w;
+	if ( proj.x <= 0.0f || proj.x >= 1.0f || proj.y <= 0.0f || proj.y >= 1.0f )
+		return 1.0f;
+
+	float2 uoffset = float2( texelEps, 0.0f );
+	float2 voffset = float2( 0.0f, texelEps );
+
+	float4 depths = float4(
+		tex2D( DepthSampler, proj.xy + uoffset + voffset ).x,
+		tex2D( DepthSampler, proj.xy + uoffset - voffset ).x,
+		tex2D( DepthSampler, proj.xy - uoffset + voffset ).x,
+		tex2D( DepthSampler, proj.xy - uoffset - voffset ).x );
+
+	float4 dz = proj.z.xxxx - ( depths + bias.xxxx );
+	float4 shadowPass = step( dz, 0.0f );
+	return dot( shadowPass, float4( 0.25f, 0.25f, 0.25f, 0.25f ) );
+}
+
+float4 main( PS_INPUT i ) : COLOR0
+{
+	float4 albedoSample = tex2D( AlbedoSampler, i.baseTexCoord );
+	if ( albedoSample.a <= 0.0f )
+		return float4( 0, 0, 0, 0 );
+
+	float3 albedo = albedoSample.rgb;
+	float3 normal = tex2D( NormalSampler, i.baseTexCoord ).xyz;
+	normal = normalize( normal * 2.0f - 1.0f );
+	float3 worldPos = tex2D( PositionSampler, i.baseTexCoord ).xyz;
+
+	float3 lightPos = g_LightPos_Radius.xyz;
+	float radius = g_LightPos_Radius.w;
+	float3 toLight = lightPos - worldPos;
+	float distSq = dot( toLight, toLight );
+
+	float radiusSq = radius * radius;
+	if ( distSq >= radiusSq )
+	{
+		return float4( 0, 0, 0, 0 );
+	}
+
+	float dist = sqrt( distSq );
+	float3 L = ( dist > 0.0001f ) ? ( toLight / dist ) : float3( 0, 0, 1 );
+
+	float3 spotDir = normalize( g_SpotDir_CosOuter.xyz );
+	float cosOuter = g_SpotDir_CosOuter.w;
+	float cosInner = g_SpotParams.x;
+
+	float spotCos = dot( -L, spotDir );
+	if ( spotCos <= cosOuter )
+	{
+		return float4( 0, 0, 0, 0 );
+	}
+
+	float spotAtten = 1.0f;
+	if ( spotCos < cosInner )
+	{
+		float t = saturate( ( spotCos - cosOuter ) / max( 0.0001f, ( cosInner - cosOuter ) ) );
+		spotAtten = t;
+	}
+
+	float ndl = saturate( dot( normal, L ) );
+	float atten = 1.0f - saturate( dist / radius );
+	atten *= atten;
+
+	float3 lightColor = g_LightColor_Intensity.rgb;
+	float intensity = g_LightColor_Intensity.w;
+
+	float shadow = 1.0f;
+	if ( g_ShadowEps_Bias.z > 0.5f )
+	{
+		float4 shadowMapPos = mul( float4( worldPos, 1.0f ), g_ShadowWorldToTexture );
+		shadow = DoShadowPCF4Tap( ShadowDepthSampler, shadowMapPos, g_ShadowEps_Bias.x, g_ShadowEps_Bias.y );
+	}
+
+	float3 lit = albedo * lightColor * ( ndl * atten * intensity * spotAtten * shadow );
+	return float4( lit, 1.0f );
+}
