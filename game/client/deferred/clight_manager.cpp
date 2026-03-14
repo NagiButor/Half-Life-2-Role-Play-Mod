@@ -28,6 +28,8 @@ ConVar r_deferred_volumetrics_blur( "r_deferred_volumetrics_blur", "1" );
 
 extern ConVar r_csm_quality;
 
+static ConVarRef r_deferred_shadow_dither_strength( "r_deferred_shadow_dither_strength" );
+
 static CLightingManager __g_lightingMan;
 
 CLightingManager* GetLightingManager()
@@ -1523,6 +1525,17 @@ void CLightingManager::RenderLights( const CViewSetup& view, CDeferredViewRender
 		                     iPassesVolumetrics[0], iPassesVolumetrics[1] );
 		engine->Con_NPrintf( 20, "Stats drawn - simple: %i, shadows: %i, cookies: %i", iDrawnSimple, iDrawnShadowed,
 		                     iDrawnCookied );
+		const int spotRes = GetShadowResolution_Spot();
+		const int pointFaceRes = GetShadowResolution_Point();
+		const bool bLegacyPoint = r_deferred_shadowpoint_legacy.GetBool();
+		const int pointAtlasW = bLegacyPoint ? pointFaceRes : pointFaceRes * 3;
+		const int pointAtlasH = pointFaceRes * 2;
+		const float flDitherTexels = r_deferred_shadow_dither_strength.IsValid() ? r_deferred_shadow_dither_strength.GetFloat() : 0.0f;
+		engine->Con_NPrintf( 21, "Shadow RT: CSM=%dx%d  Spot=%dx%d  Point=%dx%d  Dither=%.2f tex",
+			CSM_COMP_RES_X, CSM_COMP_RES_Y,
+			spotRes, spotRes,
+			pointAtlasW, pointAtlasH,
+			flDitherTexels );
 		engine->Con_NPrintf( 22, "Shadow mapping filter profile: %s - %s", pszProfile, pszFilterName );
 	}
 }

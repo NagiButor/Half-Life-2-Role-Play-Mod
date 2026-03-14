@@ -1,114 +1,132 @@
-# План: Черные круги на осях point-света в deferred
+# План: Качество теней (CSM/point/spot), артефакты point, мягкий дизеринг
 
 - Статус: анализ, реализация еще не начата
-- Версия: 8
-- Последнее обновление: учтены результаты твоих тестов cvar (visleaf/legacy)
+- Версия: 10
+- Последнее обновление: 2026-03-14 (выбран “лучший вариант” решения для каждого пункта)
 
-## 1. Причина бага
+## 1. Причина проблем
 
-### Подтверждено
-- В нашем коде уже есть прямые следы борьбы с этим же классом артефактов: в point shadow math есть комментарии про black circles/black dots/flickering рядом с bias-правками ([common_shadowmapping_fxc.h](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/materialsystem/stdshaders/common_shadowmapping_fxc.h#L759-L771)).
-- В point lighting pass используется normal-offset перед shadow compare; на grazing-углах и дальности это типично даёт нестабильный self-shadowing ([lightingpass_point_ps30.fxc](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/materialsystem/stdshaders/lightingpass_point_ps30.fxc#L193-L210)).
-- Наблюдаемый «прыжковый» характер артефакта по граням совпадает с возможными переходами world/fullscreen pass и cull-логикой ([clight_manager.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/clight_manager.cpp#L650-L678), [clight_manager.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/clight_manager.cpp#L480-L483)).
-- По твоему тесту `r_deferred_light_visleaf_cull 0/1` изменений нет: visleaf cull не является причиной этого артефакта в целевой сцене.
-- По твоему тесту `r_deferred_shadowpoint_legacy 1` (DPSM) ломает рендер теней, поэтому рабочим путем для фикса считаем только cube shadowmap (`r_deferred_shadowpoint_legacy 0`).
+### Подтверждено (что сейчас в коде)
+- **Point light_deferred (omni)**
+  - Разрешение одной “грани” берется из `r_deferred_rt_shadowpoint_res` (меняется пресетом `r_deferred_shadow_quality_pointspot`): [deferred_client_common.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/deferred_client_common.cpp#L8-L56).
+  - При `r_deferred_shadowpoint_legacy 0` используется **cube atlas 3×2**: итоговый RT `res_x = faceRes*3`, `res_y = faceRes*2`: [deferred_rt.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/deferred_rt.cpp#L470-L507), [clight_manager.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/clight_manager.cpp#L1774-L1779).
+  - Таблица пресетов point/spot (0..5): `{128,256,512,1024,1536,2048}`: [deferred_client_common.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/deferred_client_common.cpp#L26-L49).
+- **Spot light_deferred (конус/проектор)**
+  - Разрешение карты тени берется из `r_deferred_rt_shadowspot_res` (тот же пресет `r_deferred_shadow_quality_pointspot`): [deferred_client_common.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/deferred_client_common.cpp#L8-L56).
+  - Итоговый RT квадратный `res×res`: [deferred_rt.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/deferred_rt.cpp#L374-L405).
+- **CSM (солнце)**
+  - `r_csm_quality` меняет **покрытие** (projection size) и bias-таблицы; per-cascade resolution сейчас всегда **2048** для всех пресетов: [cascade_t.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/cascade_t.cpp#L65-L93).
+  - Атлас CSM при композитинге фиксированный **8192×4096** (8 каскадов как 4×2 по 2048): [deferred_global_common.h](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/materialsystem/stdshaders/deferred_global_common.h#L117-L127), [cascade_t.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/cascade_t.cpp#L87-L91).
+- Все “деферред” тени сейчас используют **depth-stencil** путь фильтрации (SHADOWMAPPING_METHOD = `SHADOWMAPPING_DEPTH_STENCIL__5X5_GAUSSIAN`): [deferred_global_common.h](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/materialsystem/stdshaders/deferred_global_common.h#L194-L209), реализация PCF/gauss: [common_shadowmapping_fxc.h](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/materialsystem/stdshaders/common_shadowmapping_fxc.h#L28-L103).
 
-### Подтверждено по внешним материалам
-- В индустриальной практике это классифицируется как shadow acne/self-shadowing из-за дискретизации shadow map; универсального «одного bias» не существует, обычно нужен slope-aware и normal-aware bias.
-- Публичные реализации в движках подтверждают те же выводы:
-- постоянный bias сам по себе нестабилен и часто даёт peter-panning;
-- receiver-plane bias даёт хорошие результаты не всегда и может ломаться на границах/дегенератах;
-- для point/cube path обычно лучше комбинация из консервативного depth bias + normal offset + аккуратного PCF.
+### Вероятно (почему “слоистые” края только у point)
+- **Регулярный (детерминированный) PCF-узор** в сочетании с большим kernel radius визуально дает “ступени/полосы” на границе тени. Это классическая проблема: один и тот же набор оффсетов для всех пикселей → бэндинг; лечится джиттером/ротейтом набора семплов (см. “Внешние источники”). 
+- **Cube-atlas ограничения**: point path принудительно клампит UV внутри тайла, чтобы PCF не перетекал на соседнюю грань (`Clamp UVs within tile...`). При больших оффсетах этот clamp может проявляться как заметные “параллельные линии” при пересечении seam/границы фейса: [common_shadowmapping_fxc.h](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/materialsystem/stdshaders/common_shadowmapping_fxc.h#L732-L741).
+- **Точность depth (DST16 vs DST24)**: на системах где shadow depth формат = 16-bit, при больших радиусах point света (большое far/near) возрастает квантизация и риск “полос”. В нашем коде near для point проекции фиксирован `zNear=5`, far≈`radius`: [common_shadowmapping_fxc.h](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/materialsystem/stdshaders/common_shadowmapping_fxc.h#L708-L714). Формат depth выбирает materialsystem, с фоллбеком на DST16: [cdeferred_manager_client.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/cdeferred_manager_client.cpp#L153-L166).
 
-### Вероятно
-- Корневая причина твоих «черных кругов» — недостабилизированный receiver bias именно в cube point-shadow path при отдельных углах и дистанции.
-- Дополнительно размер/вид круга меняется из-за соотношения: shadow resolution, kernel radius и angle-dependent bias.
-
-### Нужно проверить
-- Влияет ли сильнее всего именно bias (а не pass switching), если менять только shadow quality/resolution.
-- Как меняется артефакт при варьировании только параметров bias/normal-offset в cube path, без переключения на DPSM.
+### Подтверждено по внешним материалам (какие классы решений обычно применяют)
+- Избавление от banding при мягких тенях делают через **jittered/rotated sampling**: базовая идея — заменить низкочастотные “ступени” на высокочастотный шум, который глаз хуже замечает, и который хорошо фильтруется соседними пикселями (PCF + джиттер). Это описано в GPU Gems и в классических туториалах: NVIDIA GPU Gems 2 (PCF + jitter) и OpenGL Tutorial (banding при широком kernel и решение через rotated/stratified Poisson). 
+- Для точности depth shadow maps важны **tight near/far** и выбор глубины (16/24/32 бит): чем меньше отношение far/near, тем выше полезная точность depth — это прямой фактор acne/peter-panning/banding: Microsoft Learn про shadow depth maps.
+- Для “очень мягкого” дизеринга удобны дешевые генераторы шума на пиксель, в т.ч. **interleaved gradient noise (IGN)** и вращение выборок (Vogel/Poisson), чтобы убрать регулярную структуру: GameDev.net (CHSS/IGN) и др.
 
 ### Простыми словами
-- Это почти наверняка не «сломанные материалы», а ошибка точности/смещения в сравнении глубин тени.
-- В одних ракурсах смещение слишком маленькое и поверхность самозатеняется пятнами.
-- В других ракурсах или дистанциях условия меняются, и круги плавают по размеру/граням.
+- Сейчас CSM-качество в основном регулирует **покрытие** (насколько близко/далеко и насколько мелко), а point/spot — **размер карты**.
+- “Слоистость” у point почти всегда сигналит про сочетание **регулярного PCF-узора** и/или **cube seam/clamp**, а также может усиливаться недостаточной точностью depth при больших радиусах.
+- “Очень мягкий дизеринг” — это обычно **микро-джиттер** координат семплинга или ротация паттерна, чтобы убрать полосы без заметного шума.
 
-## 2. Лучшие способы исправления
+## 2. Лучшие и самые эффективные способы исправления
 
-### Вариант 1
-- Подход: сделать bias зависящим от угла и разрешения карты тени, а normal-offset стабилизировать клампами.
-- Плюсы: наиболее практичный и проверяемый путь без архитектурной перестройки.
-- Минусы: нужна аккуратная калибровка по сценам.
-- Риски: слишком большой bias даст отлипание теней.
-- Объем вмешательства: средний.
+### Проблема 1: какое сейчас разрешение теней (point atlas / spot)
+- Текущее состояние:
+  - Point cube atlas: `atlas = (faceRes*3) × (faceRes*2)`, `faceRes = r_deferred_rt_shadowpoint_res`.
+  - Spot: `res×res`, `res = r_deferred_rt_shadowspot_res`.
+  - По дефолту `r_deferred_shadow_quality_pointspot=5` ⇒ `faceRes=res=2048` ⇒ point atlas `6144×4096`, spot `2048×2048`.
+- Лучший вариант решения (практичный): добавить **явный вывод текущих размеров** в статистику/отладку и в UI теней.
+  - Почему это лучший: решает “какое сейчас разрешение” на 100%, без вмешательства в рендер.
+  - Где показывать: в `deferred_shadow_settings` и/или в `r_deferred_light_stats`.
 
-### Вариант 2
-- Подход: внедрить receiver-plane/adaptive bias для выборок с оффсетами (PCF) в point path.
-- Плюсы: потенциально лучшее качество при больших kernels.
-- Минусы: высокая сложность и риск артефактов на геометрических границах в deferred.
-- Риски: нестабильность на краях и при сильных depth discontinuities.
-- Объем вмешательства: средний-высокий.
+### Проблема 2: “слоистые” края у point (а у CSM/spot нормально)
+#### Лучший вариант решения (самый эффективный под наш текущий пайплайн)
+- Подход: **micro-jitter (дизеринг) на семплинге тени + “tile-safe” guard-band** в cube-atlas path.
+  - Суть: регулярный узор PCF (полосы) заменяем стохастикой, но делаем её безопасной для 3×2 атласа (не вылезать за границу тайла).
+  - Почему это лучший: стандартный приём против banding на мягких тенях (PCF + jitter/rotated sampling) и минимально инвазивен для Source 2013/D3D9.
+  - Источники:
+    - GPU Gems 2 (PCF + jitter, “banding → high-frequency noise”): https://developer.nvidia.com/gpugems/gpugems2/part-ii-shading-lighting-and-shadows/chapter-17-efficient-soft-edged-shadows-using
+    - OpenGL Tutorial (banding при широком kernel, rotated/stratified Poisson): http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-16-shadow-mapping/
+    - GameDev.net форум (rotated poisson + rotation texture / screen-space seed): https://www.gamedev.net/forums/topic/443212-dithering-shadow-maps/3937949/
+  - Привязка к нашему коду: clamp “внутри тайла” уже есть тут: [common_shadowmapping_fxc.h](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/materialsystem/stdshaders/common_shadowmapping_fxc.h#L732-L741). Дизеринг обязан учитывать этот clamp (расширяем edgeBias на |jitter|).
+  - Резервный рычаг (если останется квантизация): tight near/far + depth precision (DST24), см.: https://learn.microsoft.com/en-us/windows/win32/dxtecharts/common-techniques-to-improve-shadow-depth-maps
 
-### Вариант 3
-- Подход: оставить текущий bias, но лечить проявление через pass-гистерезис в cube path без опоры на visleaf/legacy fallback.
-- Плюсы: может снизить «скачки» видимости без смены shadow backend.
-- Минусы: лечит симптом, а не первопричину black circles.
-- Риски: ограниченный эффект, если первично доминирует bias ошибка.
-- Объем вмешательства: низкий-средний.
+### Проблема 3: “очень мягкий дизеринг” для всех теней (CSM/point/spot)
+#### Лучший вариант решения (универсальный и дешёвый)
+- Подход: **единый micro-jitter в координатах семплинга** (в “тексельных” единицах shadowmap), привязанный к world-space, и применяемый одинаково для CSM/spot/point.
+- Почему это лучший: даёт одинаковый “анти-бэндинг” эффект везде, не требует переписывать наш текущий 5×5 Gaussian PCF.
+- Рекомендации по качеству:
+  - Амплитуда на старте: ~0.20–0.35 текселя.
+  - Сид шума: worldPos (или worldPos + cascadeIndex) для стабильности при движении камеры.
+  - Источники:
+    - GPU Gems (dithered sample selection): https://developer.nvidia.com/gpugems/gpugems/part-ii-lighting-and-shadows/chapter-11-shadow-map-antialiasing
+    - DigitalRune (world-space stable jitter): https://digitalrune.github.io/DigitalRune-Documentation/html/bed07eb7-0d10-40f3-93e8-c823a787b6a7.htm
+    - IGN как дешёвый per-pixel random для теней: https://www.gamedev.net/tutorials/programming/graphics/contact-hardening-soft-shadows-made-fast-r4906/
 
-### Рекомендуемый путь
-- Основной: **Вариант 1** как базовый фикс, опираясь на практику движков и статьи по shadow acne.
-- Частично взять из Варианта 2 только безопасные идеи: bias в единицах texel и аккуратную зависимость от slope, без тяжелого полного receiver-plane переписывания на первом шаге.
-- Из Варианта 3 оставить только pass-гистерезис как вторичный шаг, без использования legacy DPSM.
+### Проблема 4: посчитать “оптимальную точность” для пресетов (CSM + point/spot)
+#### Лучший вариант решения (реально применимый в Source 2013 без архитектурного переписывания)
+- Подход: оформить “оптимальность” как **целевую world-units-per-texel** и выдать **таблицу по пресетам**, совпадающую с реальным поведением движка:
+  - CSM = coverage (ProjectionSize) при фиксированных 2048;
+  - point/spot = resolution пресета.
+- Формулы:
+  - CSM: `unitsPerTexel = ProjectionSize / 2048` (ProjectionSize — полный размер каскада): [cascade_t.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/cascade_t.cpp#L55-L59).
+  - Point: `unitsPerTexel ≈ (2*Radius) / faceRes`.
+  - Spot: `unitsPerTexel ≈ (2*Far*tan(FOV/2)) / res`.
+- Таблица “точности”:
+  - CSM, каскад 0: q0=0.50, q1=0.25, q2=0.125, q3=0.0625, q4=0.046875, q5=0.03125 (u/tex).
+  - Point/Spot res (факт): `{128, 256, 512, 1024, 1536, 2048}`: [deferred_client_common.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/deferred_client_common.cpp#L26-L34).
+  - Point “порог” для far ≈1 u/tex: `RadiusMax ≈ faceRes/2` → q0~64, q1~128, q2~256, q3~512, q4~768, q5~1024.
+  - Spot “порог” зависит от FOV. Для FOV=60°: `FarMax ≈ res/1.154` → q0~111, q1~222, q2~444, q3~888, q4~1331, q5~1775.
+- Почему это корректный критерий: масштаб проекции и отношение near/far напрямую управляют точностью depth и артефактами (acne/peter-panning/banding): https://learn.microsoft.com/en-us/windows/win32/dxtecharts/common-techniques-to-improve-shadow-depth-maps
 
-## 3. Вопросы и уточнения
-- Блокирующих вопросов нет: можно начинать реализацию по рекомендуемому пути после `/vpered`.
+## 3. Вопросы и уточнения (не блокирующие)
+- Нужен ли дизеринг строго статичный (без “плавания”) или допускается очень легкое “шевеление” при движении камеры?
+- Приоритет: сначала убрать “слоистость” point любой ценой, или сначала единый дизеринг для всех теней (чтобы сразу было видно эффект)?
 
-## 4. Пошаговый план выполнения
-1. Сделать baseline-прогон на текущей тестовой сцене и зафиксировать 3-4 ракурса с кругами.
-2. Ввести параметризованный point bias в shader-коде с зависимостью от угла и texel-scale.
-3. Ограничить normal-offset клампами, чтобы убрать acne без явного peter-panning.
-4. Добавить диагностический cvar для тонкой настройки bias в рантайме.
-5. Прогнать сравнение только в cube режиме (`r_deferred_shadowpoint_legacy 0`) и проверить чувствительность к `quality/res`.
-6. Если останутся «прыжки», добавить гистерезис в пороги world/fullscreen pass для point lights.
-7. Собрать `client_episodic.vcxproj` и скомпилировать только измененные deferred point шейдеры через `ShaderCompile235`.
-8. Скопировать готовые результаты в `hl2rpm` и повторно проверить фикс на тех же ракурсах.
+## 4. Пошаговый план выполнения (после `/vpered`)
+1. Зафиксировать тестовую сцену/ракурс со “слоистостью” point и проверить зависимость от `r_deferred_shadow_quality_pointspot` и радиуса point света.
+2. Быстро локализовать природу артефакта:
+   - повернуть/сместить point свет так, чтобы shadow edge прошел через seam куба (проверка на seam/clamp);
+   - принудительно проверить depth формат (DST16/DST24) и влияние near/far (временный хак/лог).
+3. Внедрить единый micro-jitter (dither) в sampling:
+   - добавить дешёвый генератор шума (world-space hash/IGN);
+   - применить к CSM/spot/point перед `PerformShadowMapping`;
+   - для point cube atlas расширить clamp на величину |jitter|, чтобы не ловить bleeding.
+4. Добавить cvar-интенсивность дизеринга и дефолт “очень мягкий”; обновить vgui-панель теней при необходимости.
+5. Пересчитать “точность” пресетов и предложить финальную таблицу:
+   - вывести в документ/лог: CSM units/texel по каскадам для каждого `r_csm_quality`;
+   - вывести: point/spot units/texel формулы и примеры (радиус 256/512/1024);
+   - при необходимости изменить таблицы пресетов (point/spot в [deferred_client_common.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/deferred_client_common.cpp) и CSM в [cascade_t.cpp](file:///e:/SourceModding/HL2RPMSOURCE/source-sdk-2013-mapbase-v8.0/sp/src/game/client/deferred/cascade_t.cpp)).
+6. Скомпилировать только затронутые шейдеры через ShaderCompile235 и положить результаты в `hl2rpm`.
+7. Прогнать проверку: CSM + spot + point на 2–3 сценах, убедиться что шум не заметен, а “слои” ушли/сильно уменьшились.
 
 ## 5. Что не делается до `/vpered`
 - Никаких правок кода, кроме этого плана.
 - Никакой компиляции.
 - Никакой сборки и тестового прогона.
 
-## Что найдено в интернете и что применяем
-- Применяем:
-- angle/slope-aware bias вместо «одной константы»;
-- нормал-оффсет с клампами;
-- bias в масштабе texel-size;
-- разделение «качество/стабильность» через диагностический runtime-переключатель.
-- Не применяем на первом шаге:
-- полный receiver-plane bias как обязательный дефолт (слишком рискован в deferred на границах);
-- DPSM/legacy path как рабочий fallback для этого бага, так как у тебя он ломает рендер теней;
-- полную смену техники теней (VSM/новый shadow backend), так как это уже отдельный большой проект.
-
-## Внешние источники
-- LearnOpenGL: Point Shadows — базовые практики для cube point shadows и bias  
-  https://learnopengl.com/Advanced-Lighting/Shadows/Point-Shadows
-- LearnOpenGL: Shadow Mapping — slope-dependent bias и acne/peter-panning tradeoff  
-  https://learnopengl.com/Advanced-Lighting/Shadows/Shadow-Mapping
-- DigitalRune: Shadow Acne — практический вывод «depth bias + slope-scaled normal offset»  
-  https://digitalrune.github.io/DigitalRune-Documentation/html/3f4d959e-9c98-4a97-8d85-7a73c26145d7.htm
-- Unity Shadow Library — реальный код receiver plane bias и замечание про артефакты на edges/intersections  
-  https://github.com/TwoTailsGames/Unity-Built-in-Shaders/blob/master/CGIncludes/UnityShadowLibrary.cginc
-- Bevy issue #16075 — подтверждение проблемы подбора bias и курс на oriented/adaptive bias  
-  https://github.com/bevyengine/bevy/issues/16075
-- Bevy issue #3628 — практические заметки по point/cube shadows, PCF и bias-стратегиям  
-  https://github.com/bevyengine/bevy/issues/3628
-- NdotL notes on shadow bias — разбор, где receiver-plane может деградировать, и почему normal offset часто стабильнее  
-  https://ndotl.wordpress.com/2014/12/19/notes-on-shadow-bias/
-- GameDev.net discussion — практические замечания по seam/bias и техникам point shadows  
-  https://www.gamedev.net/forums/topic/637498-point-light-shadow-mapping/
+## Внешние источники (подборки решений под наши пункты)
+- Microsoft Learn (tight near/far, depth precision, bias-техники):  
+  https://learn.microsoft.com/en-us/windows/win32/dxtecharts/common-techniques-to-improve-shadow-depth-maps
+- NVIDIA GPU Gems 2, Chapter 17 (PCF + jitter, “banding → high-frequency noise”):  
+  https://developer.nvidia.com/gpugems/gpugems2/part-ii-shading-lighting-and-shadows/chapter-17-efficient-soft-edged-shadows-using
+- NVIDIA GPU Gems, Chapter 11 (dithered sampling, выбор поднаборов семплов по экранной позиции):  
+  https://developer.nvidia.com/gpugems/gpugems/part-ii-lighting-and-shadows/chapter-11-shadow-map-antialiasing
+- OpenGL Tutorial #16 (banding при широком kernel, rotated/stratified Poisson):  
+  http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-16-shadow-mapping/
+- GameDev.net (Contact-hardening soft shadows, IGN как способ убрать banding при малом числе семплов):  
+  https://www.gamedev.net/tutorials/programming/graphics/contact-hardening-soft-shadows-made-fast-r4906/
+- GameDev.net форум (rotated poisson + rotation texture / VPOS для стабильности дизеринга):  
+  https://www.gamedev.net/forums/topic/443212-dithering-shadow-maps/3937949/
+- DigitalRune docs (jittered PCF, рекомендация делать паттерн стабильным в world space):  
+  https://digitalrune.github.io/DigitalRune-Documentation/html/bed07eb7-0d10-40f3-93e8-c823a787b6a7.htm
 
 ## Что изменилось в этой версии
-- Зафиксированы твои результаты тестов: visleaf cull не влияет, legacy DPSM непригоден из-за поломки теней.
-- План сузился до единственного целевого пути: фикс только в cube shadowmap path.
-- Уточнены шаги проверки: без переключения на legacy, фокус на bias/normal-offset и quality/res.
+- Для каждого из 4 пунктов выбран один “лучший” вариант решения и обоснован внешними источниками.
+- Добавлена таблица “точности” по текущим пресетам (CSM + point/spot) и понятные пороговые оценки.

@@ -3,6 +3,8 @@
 
 #include "deferred_includes.h"
 
+extern ConVar r_deferred_shadow_dither_strength;
+
 FORCEINLINE void CommitBaseDeferredConstants_Frustum( IShaderDynamicAPI* pShaderAPI,
 	const int iFirstFrustumRegister, const bool bVertexShader = true )
 {
@@ -57,6 +59,7 @@ FORCEINLINE void MakeShadowProjectionConstants( float *pFl0, float *pFl1, int re
 
 	pFl1[0] = resx;
 	pFl1[1] = resy;
+	pFl1[2] = Max( 0.0f, r_deferred_shadow_dither_strength.GetFloat() );
 }
 
 FORCEINLINE void CommitShadowProjectionConstants_Ortho_Single( IShaderDynamicAPI *pShaderAPI,

@@ -5,6 +5,9 @@
 
 ConVar r_deferred_radiosity_multiplier( "r_deferred_radiosity_multiplier", "0.4" );
 
+ConVar r_deferred_shadow_dither_strength( "r_deferred_shadow_dither_strength", "0.25", FCVAR_ARCHIVE,
+	"Shadow micro-dither strength in texels (0=off). Applied to CSM/spot/point shadow sampling." );
+
 void GetTexcoordSettings( const bool bDecal, const bool bMultiBlend, int &iNumTexcoords, int **iTexcoordDim )
 {
 	static int iDimDefault[] = {

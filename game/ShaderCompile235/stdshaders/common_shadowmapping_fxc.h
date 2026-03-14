@@ -25,6 +25,24 @@ static float gauss2D3[3] =
 	0.367619,
 };
 
+float ShadowDither_IGN( float2 p )
+{
+	return frac( 52.9829189f * frac( dot( p, float2( 0.06711056f, 0.00583715f ) ) ) );
+}
+
+float2 ShadowDitherOffset( float2 uv, float4 offsets_0, float4 offsets_1 )
+{
+	const float ditherTexels = offsets_1.z;
+	if ( ditherTexels <= 0.0f )
+		return 0.0f;
+
+	float2 p = uv * offsets_1.xy;
+	float n0 = ShadowDither_IGN( p );
+	float n1 = ShadowDither_IGN( p + 17.0f );
+	float2 j = float2( n0, n1 ) - 0.5f;
+	return j * offsets_0.xy * ditherTexels;
+}
+
 float ShadowDepth_Raw_Nvidia( sampler depthMap, float3 uvw )
 {
 	return tex2Dproj( depthMap, float4( uvw, 1 ) ).x;
@@ -506,6 +524,8 @@ pFl1[1] = resy;
 
 float PerformShadowMapping( sampler depthMap, float3 uvw, float4 offsets_0, float4 offsets_1 )
 {
+	uvw.xy += ShadowDitherOffset( uvw.xy, offsets_0, offsets_1 );
+
 #if SHADOWMAPPING_METHOD == SHADOWMAPPING_DEPTH_COLOR__RAW
 	return ShadowColor_Raw( depthMap, uvw );
 
@@ -736,7 +756,7 @@ float PerformDualParaboloidShadow( sampler shadowSampler, float3 vecLightToGeome
 		float2 tileOffset = float2( fmod( uvwfAtlas.w, 3.0f ), floor( uvwfAtlas.w / 3.0f ) );
 		float2 tileMin = tileOffset * tileScale;
 		float2 tileMax = tileMin + tileScale;
-		float2 edgeBias = offsets_0.zw + offsets_0.xy;
+		float2 edgeBias = offsets_0.zw + offsets_0.xy + ( offsets_0.xy * ( 0.5f * offset_1.z ) );
 		uvwfAtlas.xy = clamp( uvwfAtlas.xy, tileMin + edgeBias, tileMax - edgeBias );
 
 		// Receiver-side slope-dependent depth bias
