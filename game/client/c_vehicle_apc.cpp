@@ -44,8 +44,7 @@ C_PropAPC::C_PropAPC()
 	m_flViewAngleDeltaTime = 0.0f;
 	m_pHeadlight = NULL;
 	
-	ConVarRef r_APCFOV( "r_APCFOV" );
-	m_ViewSmoothingData.flFOV = r_APCFOV.GetFloat();
+	m_ViewSmoothingData.flFOV = 90.0f;
 }
 
 //-----------------------------------------------------------------------------

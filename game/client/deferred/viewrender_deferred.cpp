@@ -73,12 +73,20 @@ static void UpdateSkyAtmoLUT()
 {
 	if ( !r_deferred_skyatmo_lut.GetBool() )
 		return;
+	if ( !GetGlobalLight() )
+		return;
 
-	static float s_nextTransmittanceUpdateTime = 0.0f;
-	if ( !gpGlobals || gpGlobals->curtime >= s_nextTransmittanceUpdateTime )
+	// Only regenerate LUTs when the sun direction actually changes.
+	// Initial value is impossible so the first frame always triggers.
+	static Vector s_prevSunDir( FLT_MAX, FLT_MAX, FLT_MAX );
+	const lightData_Global_t state = GetGlobalLight()->GetState();
+	Vector curSunDir( state.vecLight.x, state.vecLight.y, state.vecLight.z );
+	if ( ( curSunDir - s_prevSunDir ).LengthSqr() < 1e-8f )
+		return;
+	s_prevSunDir = curSunDir;
+
+	// Transmittance LUT
 	{
-		s_nextTransmittanceUpdateTime = ( gpGlobals ? gpGlobals->curtime : 0.0f ) + Max( 0.0f, r_deferred_skyatmo_transmittance_lut_update_interval.GetFloat() );
-
 		IMaterial *pTransMat = GetDeferredManager()->GetDeferredMaterial( DEF_MAT_SKY_ATMO_TRANSMITTANCE_LUTGEN );
 		ITexture *pTransLut = GetDefRT_SkyAtmoTransmittanceLUT();
 		if ( pTransMat && pTransLut )
@@ -87,23 +95,18 @@ static void UpdateSkyAtmoLUT()
 			pRenderContext->PushRenderTargetAndViewport( pTransLut );
 			pRenderContext->ClearColor3ub( 0, 0, 0 );
 			pRenderContext->ClearBuffers( true, false );
-
 			const int tw = pTransLut->GetActualWidth();
 			const int th = pTransLut->GetActualHeight();
 			pRenderContext->DrawScreenSpaceRectangle( pTransMat,
 			                                          0, 0, tw, th,
 			                                          0, 0, tw - 1, th - 1,
 			                                          tw, th );
-
 			pRenderContext->PopRenderTargetAndViewport();
 		}
 	}
 
-	static float s_nextMultiScatteringUpdateTime = 0.0f;
-	if ( !gpGlobals || gpGlobals->curtime >= s_nextMultiScatteringUpdateTime )
+	// Multi-scattering LUT
 	{
-		s_nextMultiScatteringUpdateTime = ( gpGlobals ? gpGlobals->curtime : 0.0f ) + Max( 0.0f, r_deferred_skyatmo_multiscattering_lut_update_interval.GetFloat() );
-
 		IMaterial *pMsMat = GetDeferredManager()->GetDeferredMaterial( DEF_MAT_SKY_ATMO_MULTISCATTERING_LUTGEN );
 		ITexture *pMsLut = GetDefRT_SkyAtmoMultiScatteringLUT();
 		if ( pMsMat && pMsLut )
@@ -112,23 +115,18 @@ static void UpdateSkyAtmoLUT()
 			pRenderContext->PushRenderTargetAndViewport( pMsLut );
 			pRenderContext->ClearColor3ub( 0, 0, 0 );
 			pRenderContext->ClearBuffers( true, false );
-
 			const int mw = pMsLut->GetActualWidth();
 			const int mh = pMsLut->GetActualHeight();
 			pRenderContext->DrawScreenSpaceRectangle( pMsMat,
 			                                          0, 0, mw, mh,
 			                                          0, 0, mw - 1, mh - 1,
 			                                          mw, mh );
-
 			pRenderContext->PopRenderTargetAndViewport();
 		}
 	}
 
-	static float s_nextSkyViewUpdateTime = 0.0f;
-	if ( !gpGlobals || gpGlobals->curtime >= s_nextSkyViewUpdateTime )
+	// SkyView LUT
 	{
-		s_nextSkyViewUpdateTime = ( gpGlobals ? gpGlobals->curtime : 0.0f ) + Max( 0.0f, r_deferred_skyatmo_skyview_lut_update_interval.GetFloat() );
-
 		IMaterial *pSvMat = GetDeferredManager()->GetDeferredMaterial( DEF_MAT_SKY_ATMO_SKYVIEW_LUTGEN );
 		ITexture *pSvLut = GetDefRT_SkyAtmoSkyViewLUT();
 		if ( pSvMat && pSvLut )
@@ -137,42 +135,35 @@ static void UpdateSkyAtmoLUT()
 			pRenderContext->PushRenderTargetAndViewport( pSvLut );
 			pRenderContext->ClearColor3ub( 0, 0, 0 );
 			pRenderContext->ClearBuffers( true, false );
-
 			const int sw = pSvLut->GetActualWidth();
 			const int sh = pSvLut->GetActualHeight();
 			pRenderContext->DrawScreenSpaceRectangle( pSvMat,
 			                                          0, 0, sw, sh,
 			                                          0, 0, sw - 1, sh - 1,
 			                                          sw, sh );
-
 			pRenderContext->PopRenderTargetAndViewport();
 		}
 	}
 
-	static float s_nextUpdateTime = 0.0f;
-	if ( gpGlobals && gpGlobals->curtime < s_nextUpdateTime )
-		return;
-
-	s_nextUpdateTime = ( gpGlobals ? gpGlobals->curtime : 0.0f ) + Max( 0.0f, r_deferred_skyatmo_lut_update_interval.GetFloat() );
-
-	IMaterial *pMat = GetDeferredManager()->GetDeferredMaterial( DEF_MAT_SKY_ATMO_LUTGEN );
-	ITexture *pLut = GetDefRT_SkyAtmoLUT();
-	if ( !pMat || !pLut )
-		return;
-
-	CMatRenderContextPtr pRenderContext( materials );
-	pRenderContext->PushRenderTargetAndViewport( pLut );
-	pRenderContext->ClearColor3ub( 0, 0, 0 );
-	pRenderContext->ClearBuffers( true, false );
-
-	const int w = pLut->GetActualWidth();
-	const int h = pLut->GetActualHeight();
-	pRenderContext->DrawScreenSpaceRectangle( pMat,
-	                                          0, 0, w, h,
-	                                          0, 0, w - 1, h - 1,
-	                                          w, h );
-
-	pRenderContext->PopRenderTargetAndViewport();
+	// SkyAtmo latlong LUT
+	{
+		IMaterial *pMat = GetDeferredManager()->GetDeferredMaterial( DEF_MAT_SKY_ATMO_LUTGEN );
+		ITexture *pLut = GetDefRT_SkyAtmoLUT();
+		if ( pMat && pLut )
+		{
+			CMatRenderContextPtr pRenderContext( materials );
+			pRenderContext->PushRenderTargetAndViewport( pLut );
+			pRenderContext->ClearColor3ub( 0, 0, 0 );
+			pRenderContext->ClearBuffers( true, false );
+			const int w = pLut->GetActualWidth();
+			const int h = pLut->GetActualHeight();
+			pRenderContext->DrawScreenSpaceRectangle( pMat,
+			                                          0, 0, w, h,
+			                                          0, 0, w - 1, h - 1,
+			                                          w, h );
+			pRenderContext->PopRenderTargetAndViewport();
+		}
+	}
 }
 
 void SetClearColorToFogColor()
@@ -1899,7 +1890,7 @@ void CPointLightCubeFaceShadowView::CalcShadowView()
 
 	m_bOrtho = false;
 	m_flAspectRatio = 1.0f;
-	fov = fovViewmodel = 90.0f;
+	fov = fovViewmodel = 92.0f; // 1 degree guard band per edge for PCF at cube face boundaries
 	zNear = zNearViewmodel = DEFLIGHT_SPOT_ZNEAR;
 	zFar = zFarViewmodel = Max( flRadius, DEFLIGHT_SPOT_ZNEAR + 1.0f );
 }

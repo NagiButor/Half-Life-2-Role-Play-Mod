@@ -718,7 +718,11 @@ float4 BuildPointShadowCubeAtlasUVZ( float3 vecLightToGeometry, float lightToGeo
 	uvFace.x = dot( dir, faceRight[faceIndex] ) / ma;
 	uvFace.y = -dot( dir, faceUp[faceIndex] ) / ma;
 
-	float2 uvLocal = uvFace * 0.5f + 0.5f;
+	// Guard-band scale: faces are rendered with 92 deg FOV (half = 46 deg).
+	// Map the 90-deg content UV to the inner portion of the tile.
+	// guardScale = 1.0 / tan(46 deg) = 0.96569
+	static const float CUBE_GUARD_SCALE = 0.96569f;
+	float2 uvLocal = uvFace * ( 0.5f * CUBE_GUARD_SCALE ) + 0.5f;
 
 	float face = (float)faceIndex;
 	float2 tileScale = float2( 1.0f / 3.0f, 1.0f / 2.0f );
@@ -751,12 +755,12 @@ float PerformDualParaboloidShadow( sampler shadowSampler, float3 vecLightToGeome
 
 		float4 uvwfAtlas = BuildPointShadowCubeAtlasUVZ( vecLightToGeometry, lightToGeoDistance, radius );
 
-		// Clamp UVs within tile to prevent PCF bleeding across faces
+		// Clamp UVs within tile: relaxed since guard texels provide valid data
 		float2 tileScale = float2( 1.0f / 3.0f, 1.0f / 2.0f );
 		float2 tileOffset = float2( fmod( uvwfAtlas.w, 3.0f ), floor( uvwfAtlas.w / 3.0f ) );
 		float2 tileMin = tileOffset * tileScale;
 		float2 tileMax = tileMin + tileScale;
-		float2 edgeBias = offsets_0.zw + offsets_0.xy + ( offsets_0.xy * ( 0.5f * offset_1.z ) );
+		float2 edgeBias = offsets_0.xy * 0.5f;
 		uvwfAtlas.xy = clamp( uvwfAtlas.xy, tileMin + edgeBias, tileMax - edgeBias );
 
 		// Receiver-side slope-dependent depth bias

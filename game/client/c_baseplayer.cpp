@@ -80,6 +80,9 @@ int g_nKillCamMode = OBS_MODE_NONE;
 int g_nKillCamTarget1 = 0;
 int g_nKillCamTarget2 = 0;
 
+ConVar cl_suitless_blink_freq( "cl_suitless_blink_freq", "1.0", FCVAR_ARCHIVE, "Suitless overlay blink frequency (Hz)" );
+ConVar cl_suitless_blink_intensity( "cl_suitless_blink_intensity", "0.75", FCVAR_ARCHIVE, "Suitless overlay intensity multiplier" );
+
 extern ConVar mp_forcecamera; // in gamevars_shared.h
 
 #define FLASHLIGHT_DISTANCE		1000
@@ -1102,8 +1105,8 @@ void C_BasePlayer::OnDataChanged( DataUpdateType_t updateType )
 		// Clamp to valid range
 		float flIntensity = clamp( m_flSuitlessHealthOverlay, 0.0f, 1.0f );
 		// client-tweakable blink frequency and intensity multiplier
-		static ConVar cl_suitless_blink_freq( "cl_suitless_blink_freq", "1.0", FCVAR_ARCHIVE, "Suitless overlay blink frequency (Hz)" );
-		static ConVar cl_suitless_blink_intensity( "cl_suitless_blink_intensity", "0.75", FCVAR_ARCHIVE, "Suitless overlay intensity multiplier" );
+		extern ConVar cl_suitless_blink_freq;
+		extern ConVar cl_suitless_blink_intensity;
 
 		if ( flIntensity > 0.001f )
 		{

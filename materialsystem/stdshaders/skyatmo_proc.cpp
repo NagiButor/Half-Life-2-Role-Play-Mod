@@ -35,6 +35,12 @@ BEGIN_VS_SHADER( SkyAtmoProc, "" )
 
 	SHADER_INIT
 	{
+		if ( params[SKYLUT]->IsDefined() )
+			LoadTexture( SKYLUT );
+		if ( params[TRANSMITTANCELUT]->IsDefined() )
+			LoadTexture( TRANSMITTANCELUT );
+		if ( params[SKYVIEWLUT]->IsDefined() )
+			LoadTexture( SKYVIEWLUT );
 	}
 
 	SHADER_DRAW
