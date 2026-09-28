@@ -22,6 +22,8 @@
 #include "rumble_shared.h"
 #include "gamestats.h"
 
+#include "hl2rpm_crashdebug.h"
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -162,6 +164,8 @@ void CBaseHLBludgeonWeapon::SecondaryAttack()
 //------------------------------------------------------------------------------
 void CBaseHLBludgeonWeapon::Hit( trace_t &traceHit, Activity nHitActivity, bool bIsSecondary )
 {
+	RPM_CRUMB( "Melee '%s' Hit ent=%d '%s' surf=%d secondary=%d", GetClassname(), traceHit.m_pEnt ? traceHit.m_pEnt->entindex() : -1,
+		traceHit.m_pEnt ? traceHit.m_pEnt->GetClassname() : "NULL", traceHit.surface.surfaceProps, bIsSecondary ? 1 : 0 );
 	CBasePlayer *pPlayer = ToBasePlayer( GetOwner() );
 	
 	//Do view kick
@@ -309,6 +313,7 @@ bool CBaseHLBludgeonWeapon::ImpactWater( const Vector &start, const Vector &end 
 //-----------------------------------------------------------------------------
 void CBaseHLBludgeonWeapon::ImpactEffect( trace_t &traceHit )
 {
+	RPM_CRUMB( "Melee '%s' ImpactEffect surf=%d fraction=%.2f", GetClassname(), traceHit.surface.surfaceProps, traceHit.fraction );
 	// See if we hit water (we don't do the other impact effects in this case)
 	if ( ImpactWater( traceHit.startpos, traceHit.endpos ) )
 		return;
@@ -323,6 +328,7 @@ void CBaseHLBludgeonWeapon::ImpactEffect( trace_t &traceHit )
 //------------------------------------------------------------------------------
 void CBaseHLBludgeonWeapon::Swing( int bIsSecondary )
 {
+	RPM_CRUMB( "Melee '%s' Swing secondary=%d", GetClassname(), bIsSecondary );
 	trace_t traceHit;
 
 	// Try a ray

@@ -16,6 +16,7 @@
 #include "engine/IStaticPropMgr.h"
 #include "c_impact_effects.h"
 #include "tier0/vprof.h"
+#include "hl2rpm_crashdebug.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -134,6 +135,8 @@ bool Impact( Vector &vecOrigin, Vector &vecStart, int iMaterial, int iDamageType
 	VPROF( "Impact" );
 
 	Assert ( pEntity );
+	RPM_CRUMB( "Impact ent=%d '%s' mat='%c' dmg=0x%x hitbox=%d flags=0x%x", pEntity ? pEntity->entindex() : -1,
+		pEntity ? pEntity->GetClassname() : "NULL", iMaterial ? iMaterial : '?', iDamageType, iHitbox, nFlags );
 
 #ifdef MAPBASE
 	// If the entity already has a ragdoll that was created on the current tick, use that ragdoll instead.
@@ -231,6 +234,8 @@ bool Impact( Vector &vecOrigin, Vector &vecStart, int iMaterial, int iDamageType
 
 		if ( !bSkipDecal )
 		{
+			RPM_CRUMB( "Impact decal '%s' (#%d) on ent=%d %s", pchDecalName, decalNumber, pEntity->entindex(),
+				( pEntity->entindex() == 0 && iHitbox != 0 ) ? "static prop" : pEntity->GetClassname() );
 			if ( (pEntity->entindex() == 0) && (iHitbox != 0) )
 			{
 				staticpropmgr->AddDecalToStaticProp( vecStart, traceExt, iHitbox - 1, decalNumber, true, tr );
@@ -240,6 +245,7 @@ bool Impact( Vector &vecOrigin, Vector &vecStart, int iMaterial, int iDamageType
 				// Here we deal with decals on entities.
 				pEntity->AddDecal( vecStart, traceExt, vecOrigin, iHitbox, decalNumber, true, tr, maxLODToDecal );
 			}
+			RPM_CRUMB( "Impact decal done" );
 		}
 	}
 	else
@@ -392,6 +398,9 @@ void PerformCustomEffects( const Vector &vecOrigin, trace_t &tr, const Vector &s
 	if ( tr.surface.flags & (SURF_SKY|SURF_NODRAW|SURF_HINT|SURF_SKIP) )
 		return;
 
+	RPM_CRUMB( "Impact custom FX mat='%c' scale=%d flags=0x%x surface='%s'", iMaterial ? iMaterial : '?', iScale, nFlags,
+		tr.surface.name ? tr.surface.name : "" );
+
 	if ( cl_new_impact_effects.GetInt() )
 	{
 		PerformNewCustomEffects( vecOrigin, tr, shotDir, iMaterial, iScale, nFlags );
@@ -454,6 +463,7 @@ void PerformCustomEffects( const Vector &vecOrigin, trace_t &tr, const Vector &s
 void PlayImpactSound( CBaseEntity *pEntity, trace_t &tr, Vector &vecServerOrigin, int nServerSurfaceProp )
 {
 	VPROF( "PlayImpactSound" );
+	RPM_CRUMB( "Impact sound server surf=%d client surf=%d", nServerSurfaceProp, tr.surface.surfaceProps );
 	surfacedata_t *pdata;
 	Vector vecOrigin;
 

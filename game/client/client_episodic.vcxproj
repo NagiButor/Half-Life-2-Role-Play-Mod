@@ -137,7 +137,7 @@ if ERRORLEVEL 1 exit /b 1
     </Bscmake>
     <PostBuildEvent>
       <Message>Publishing to E:\Steam\steamapps\sourcemods\hl2rpm\bin\.</Message>
-      <Command>copy "$(TargetDir)$(TargetFileName)" "E:\Steam\steamapps\sourcemods\hl2rpm\bin\.\$(TargetFileName)"</Command>
+      <Command>copy "$(TargetDir)$(TargetFileName)" "E:\Steam\steamapps\sourcemods\hl2rpm\bin\.\$(TargetFileName)"&#x0D;&#x0A;if exist "$(TargetDir)$(TargetName).pdb" copy "$(TargetDir)$(TargetName).pdb" "E:\Steam\steamapps\sourcemods\hl2rpm\bin\.\$(TargetName).pdb"</Command>
     </PostBuildEvent>
     <CustomBuildStep>
     </CustomBuildStep>
@@ -223,7 +223,7 @@ if ERRORLEVEL 1 exit /b 1
     </Bscmake>
     <PostBuildEvent>
       <Message>Publishing to E:\Steam\steamapps\sourcemods\hl2rpm\bin\.</Message>
-      <Command>copy "$(TargetDir)$(TargetFileName)" "E:\Steam\steamapps\sourcemods\hl2rpm\bin\.\$(TargetFileName)"</Command>
+      <Command>copy "$(TargetDir)$(TargetFileName)" "E:\Steam\steamapps\sourcemods\hl2rpm\bin\.\$(TargetFileName)"&#x0D;&#x0A;if exist "$(TargetDir)$(TargetName).pdb" copy "$(TargetDir)$(TargetName).pdb" "E:\Steam\steamapps\sourcemods\hl2rpm\bin\.\$(TargetName).pdb"</Command>
     </PostBuildEvent>
     <CustomBuildStep>
     </CustomBuildStep>
@@ -1139,6 +1139,11 @@ if ERRORLEVEL 1 exit /b 1
     <ClCompile Include="..\..\game\shared\mapentities_shared.cpp" />
     <ClCompile Include="mathproxy.cpp" />
     <ClCompile Include="matrixproxy.cpp" />
+    <ClCompile Include="..\..\game\shared\hl2rpm_crashdebug.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="hl2rpm_crashhandler_client.cpp" />
     <ClCompile Include="..\..\public\tier0\memoverride.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>

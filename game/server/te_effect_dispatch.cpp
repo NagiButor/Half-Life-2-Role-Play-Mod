@@ -15,6 +15,8 @@
 #include "te_effect_dispatch.h"
 #include "networkstringtable_gamedll.h"
 
+#include "hl2rpm_crashdebug.h"
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -87,5 +89,6 @@ void DispatchEffect( const char *pName, const CEffectData &data )
 
 void DispatchEffect( const char *pName, const CEffectData &data, CRecipientFilter &filter )
 {
+	RPM_CRUMB( "Server DispatchEffect '%s' ent=%d surf=%d dmg=0x%x", pName, data.m_nEntIndex, data.m_nSurfaceProp, data.m_nDamageType );
 	te->DispatchEffect( filter, 0.0, data.m_vOrigin, pName, data );
 }

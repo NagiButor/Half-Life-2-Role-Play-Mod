@@ -9,6 +9,10 @@
 #include "deferred/deferred_client_common.h"
 #include <crtmemdebug.h>
 #include "vgui_int.h"
+
+// HL2RPM crash debugger (hl2rpm_crashhandler_client.cpp)
+void RPMCrash_ClientInit();
+void RPMCrash_ClientShutdown();
 #include "clientmode.h"
 #include "iinput.h"
 #include "iviewrender.h"
@@ -1005,6 +1009,10 @@ int CHLClient::Init( CreateInterfaceFn appSystemFactory, CreateInterfaceFn physi
 	// please don't collapse this into one monolithic boolean expression (impossible to debug)
 	if ( (engine = (IVEngineClient *)appSystemFactory( VENGINE_CLIENT_INTERFACE_VERSION, NULL )) == NULL )
 		return false;
+
+	// HL2RPM: crash debugger, as early as possible (needs only the engine interface)
+	RPMCrash_ClientInit();
+
 	if ( (modelrender = (IVModelRender *)appSystemFactory( VENGINE_HUDMODEL_INTERFACE_VERSION, NULL )) == NULL )
 		return false;
 	if ( (effects = (IVEfx *)appSystemFactory( VENGINE_EFFECTS_INTERFACE_VERSION, NULL )) == NULL )
@@ -1388,6 +1396,9 @@ void CHLClient::Shutdown( void )
 	// NVNT Disconnect haptics system
 	DisconnectHaptics();
 #endif
+
+	// HL2RPM: must be last - unhooks spew and the exception handler before the DLL unloads
+	RPMCrash_ClientShutdown();
 }
 
 

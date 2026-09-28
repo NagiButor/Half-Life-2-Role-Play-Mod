@@ -1,4 +1,13 @@
 // ALL SKIP STATEMENTS THAT AFFECT THIS SHADER!!!
+// ( $FLASHLIGHT == 0 ) && ( $FLASHLIGHTSHADOWS == 1 )
+// ( $FLASHLIGHT == 0 ) && ( $FLASHLIGHTDEPTHFILTERMODE != 0 )
+// defined $HDRTYPE && defined $HDRENABLED && !$HDRTYPE && $HDRENABLED
+// defined $PIXELFOGTYPE && defined $WRITEWATERFOGTODESTALPHA && ( $PIXELFOGTYPE != 1 ) && $WRITEWATERFOGTODESTALPHA
+// defined $LIGHTING_PREVIEW && defined $HDRTYPE && $LIGHTING_PREVIEW && $HDRTYPE != 0
+// defined $LIGHTING_PREVIEW && defined $FASTPATHENVMAPTINT && $LIGHTING_PREVIEW && $FASTPATHENVMAPTINT
+// defined $LIGHTING_PREVIEW && defined $FASTPATHENVMAPCONTRAST && $LIGHTING_PREVIEW && $FASTPATHENVMAPCONTRAST
+// defined $LIGHTING_PREVIEW && defined $FASTPATH && $LIGHTING_PREVIEW && $FASTPATH
+// ($FLASHLIGHT || $FLASHLIGHTSHADOWS) && $LIGHTING_PREVIEW
 // defined $HDRTYPE && defined $HDRENABLED && !$HDRTYPE && $HDRENABLED
 // defined $PIXELFOGTYPE && defined $WRITEWATERFOGTODESTALPHA && ( $PIXELFOGTYPE != 1 ) && $WRITEWATERFOGTODESTALPHA
 // defined $LIGHTING_PREVIEW && defined $HDRTYPE && $LIGHTING_PREVIEW && $HDRTYPE != 0
@@ -69,7 +78,8 @@ public:
 	int GetIndex() const
 	{
 		Assert( m_bVERTEXALPHA && m_bFLASHLIGHT && m_bFLASHLIGHTDEPTHFILTERMODE );
-		return ( 2 * m_nVERTEXALPHA ) + ( 4 * m_nFLASHLIGHT ) + ( 8 * m_nFLASHLIGHTDEPTHFILTERMODE ) + 0;
+		AssertMsg( !( ( m_nFLASHLIGHT == 0 ) && ( m_nFLASHLIGHTDEPTHFILTERMODE != 0 ) ), "Invalid combo combination ( ( FLASHLIGHT == 0 ) && ( FLASHLIGHTDEPTHFILTERMODE != 0 ) )" );
+		return ( 4 * m_nVERTEXALPHA ) + ( 8 * m_nFLASHLIGHT ) + ( 16 * m_nFLASHLIGHTDEPTHFILTERMODE ) + 0;
 	}
 };
 
@@ -79,23 +89,46 @@ public:
 class SDK_decalmodulate_ps20b_Dynamic_Index
 {
 	unsigned int m_nPIXELFOGTYPE : 2;
+	unsigned int m_nFLASHLIGHTSHADOWS : 2;
+#ifdef _DEBUG
+	bool m_bPIXELFOGTYPE : 1;
+	bool m_bFLASHLIGHTSHADOWS : 1;
+#endif	// _DEBUG
 public:
 	void SetPIXELFOGTYPE( int i )
 	{
 		Assert( i >= 0 && i <= 1 );
 		m_nPIXELFOGTYPE = i;
+#ifdef _DEBUG
+		m_bPIXELFOGTYPE = true;
+#endif	// _DEBUG
+	}
+
+	void SetFLASHLIGHTSHADOWS( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nFLASHLIGHTSHADOWS = i;
+#ifdef _DEBUG
+		m_bFLASHLIGHTSHADOWS = true;
+#endif	// _DEBUG
 	}
 
 	SDK_decalmodulate_ps20b_Dynamic_Index( IShaderDynamicAPI* pShaderAPI )
 	{
-		m_nPIXELFOGTYPE = ( pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z ) ;
+		m_nPIXELFOGTYPE = 0;
+		m_nFLASHLIGHTSHADOWS = 0;
+#ifdef _DEBUG
+		m_bPIXELFOGTYPE = false;
+		m_bFLASHLIGHTSHADOWS = false;
+#endif	// _DEBUG
 	}
 
 	int GetIndex() const
 	{
-		return ( 1 * m_nPIXELFOGTYPE ) + 0;
+		Assert( m_bPIXELFOGTYPE && m_bFLASHLIGHTSHADOWS );
+		return ( 1 * m_nPIXELFOGTYPE ) + ( 2 * m_nFLASHLIGHTSHADOWS ) + 0;
 	}
 };
 
-#define shaderDynamicTest_SDK_decalmodulate_ps20b 1
+#define shaderDynamicTest_SDK_decalmodulate_ps20b psh_forgot_to_set_dynamic_PIXELFOGTYPE + psh_forgot_to_set_dynamic_FLASHLIGHTSHADOWS
 

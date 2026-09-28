@@ -14,6 +14,7 @@
 #include "tier1/KeyValues.h"
 #include "toolframework_client.h"
 #include "tier0/vprof.h"
+#include "hl2rpm_crashdebug.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -76,7 +77,12 @@ void DispatchEffectToCallback( const char *pEffectName, const CEffectData &m_Eff
 		// If the name matches, call it
 		if ( Q_stricmp( pReg->m_pEffectName, pEffectName ) == 0 )
 		{
+			// HL2RPM crash debugger: a crash inside the effect leaves "FX begin" without "FX end"
+			RPM_CRUMB( "FX begin '%s' ent=%d surf=%d dmg=0x%x hitbox=%d pos=(%.0f %.0f %.0f)", pEffectName,
+				m_EffectData.entindex(), m_EffectData.m_nSurfaceProp, m_EffectData.m_nDamageType, m_EffectData.m_nHitBox,
+				m_EffectData.m_vOrigin.x, m_EffectData.m_vOrigin.y, m_EffectData.m_vOrigin.z );
 			pReg->m_pFunction( m_EffectData );
+			RPM_CRUMB( "FX end '%s'", pEffectName );
 			return;
 		}
 	}

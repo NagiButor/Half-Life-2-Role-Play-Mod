@@ -35,6 +35,8 @@ bool NPC_CheckBrushExclude( CBaseEntity *pEntity, CBaseEntity *pBrush );
 #endif
 
 
+#include "hl2rpm_crashdebug.h"
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -871,6 +873,9 @@ void UTIL_DecalTrace( trace_t *pTrace, char const *decalName )
 {
 	if (pTrace->fraction == 1.0)
 		return;
+
+	RPM_CRUMB( "DecalTrace '%s' on ent=%d '%s'", decalName ? decalName : "NULL", pTrace->m_pEnt ? pTrace->m_pEnt->entindex() : -1,
+		pTrace->m_pEnt ? pTrace->m_pEnt->GetClassname() : "NULL" );
 
 	CBaseEntity *pEntity = pTrace->m_pEnt;
 	pEntity->DecalTrace( pTrace, decalName );

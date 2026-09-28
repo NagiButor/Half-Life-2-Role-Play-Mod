@@ -4,9 +4,10 @@
 //  STATIC: "VERTEXCOLOR"			"0..1"
 //  STATIC: "LIGHTING_PREVIEW"		"0..1"	[PC]
 //  STATIC: "LIGHTING_PREVIEW"		"0..0"	[XBOX]
+//  STATIC: "FLASHLIGHT"			"0..1"  
 
+//	DYNAMIC: "DOWATERFOG"			"0..1"
 //  DYNAMIC: "COMPRESSED_VERTS"		"0..1"
-#include "common_fog_vs_fxc.h"
 //	DYNAMIC: "SKINNING"				"0..0"  [vs20]
 //	DYNAMIC: "SKINNING"				"0..1"  [vs30]
 
@@ -30,7 +31,7 @@ const float4 cBaseTexCoordTransform[2]		: register( SHADER_SPECIFIC_CONST_0 );
 //		 cMorphTargetTextureDim.z = 4tuples/morph
 const float3 cMorphTargetTextureDim			: register( SHADER_SPECIFIC_CONST_10 );
 const float4 cMorphSubrect					: register( SHADER_SPECIFIC_CONST_11 );
-sampler2D morphSampler						: register( D3DVERTEXTEXTURESAMPLER0, s0 );
+sampler2D morphSampler						: register( s0 );	// HL2RPM: was register( D3DVERTEXTEXTURESAMPLER0, s0 ), rejected by the new fxc
 #endif
 
 struct VS_INPUT
@@ -67,6 +68,10 @@ struct VS_OUTPUT
 	HALF2 baseTexCoord				: TEXCOORD0;		// Base texture coordinate
 	float4 worldPos_ProjPosZ		: TEXCOORD1;
 	float4 color					: COLOR1;		// Vertex color (from lighting or unlit)
+	
+#if FLASHLIGHT
+	float4 vProjPos					: TEXCOORD2;
+#endif
 };
 
 VS_OUTPUT main( const VS_INPUT v )
@@ -112,6 +117,13 @@ VS_OUTPUT main( const VS_INPUT v )
 	
 #if !defined( _X360 ) && !defined( SHADER_MODEL_VS_3_0 )
 	o.fog = CalcFixedFunctionFog( worldPos, g_FogType );
+#endif
+
+#if FLASHLIGHT
+	// Transform into projection space
+	projPos.z = dot( float4( worldPos, 1 ), cViewProjZ );
+
+	o.vProjPos = projPos;
 #endif
 
 	o.worldPos_ProjPosZ.xyz = worldPos.xyz;

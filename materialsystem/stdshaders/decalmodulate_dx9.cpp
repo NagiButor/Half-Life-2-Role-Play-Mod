@@ -128,8 +128,7 @@ BEGIN_VS_SHADER( SDK_DecalModulate_dx9,
 				DECLARE_STATIC_VERTEX_SHADER( sdk_decalmodulate_vs20 );
 				SET_STATIC_VERTEX_SHADER_COMBO( VERTEXCOLOR,  bHasVertexAlpha );
 				SET_STATIC_VERTEX_SHADER_COMBO( LIGHTING_PREVIEW, false );
-				SET_STATIC_VERTEX_SHADER_COMBO( DOPIXELFOG, g_pHardwareConfig->SupportsPixelShaders_2_b() );
-				SET_STATIC_VERTEX_SHADER_COMBO( HARDWAREFOGBLEND, !g_pHardwareConfig->SupportsPixelShaders_2_b() );
+				SET_STATIC_VERTEX_SHADER_COMBO( FLASHLIGHT, bHasFlashlight );	// HL2RPM: restored Mapbase combo set (must match SDK_decalmodulate_vs20.fxc)
 				SET_STATIC_VERTEX_SHADER( sdk_decalmodulate_vs20 );
 
 				if( g_pHardwareConfig->SupportsPixelShaders_2_b() )

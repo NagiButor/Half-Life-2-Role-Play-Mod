@@ -1,11 +1,18 @@
+// ALL SKIP STATEMENTS THAT AFFECT THIS SHADER!!!
+// defined $LIGHTING_PREVIEW && defined $FASTPATH && $LIGHTING_PREVIEW && $FASTPATH
+
+#pragma once
 #include "shaderlib/cshader.h"
 class sdk_decalmodulate_vs20_Static_Index
 {
-private:
-	int m_nVERTEXCOLOR;
+	unsigned int m_nVERTEXCOLOR : 2;
+	unsigned int m_nLIGHTING_PREVIEW : 2;
+	unsigned int m_nFLASHLIGHT : 2;
 #ifdef _DEBUG
-	bool m_bVERTEXCOLOR;
-#endif
+	bool m_bVERTEXCOLOR : 1;
+	bool m_bLIGHTING_PREVIEW : 1;
+	bool m_bFLASHLIGHT : 1;
+#endif	// _DEBUG
 public:
 	void SetVERTEXCOLOR( int i )
 	{
@@ -13,138 +20,59 @@ public:
 		m_nVERTEXCOLOR = i;
 #ifdef _DEBUG
 		m_bVERTEXCOLOR = true;
-#endif
+#endif	// _DEBUG
 	}
-	void SetVERTEXCOLOR( bool i )
-	{
-		m_nVERTEXCOLOR = i ? 1 : 0;
-#ifdef _DEBUG
-		m_bVERTEXCOLOR = true;
-#endif
-	}
-private:
-	int m_nLIGHTING_PREVIEW;
-#ifdef _DEBUG
-	bool m_bLIGHTING_PREVIEW;
-#endif
-public:
+
 	void SetLIGHTING_PREVIEW( int i )
 	{
 		Assert( i >= 0 && i <= 1 );
 		m_nLIGHTING_PREVIEW = i;
 #ifdef _DEBUG
 		m_bLIGHTING_PREVIEW = true;
-#endif
+#endif	// _DEBUG
 	}
-	void SetLIGHTING_PREVIEW( bool i )
-	{
-		m_nLIGHTING_PREVIEW = i ? 1 : 0;
-#ifdef _DEBUG
-		m_bLIGHTING_PREVIEW = true;
-#endif
-	}
-private:
-	int m_nDOPIXELFOG;
-#ifdef _DEBUG
-	bool m_bDOPIXELFOG;
-#endif
-public:
-	void SetDOPIXELFOG( int i )
+
+	void SetFLASHLIGHT( int i )
 	{
 		Assert( i >= 0 && i <= 1 );
-		m_nDOPIXELFOG = i;
+		m_nFLASHLIGHT = i;
 #ifdef _DEBUG
-		m_bDOPIXELFOG = true;
-#endif
+		m_bFLASHLIGHT = true;
+#endif	// _DEBUG
 	}
-	void SetDOPIXELFOG( bool i )
+
+	sdk_decalmodulate_vs20_Static_Index( IShaderShadow* pShaderShadow, IMaterialVar** params )
 	{
-		m_nDOPIXELFOG = i ? 1 : 0;
-#ifdef _DEBUG
-		m_bDOPIXELFOG = true;
-#endif
-	}
-private:
-	int m_nHARDWAREFOGBLEND;
-#ifdef _DEBUG
-	bool m_bHARDWAREFOGBLEND;
-#endif
-public:
-	void SetHARDWAREFOGBLEND( int i )
-	{
-		Assert( i >= 0 && i <= 1 );
-		m_nHARDWAREFOGBLEND = i;
-#ifdef _DEBUG
-		m_bHARDWAREFOGBLEND = true;
-#endif
-	}
-	void SetHARDWAREFOGBLEND( bool i )
-	{
-		m_nHARDWAREFOGBLEND = i ? 1 : 0;
-#ifdef _DEBUG
-		m_bHARDWAREFOGBLEND = true;
-#endif
-	}
-public:
-	sdk_decalmodulate_vs20_Static_Index( )
-	{
+		m_nVERTEXCOLOR = 0;
+		m_nLIGHTING_PREVIEW = 0;
+		m_nFLASHLIGHT = 0;
 #ifdef _DEBUG
 		m_bVERTEXCOLOR = false;
-#endif // _DEBUG
-		m_nVERTEXCOLOR = 0;
-#ifdef _DEBUG
 		m_bLIGHTING_PREVIEW = false;
-#endif // _DEBUG
-		m_nLIGHTING_PREVIEW = 0;
-#ifdef _DEBUG
-		m_bDOPIXELFOG = false;
-#endif // _DEBUG
-		m_nDOPIXELFOG = 0;
-#ifdef _DEBUG
-		m_bHARDWAREFOGBLEND = false;
-#endif // _DEBUG
-		m_nHARDWAREFOGBLEND = 0;
+		m_bFLASHLIGHT = false;
+#endif	// _DEBUG
 	}
-	int GetIndex()
+
+	int GetIndex() const
 	{
-		// Asserts to make sure that we aren't using any skipped combinations.
-		// Asserts to make sure that we are setting all of the combination vars.
-#ifdef _DEBUG
-		bool bAllStaticVarsDefined = m_bVERTEXCOLOR && m_bLIGHTING_PREVIEW && m_bDOPIXELFOG && m_bHARDWAREFOGBLEND;
-		Assert( bAllStaticVarsDefined );
-#endif // _DEBUG
-		return ( 4 * m_nVERTEXCOLOR ) + ( 8 * m_nLIGHTING_PREVIEW ) + ( 16 * m_nDOPIXELFOG ) + ( 32 * m_nHARDWAREFOGBLEND ) + 0;
+		Assert( m_bVERTEXCOLOR && m_bLIGHTING_PREVIEW && m_bFLASHLIGHT );
+		return ( 4 * m_nVERTEXCOLOR ) + ( 8 * m_nLIGHTING_PREVIEW ) + ( 16 * m_nFLASHLIGHT ) + 0;
 	}
 };
-#define shaderStaticTest_sdk_decalmodulate_vs20 vsh_forgot_to_set_static_VERTEXCOLOR + vsh_forgot_to_set_static_LIGHTING_PREVIEW + vsh_forgot_to_set_static_DOPIXELFOG + vsh_forgot_to_set_static_HARDWAREFOGBLEND + 0
+
+#define shaderStaticTest_sdk_decalmodulate_vs20 vsh_forgot_to_set_static_VERTEXCOLOR + vsh_forgot_to_set_static_LIGHTING_PREVIEW + vsh_forgot_to_set_static_FLASHLIGHT
+
+
 class sdk_decalmodulate_vs20_Dynamic_Index
 {
-private:
-	int m_nCOMPRESSED_VERTS;
+	unsigned int m_nDOWATERFOG : 2;
+	unsigned int m_nCOMPRESSED_VERTS : 2;
+	unsigned int m_nSKINNING : 1;
 #ifdef _DEBUG
-	bool m_bCOMPRESSED_VERTS;
-#endif
-public:
-	void SetCOMPRESSED_VERTS( int i )
-	{
-		Assert( i >= 0 && i <= 1 );
-		m_nCOMPRESSED_VERTS = i;
-#ifdef _DEBUG
-		m_bCOMPRESSED_VERTS = true;
-#endif
-	}
-	void SetCOMPRESSED_VERTS( bool i )
-	{
-		m_nCOMPRESSED_VERTS = i ? 1 : 0;
-#ifdef _DEBUG
-		m_bCOMPRESSED_VERTS = true;
-#endif
-	}
-private:
-	int m_nDOWATERFOG;
-#ifdef _DEBUG
-	bool m_bDOWATERFOG;
-#endif
+	bool m_bDOWATERFOG : 1;
+	bool m_bCOMPRESSED_VERTS : 1;
+	bool m_bSKINNING : 1;
+#endif	// _DEBUG
 public:
 	void SetDOWATERFOG( int i )
 	{
@@ -152,61 +80,45 @@ public:
 		m_nDOWATERFOG = i;
 #ifdef _DEBUG
 		m_bDOWATERFOG = true;
-#endif
+#endif	// _DEBUG
 	}
-	void SetDOWATERFOG( bool i )
+
+	void SetCOMPRESSED_VERTS( int i )
 	{
-		m_nDOWATERFOG = i ? 1 : 0;
+		Assert( i >= 0 && i <= 1 );
+		m_nCOMPRESSED_VERTS = i;
 #ifdef _DEBUG
-		m_bDOWATERFOG = true;
-#endif
+		m_bCOMPRESSED_VERTS = true;
+#endif	// _DEBUG
 	}
-private:
-	int m_nSKINNING;
-#ifdef _DEBUG
-	bool m_bSKINNING;
-#endif
-public:
+
 	void SetSKINNING( int i )
 	{
 		Assert( i >= 0 && i <= 0 );
 		m_nSKINNING = i;
 #ifdef _DEBUG
 		m_bSKINNING = true;
-#endif
+#endif	// _DEBUG
 	}
-	void SetSKINNING( bool i )
+
+	sdk_decalmodulate_vs20_Dynamic_Index( IShaderDynamicAPI* pShaderAPI )
 	{
-		m_nSKINNING = i ? 1 : 0;
-#ifdef _DEBUG
-		m_bSKINNING = true;
-#endif
-	}
-public:
-	sdk_decalmodulate_vs20_Dynamic_Index()
-	{
-#ifdef _DEBUG
-		m_bCOMPRESSED_VERTS = false;
-#endif // _DEBUG
+		m_nDOWATERFOG = 0;
 		m_nCOMPRESSED_VERTS = 0;
+		m_nSKINNING = 0;
 #ifdef _DEBUG
 		m_bDOWATERFOG = false;
-#endif // _DEBUG
-		m_nDOWATERFOG = 0;
-#ifdef _DEBUG
+		m_bCOMPRESSED_VERTS = false;
 		m_bSKINNING = false;
-#endif // _DEBUG
-		m_nSKINNING = 0;
+#endif	// _DEBUG
 	}
-	int GetIndex()
+
+	int GetIndex() const
 	{
-		// Asserts to make sure that we aren't using any skipped combinations.
-		// Asserts to make sure that we are setting all of the combination vars.
-#ifdef _DEBUG
-		bool bAllDynamicVarsDefined = m_bCOMPRESSED_VERTS && m_bDOWATERFOG && m_bSKINNING;
-		Assert( bAllDynamicVarsDefined );
-#endif // _DEBUG
-		return ( 1 * m_nCOMPRESSED_VERTS ) + ( 2 * m_nDOWATERFOG ) + ( 4 * m_nSKINNING ) + 0;
+		Assert( m_bDOWATERFOG && m_bCOMPRESSED_VERTS && m_bSKINNING );
+		return ( 1 * m_nDOWATERFOG ) + ( 2 * m_nCOMPRESSED_VERTS ) + ( 4 * m_nSKINNING ) + 0;
 	}
 };
-#define shaderDynamicTest_sdk_decalmodulate_vs20 vsh_forgot_to_set_dynamic_COMPRESSED_VERTS + vsh_forgot_to_set_dynamic_DOWATERFOG + vsh_forgot_to_set_dynamic_SKINNING + 0
+
+#define shaderDynamicTest_sdk_decalmodulate_vs20 vsh_forgot_to_set_dynamic_DOWATERFOG + vsh_forgot_to_set_dynamic_COMPRESSED_VERTS + vsh_forgot_to_set_dynamic_SKINNING
+

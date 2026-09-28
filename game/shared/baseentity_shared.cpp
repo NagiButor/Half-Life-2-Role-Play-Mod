@@ -59,6 +59,8 @@ ConVar hl2_episodic( "hl2_episodic", "0", FCVAR_REPLICATED );
 
 #include "rumble_shared.h"
 
+#include "hl2rpm_crashdebug.h"
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -687,6 +689,9 @@ void CBaseEntity::ImpactTrace( trace_t *pTrace, int iDamageType, const char *pCu
 {
 	VPROF( "CBaseEntity::ImpactTrace" );
 	Assert( pTrace->m_pEnt );
+	RPM_CRUMB( "ImpactTrace on ent=%d '%s' surf=%d dmg=0x%x hitbox=%d custom=%s", pTrace->m_pEnt ? pTrace->m_pEnt->entindex() : -1,
+		pTrace->m_pEnt ? pTrace->m_pEnt->GetClassname() : "NULL", pTrace->surface.surfaceProps, iDamageType, pTrace->hitbox,
+		pCustomImpactName ? pCustomImpactName : "-" );
 
 	CBaseEntity *pEntity = pTrace->m_pEnt;
  
@@ -1616,6 +1621,7 @@ typedef CTraceFilterSimpleList CBulletsTraceFilter;
 
 void CBaseEntity::FireBullets( const FireBulletsInfo_t &info )
 {
+	RPM_CRUMB( "FireBullets from ent=%d '%s' shots=%d ammo=%d dmg=%.0f", entindex(), GetClassname(), info.m_iShots, info.m_iAmmoType, info.m_flDamage );
 #if defined(MAPBASE_VSCRIPT) && defined(GAME_DLL)
 	if ( m_ScriptScope.IsInitialized() && g_Hook_FireBullets.CanRunInScope( m_ScriptScope ) )
 	{
