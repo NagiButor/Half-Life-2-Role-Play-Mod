@@ -1,0 +1,136 @@
+@include "base.fgd"
+
+@PointClass base(Targetname, Parentname, Angles) iconsprite("editor/light.vmt") sphere(radius) = light_deferred
+[
+	spawnflags(flags) =
+	[
+		1 	: "Enabled" : 1
+		2 	: "Enable shadow" : 0
+		4 	: "Enable cookie" : 0
+		8 	: "Enable volumetrics" : 0
+		16	: "Enable lightstyle" : 0
+	]
+
+	light_type(Choices) : "Light type" : 0 : "" =
+	[
+		0 : "Point"
+		1 : "Spot"
+	]
+
+	diffuse(color255) : "Color diffuse" : "255 255 255 255" : ""
+	ambient(color255) : "Color ambient" : "10 10 10 255" : ""
+
+	radius(float) : "Radius" : "256.0" : ""
+	power(float) : "Falloff power" : "2.0" : ""
+
+	spot_cone_inner(float) : "Spotlight cone inner" : "35.0" : ""
+	spot_cone_outer(float) : "Spotlight cone outer" : "45.0" : ""
+
+	vis_dist(integer) : "Visible distance" : 2048 : ""
+	vis_range(integer) : "Visible fade range" : 512 : ""
+	shadow_dist(integer) : "Shadow distance" : 1536 : ""
+	shadow_range(integer) : "Shadow fade range" : 512 : ""
+
+	cookietex(string) : "Cookie texture" : : "Path to vtf or vgui projectable factory name."
+
+	style_seed(integer) : "Lightstyle seed" : -1 : ""
+	style_amt(float) : "Lightstyle amount" : "0.5" : ""
+	style_speed(float) : "Lightstyle speed" : "0.3" : ""
+	style_smooth(float) : "Lightstyle smoothing" : "0.5" : ""
+	style_random(float) : "Lightstyle random" : "0.5" : ""
+
+	enable_from_hour(float) : "Enable from (hour)" : -1 : "If set, the light is only enabled between enable_from_hour and enable_to_hour. Uses env_timecycle time. Example night: 20 -> 6."
+	enable_to_hour(float) : "Enable to (hour)" : -1 : "See enable_from_hour."
+	time_toggle_shadows(choices) : "Toggle shadows with time" : 1 : "If enabled, shadows will also toggle on/off with the time window." =
+	[
+		0 : "No"
+		1 : "Yes"
+	]
+	time_toggle_volumetrics(choices) : "Toggle volumetrics with time" : 1 : "If enabled, volumetrics will also toggle on/off with the time window." =
+	[
+		0 : "No"
+		1 : "Yes"
+	]
+]
+
+@PointClass base(Targetname, Parentname, Angles) iconsprite("editor/light.vmt") lightprop("models/editor/spot.mdl") lightcone() sphere(radius) = light_deferred_spot
+[
+	spawnflags(flags) =
+	[
+		1 	: "Enabled" : 1
+		2 	: "Enable shadow" : 0
+		4 	: "Enable cookie" : 0
+		8 	: "Enable volumetrics" : 0
+		16	: "Enable lightstyle" : 0
+	]
+
+	light_type(Choices) : "Light type" : 1 : "" =
+	[
+		0 : "Point"
+		1 : "Spot"
+	]
+
+	diffuse(color255) : "Color diffuse" : "255 255 255 255" : ""
+	ambient(color255) : "Color ambient" : "10 10 10 255" : ""
+
+	radius(float) : "Radius" : "256.0" : ""
+	power(float) : "Falloff power" : "2.0" : ""
+
+	spot_cone_inner(float) : "Spotlight cone inner" : "35.0" : ""
+	spot_cone_outer(float) : "Spotlight cone outer" : "45.0" : ""
+
+	vis_dist(integer) : "Visible distance" : 2048 : ""
+	vis_range(integer) : "Visible fade range" : 512 : ""
+	shadow_dist(integer) : "Shadow distance" : 1536 : ""
+	shadow_range(integer) : "Shadow fade range" : 512 : ""
+
+	cookietex(string) : "Cookie texture" : : "Path to vtf or vgui projectable factory name."
+
+	style_seed(integer) : "Lightstyle seed" : -1 : ""
+	style_amt(float) : "Lightstyle amount" : "0.5" : ""
+	style_speed(float) : "Lightstyle speed" : "0.3" : ""
+	style_smooth(float) : "Lightstyle smoothing" : "0.5" : ""
+	style_random(float) : "Lightstyle random" : "0.5" : ""
+
+	enable_from_hour(float) : "Enable from (hour)" : -1 : "If set, the light is only enabled between enable_from_hour and enable_to_hour. Uses env_timecycle time. Example night: 20 -> 6."
+	enable_to_hour(float) : "Enable to (hour)" : -1 : "See enable_from_hour."
+	time_toggle_shadows(choices) : "Toggle shadows with time" : 1 : "If enabled, shadows will also toggle on/off with the time window." =
+	[
+		0 : "No"
+		1 : "Yes"
+	]
+	time_toggle_volumetrics(choices) : "Toggle volumetrics with time" : 1 : "If enabled, volumetrics will also toggle on/off with the time window." =
+	[
+		0 : "No"
+		1 : "Yes"
+	]
+]
+
+@PointClass base(Targetname, Angles) iconsprite("editor/light_env.vmt") = light_deferred_global
+[
+	spawnflags(flags) =
+	[
+		1 	: "Enabled" : 1
+		2 	: "Enable shadow" : 1
+		4 	: "Enable transitions" : 1
+	]
+	diffuse(color255) : "Color diffuse" : "255 255 255 255" : ""
+	ambient_high(color255) : "Color ambient high" : "20 40 80 255" : ""
+	ambient_low(color255) : "Color ambient low" : "40 20 10 255" : ""
+
+	fadetime(float) : "Fade interval time" : "1.0" : ""
+]
+
+@PointClass base(Targetname) iconsprite("editor/logic_script.vmt") = env_timecycle
+[
+	start_time(float) : "Start time (hours)" : "12.0" : ""
+	time_scale(float) : "Time scale multiplier" : "10.0" : "Real day is 2.4 hours when day_length_seconds=8640 and time_scale=10."
+	day_length_seconds(float) : "Day length (seconds)" : "8640.0" : ""
+
+	sunrise_hour(float) : "Sunrise hour" : "6.0" : ""
+	sunset_hour(float) : "Sunset hour" : "18.0" : ""
+	max_altitude(float) : "Max sun altitude (deg)" : "60.0" : ""
+	azimuth_offset(float) : "Azimuth offset (deg)" : "0.0" : ""
+	twilight_hours(float) : "Twilight duration (hours)" : "1.25" : ""
+	night_altitude(float) : "Night sun altitude (deg)" : "-12.0" : ""
+]

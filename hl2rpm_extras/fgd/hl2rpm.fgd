@@ -1,0 +1,94 @@
+// Сущность оружия
+@PointClass base(Weapon) studio("models/weapons/w_shot_xm1014.mdl") sphere(fademindist) sphere(fademaxdist) = weapon_xm1014 : "XM1014" [
+]
+
+
+@BaseClass base(BaseNPC, RappelNPC, GrenadeUser, PolicingNPC) = BaseCombine
+[
+	additionalequipment(choices) : "Weapons" : "weapon_smg1" =
+	[
+		"weapon_357" : ".357 Magnum (Revolver)"
+		"weapon_ar2" : "AR2 (Pulse Rifle)"
+		"weapon_citizenpackage" : "Citizen Package (Ration)"
+		"weapon_citizensuitcase" : "Citizen Suitcase"
+		"weapon_pistol" : "Pistol"
+		"weapon_rpg" : "RPG"
+		"weapon_shotgun" : "Shotgun"
+		"weapon_smg1" : "SMG1"
+		"weapon_stunstick" : "Stun Stick"
+		"weapon_xm1014" : "XM1014"
+		"0" : "Nothing"
+	]
+
+	spawnflags(Flags) = 
+	[
+		65536 :  "[65536] Start LookOff" : 0
+		131072	: "[131072] Don't drop grenades" : 0
+		262144  : "[262144] Don't drop AR2 alt fire (elite only) " : 0
+	]
+	
+	NumGrenades(choices) : "Number of Grenades" : "5" =
+	[
+		"0" : "None"
+		"1" : "1"
+		"2" : "2"
+		"3" : "3"
+		"4" : "4"
+		"5" : "5"
+		"999999" : "Unlimited"
+	]
+	
+	UnderthrowGrenades(choices) : "Underthrow Grenades" : "0" : "If enabled, this soldier will 'underthrow' their grenades with ACT_SPECIAL_ATTACK1, which looks a lot more like the HL1 grunt animation. This includes grenades thrown during regular behavior and grenades forced with ThrowGrenadeAtTarget." =
+	[
+		"0" : "No"
+		"1" : "Yes"
+	]
+	
+	SetAlternateCapable(choices) : "Alternate Capable" : "0" : "Makes the soldier capable of using both grenades AND energy balls at the same time, regardless of their elite status." =
+	[
+		"0" : "No"
+		"1" : "Yes"
+	]
+
+	// Inputs
+	input LookOn(void) : "Look normally"	
+	input LookOff(void) : "Don't look for myself, use other squad member's eyes"
+	input StartPatrolling(void) : "Patrol whenever I'm idle or alert."
+	input StopPatrolling(void) : "Stop patrolling when I'm idle or alert."
+	input SetElite(bool) : "Sets whether we are an elite. Model will not change, but grenades will transform into energy balls or vice versa."
+	input UnderthrowGrenades(bool) : "Sets whether we should underthrow our grenades."
+	input SetAlternateCapable(bool) : "Sets whether the soldier is capable of using both grenades and energy balls at the same time."
+]
+
+@PointClass base(Item) studio("models/combine_vests/militaryvest.mdl") = item_combine_soldier_suit : "CMB Soldier Suit" [
+]
+
+@SolidClass base(Trigger) = func_loot_container : "Loot Container"
+[
+	loot_displayname(string) : "Displayable name" : ""
+	loot_sound_open(sound) : "Sound open" : ""
+	loot_sound_close(sound) : "Sound close" : ""
+	loot_items(string) : "Loot items" : ""
+]
+
+@SolidClass base(Trigger) = trigger_dialog_start : "Start dialog when player enters trigger"
+[
+	npc_name(target_destination) : "NPC name" : "" : "targetname of the NPC entity which dialog should start for."
+	trigger_once(choices) : "Trigger once" : 0 =
+	[
+		0 : "No"
+		1 : "Yes"
+	]
+	npc_approach(choices) : "NPC approaches player before dialog" : 0 =
+	[
+		0 : "No"
+		1 : "Yes"
+	]
+	approach_run(choices) : "Approach speed" : 0 : "How the NPC approaches the player when npc_approach=1." =
+	[
+		0 : "Walk"
+		1 : "Run"
+	]
+	approach_distance(float) : "Approach distance" : 96 : "Distance to player at which dialog starts (used when npc_approach=1)."
+]
+
