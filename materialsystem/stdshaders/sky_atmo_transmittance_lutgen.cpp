@@ -49,6 +49,11 @@ BEGIN_VS_SHADER( SKY_ATMO_TRANSMITTANCE_LUTGEN, "" )
  
 			DECLARE_DYNAMIC_PIXEL_SHADER( sky_atmo_transmittance_lutgen_ps30 );
 			SET_DYNAMIC_PIXEL_SHADER( sky_atmo_transmittance_lutgen_ps30 );
+
+			// HL2RPM: weather haze thickens the aerosol layer
+			const weatherData_t &w = GetDeferredExt()->GetWeatherData();
+			float flAtmo[4] = { w.bEnabled ? w.vecAtmoParams.x : 1.0f, 0, 0, 0 };
+			pShaderAPI->SetPixelShaderConstant( 2, flAtmo );
 		}
  
 		Draw();

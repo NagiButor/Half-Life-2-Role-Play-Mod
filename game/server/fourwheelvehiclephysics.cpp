@@ -414,6 +414,27 @@ bool CFourWheelVehiclePhysics::Initialize( const char *pVehicleScript, unsigned 
 	}
 	m_pOuter->VPhysicsDestroyObject();
 
+	// HL2RPM: a wheeled vehicle on a model without wheel attachments (e.g. a decorative car
+	// model placed as prop_vehicle) gets degenerate axles, its physics turn into NaNs and
+	// vphysics crashes a few seconds after the map loads. Refuse it with a clear warning.
+	if ( nVehicleType == VEHICLE_TYPE_CAR_WHEELS )
+	{
+		static const char *s_pszWheels[4] = { "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr" };
+		for ( int i = 0; i < 4; i++ )
+		{
+			if ( m_pOuter->LookupAttachment( s_pszWheels[i] ) <= 0 )
+			{
+				Warning( "%s '%s' at (%.0f %.0f %.0f): model %s has no '%s' attachment for vehicle script %s - "
+					"the vehicle was removed (use prop_physics / prop_static for decorative cars).\n",
+					m_pOuter->GetClassname(), STRING( m_pOuter->GetEntityName() ),
+					m_pOuter->GetAbsOrigin().x, m_pOuter->GetAbsOrigin().y, m_pOuter->GetAbsOrigin().z,
+					STRING( m_pOuter->GetModelName() ), s_pszWheels[i], pVehicleScript );
+				UTIL_Remove( m_pOuter );
+				return false;
+			}
+		}
+	}
+
 	// Create the vphysics model + teleport it into position
 	solid_t solid;
 	vehicleparams_t vehicle;

@@ -26,10 +26,14 @@ BEGIN_VS_SHADER( SKY_ATMO_SKYVIEW_LUTGEN, "" )
 
 	SHADER_INIT
 	{
-		if ( params[TRANSMITTANCELUT]->IsDefined() )
-			LoadTexture( TRANSMITTANCELUT );
-		if ( params[MULTISCATTERINGLUT]->IsDefined() )
-			LoadTexture( MULTISCATTERINGLUT );
+		// HL2RPM: default param values don't count as "defined", so these LUTs were
+		// never loaded and the sky was computed from the error texture (purple checker).
+		if ( !params[TRANSMITTANCELUT]->IsDefined() )
+			params[TRANSMITTANCELUT]->SetStringValue( DEFRTNAME_SKY_TRANSMITTANCE_LUT );
+		if ( !params[MULTISCATTERINGLUT]->IsDefined() )
+			params[MULTISCATTERINGLUT]->SetStringValue( DEFRTNAME_SKY_MULTISCATTERING_LUT );
+		LoadTexture( TRANSMITTANCELUT );
+		LoadTexture( MULTISCATTERINGLUT );
 	}
 
 	SHADER_DRAW
@@ -69,7 +73,14 @@ BEGIN_VS_SHADER( SKY_ATMO_SKYVIEW_LUTGEN, "" )
 			const lightData_Global_t& data = GetDeferredExt()->GetLightData_Global();
 
 			CommitGlobalLightForward( pShaderAPI, 1 );
-			pShaderAPI->SetPixelShaderConstant( 16, data.diff.Base() );
+
+			// HL2RPM: weather haze thickens the aerosol layer. With the weather system the sky
+			// is lit by the untinted sun (the atmosphere colors it and casts the earth's shadow
+			// at dusk; the global light's diffuse is tinted and faded out at the horizon).
+			const weatherData_t &w = GetDeferredExt()->GetWeatherData();
+			pShaderAPI->SetPixelShaderConstant( 16, w.bEnabled ? w.vecSkyLight.Base() : data.diff.Base() );
+			float flAtmo[4] = { w.bEnabled ? w.vecAtmoParams.x : 1.0f, 0, 0, 0 };
+			pShaderAPI->SetPixelShaderConstant( 2, flAtmo );
 		}
 
 		Draw();

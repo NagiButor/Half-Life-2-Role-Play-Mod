@@ -121,8 +121,10 @@
 
 #if CSM_USE_COMPOSITED_TARGET
 /* Composited resolution
+ * HL2RPM: 2x2 tiles of up to 2048 (up to 4 view-fitted cascades).
+ * Only used by client code, shaders get the size through constants.
  */
-#	define CSM_COMP_RES_X 8192
+#	define CSM_COMP_RES_X 4096
 #	define CSM_COMP_RES_Y 4096
 #endif
 

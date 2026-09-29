@@ -1,0 +1,152 @@
+//========= HL2RPM ============================================================//
+//
+// Weather applied to the lit opaque scene (before translucents):
+//   - wet surfaces: darker + sky reflection (Fresnel), only where rain can fall
+//     (top-down rain occlusion map), walls a bit, floors fully
+//   - puddles on flat ground with raindrop ripples
+//   - exponential height fog with sun in-scattering
+//
+// Blend: ONE, SRC_ALPHA  ->  result = src.rgb + scene * src.a
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+#include "common_deferred_fxc.h"
+
+sampler sNormals		: register( s0 );
+sampler sDepth			: register( s1 );
+sampler sRainMap		: register( s2 );	// hardware depth compare
+sampler sWeatherMap		: register( s3 );
+
+const float3 g_vecViewOrigin	: register( c0 );
+const float4 g_vecRain			: register( c1 );	// rain, wetness, puddles, time
+const float4 g_vecFog			: register( c2 );	// density /1000u, falloff /1000u, base z, volumetric
+const float4 g_vecFogColor		: register( c3 );	// rgb, max opacity
+const float4 g_vecSkyZenith		: register( c4 );
+const float4 g_vecSkyHorizon	: register( c5 );
+const float4 g_vecLightDir		: register( c6 );
+const float4 g_vecLightColor	: register( c7 );
+const float4 g_matRainMap[3]	: register( c8 );	// rows of world -> rain map texture
+const float4 g_vecRainMap		: register( c11 );	// depth bias, size, texel size, valid
+const float4 g_vecFlags			: register( c12 );	// x fog on, y wet on, z night
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+};
+
+float RainExposure( float3 worldPos, float3 normal )
+{
+	if ( g_vecRainMap.w < 0.5 )
+		return saturate( normal.z * 1.2 );	// no map yet: guess from the normal
+
+	float4 wp = float4( worldPos + normal * 2.0, 1.0 );
+	float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
+
+	// outside the map: fade to the normal-based guess
+	float2 edge = abs( uvz.xy * 2.0 - 1.0 );
+	float inside = saturate( ( 1.0 - max( edge.x, edge.y ) ) * 12.0 );
+
+	float z = uvz.z - g_vecRainMap.x;
+	float2 o = g_vecRainMap.z / g_vecRainMap.y * 1.5;	// ~1.5 texels in uv
+	float exposed = 0.25 * (
+		tex2Dproj( sRainMap, float4( uvz.xy + float2( -o.x, -o.y ), z, 1 ) ).x +
+		tex2Dproj( sRainMap, float4( uvz.xy + float2(  o.x, -o.y ), z, 1 ) ).x +
+		tex2Dproj( sRainMap, float4( uvz.xy + float2( -o.x,  o.y ), z, 1 ) ).x +
+		tex2Dproj( sRainMap, float4( uvz.xy + float2(  o.x,  o.y ), z, 1 ) ).x );
+
+	return lerp( saturate( normal.z * 1.2 ), exposed, inside );
+}
+
+// Expanding rings where drops hit a puddle
+float3 RippleNormal( float2 p, float time, float strength )
+{
+	float2 cell = floor( p );
+	float2 f = frac( p ) - 0.5;
+	float3 n = float3( 0, 0, 1 );
+
+	float rnd = frac( sin( dot( cell, float2( 12.9898, 78.233 ) ) ) * 43758.5453 );
+	float t = frac( time * 0.9 + rnd );
+	float2 center = float2( frac( rnd * 7.13 ), frac( rnd * 3.71 ) ) - 0.5;
+	float d = length( f - center * 0.6 );
+	float ring = sin( ( d - t * 0.45 ) * 60.0 ) * saturate( 1.0 - abs( d - t * 0.45 ) * 14.0 ) * ( 1.0 - t );
+	float2 dir = ( f - center * 0.6 ) / max( d, 1e-3 );
+	n.xy += dir * ring * strength;
+	return normalize( n );
+}
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	float depth = tex2D( sDepth, In.vTexCoord ).x;
+	if ( depth < 0.1 )
+		return float4( 0, 0, 0, 1 );	// sky: handled by the sky shader
+
+	float3 worldPos = g_vecViewOrigin + In.vecWorldRay * depth;
+	float3 toPoint = worldPos - g_vecViewOrigin;
+	float dist = length( toPoint );
+	float3 rd = toPoint / max( dist, 1e-3 );
+
+	float3 N = normalize( tex2D( sNormals, In.vTexCoord ).xyz * 2.0 - 1.0 );
+
+	float4 result = float4( 0, 0, 0, 1 );
+
+	// ---------------- wetness
+	float wetness = g_vecRain.y;
+	if ( g_vecFlags.y > 0.5 && wetness > 0.001 )
+	{
+		float exposure = RainExposure( worldPos, N );
+		float wet = wetness * exposure * saturate( N.z * 1.1 + 0.35 );
+
+		float2 puv = worldPos.xy / 700.0;
+		float pn = tex2D( sWeatherMap, puv ).a * 0.7 + tex2D( sWeatherMap, puv * 3.7 + 0.21 ).a * 0.3;
+		float puddles = g_vecRain.z;
+		float puddle = puddles * exposure * smoothstep( 0.92, 0.985, N.z )
+			* smoothstep( 0.62 - puddles * 0.28, 0.70 - puddles * 0.28, pn );
+
+		float3 Nw = N;
+		if ( puddle > 0.01 )
+		{
+			float3 up = float3( 0, 0, 1 );
+			if ( g_vecRain.x > 0.02 )
+				up = RippleNormal( worldPos.xy / 18.0, g_vecRain.w, 0.25 * g_vecRain.x );
+			Nw = normalize( lerp( N, up, puddle ) );
+		}
+
+		float3 V = -rd;
+		float3 R = reflect( rd, Nw );
+		float NdV = saturate( dot( Nw, V ) );
+		float F = 0.02 + 0.98 * pow( 1.0 - NdV, 5.0 );
+
+		float3 sky = lerp( g_vecSkyHorizon.rgb, g_vecSkyZenith.rgb, saturate( R.z * 1.2 ) );
+		float sunSpec = pow( saturate( dot( R, g_vecLightDir.xyz ) ), 220.0 ) * saturate( g_vecLightDir.z * 5.0 );
+		float3 refl = ( sky + g_vecLightColor.rgb * sunSpec * 0.5 ) * F * ( wet * 0.6 + puddle );
+
+		result.rgb += refl;
+		result.a *= 1.0 - ( wet * 0.40 + puddle * 0.25 );
+	}
+
+	// ---------------- height fog
+	if ( g_vecFlags.x > 0.5 && g_vecFog.x > 0.0 )
+	{
+		float d0 = g_vecFog.x * 0.001;
+		float k = max( g_vecFog.y * 0.001, 1e-6 );
+		float camH = g_vecViewOrigin.z - g_vecFog.z;
+		float dz = toPoint.z;
+		float kdz = k * dz;
+		float shape = ( abs( kdz ) > 1e-4 ) ? ( 1.0 - exp( -kdz ) ) / kdz : 1.0;
+		float opticalDepth = d0 * dist * exp( -k * camH ) * shape;
+		float fog = ( 1.0 - exp( -opticalDepth ) ) * g_vecFogColor.a;
+
+		// sunlight scattered toward the camera (strong forward lobe)
+		float cosTheta = dot( rd, g_vecLightDir.xyz );
+		float g = 0.62;
+		float phase = ( 1.0 - g * g ) / pow( max( 1.0 + g * g - 2.0 * g * cosTheta, 1e-3 ), 1.5 ) * 0.25;
+		float3 fogColor = g_vecFogColor.rgb + g_vecLightColor.rgb * phase * 0.18 * ( 1.0 - g_vecFlags.z );
+
+		result.rgb = result.rgb * ( 1.0 - fog ) + fogColor * fog;
+		result.a *= 1.0 - fog;
+	}
+
+	return result;
+}

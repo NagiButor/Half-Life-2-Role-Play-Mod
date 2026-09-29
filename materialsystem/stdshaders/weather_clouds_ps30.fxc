@@ -1,0 +1,284 @@
+//========= HL2RPM ============================================================//
+//
+// Volumetric clouds, rendered in screen space at reduced resolution.
+//
+// Output: rgb = in-scattered light (sky units, before the sky exposure),
+//         a   = transmittance (1 = clear sky, 0 = opaque cloud),
+//         a < 0 marks pixels that were not computed (covered by geometry).
+//
+// The sky shader composites this over the atmosphere. Temporal accumulation
+// (reprojected with the previous camera rotation) removes the raymarch noise.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+sampler sDepth			: register( s0 );	// G-buffer linear depth, 0 = sky
+sampler sNoise			: register( s1 );	// 3D noise atlas (8x8 slices)
+sampler sWeather		: register( s2 );	// 2D weather map
+sampler sHistory		: register( s3 );	// last frame's clouds
+
+const float4 g_vecCamera		: register( c0 );	// xyz camera pos (units)
+const float4 g_vecLightDir		: register( c1 );	// xyz direction to the sun/moon lighting the clouds, w night
+const float4 g_vecLightColor	: register( c2 );	// rgb
+const float4 g_vecSkyZenith		: register( c3 );
+const float4 g_vecSkyHorizon	: register( c4 );
+const float4 g_vecCloud0		: register( c5 );	// coverage, density, type, darkness
+const float4 g_vecCloud1		: register( c6 );	// base (m), thickness (m), cirrus, time (s)
+const float4 g_vecCloud2		: register( c7 );	// brightness, shadow strength, steps, temporal blend
+const float4 g_vecWind			: register( c8 );	// xy cloud offset (m)
+const float4 g_vecScreen		: register( c9 );	// 1/w, 1/h (full res), uv scale, frame
+const float4 g_matPrevVP[4]		: register( c10 );	// rows, rotation-only previous view projection
+const float4 g_vecLightning		: register( c14 );	// xyz flash dir, w intensity
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+	float2 vScreenPos			: VPOS;
+};
+
+static const float PI = 3.14159265;
+static const float EARTH_R = 6371000.0;
+static const float UNITS_TO_M = 0.0254;
+static const float MAX_DIST = 60000.0;
+// all periods divide the 160 km wrap of the wind offset (no pops when it wraps)
+static const float SHAPE_PERIOD = 8000.0;		// m
+static const float DETAIL_PERIOD = 1600.0;		// m
+static const float WEATHER_PERIOD = 40000.0;	// m
+
+// 3D noise from the 8x8 slice atlas: 62x62 slices with a 1 texel wrap border
+float4 Noise3D( float3 p )
+{
+	p = frac( p );
+	float zs = p.z * 64.0 - 0.5;
+	float z0 = floor( zs );
+	float zf = zs - z0;
+	z0 = ( z0 < 0.0 ) ? 63.0 : z0;
+	float z1 = ( z0 >= 63.0 ) ? 0.0 : z0 + 1.0;
+
+	float2 inTile = ( 1.0 + p.xy * 62.0 ) / 512.0;
+	float2 t0 = float2( fmod( z0, 8.0 ), floor( z0 / 8.0 ) ) * 0.125;
+	float2 t1 = float2( fmod( z1, 8.0 ), floor( z1 / 8.0 ) ) * 0.125;
+
+	float4 a = tex2Dlod( sNoise, float4( t0 + inTile, 0, 0 ) );
+	float4 b = tex2Dlod( sNoise, float4( t1 + inTile, 0, 0 ) );
+	return lerp( a, b, zf );
+}
+
+float Remap( float v, float lo, float hi, float newLo, float newHi )
+{
+	return newLo + ( v - lo ) / ( hi - lo ) * ( newHi - newLo );
+}
+
+// Distance along the ray to the sphere of radius (R + H) seen from height h below it.
+// Rationalized form: no catastrophic cancellation with planet-sized numbers.
+float DistToLayer( float mu, float h, float H )
+{
+	float rh = EARTH_R + h;
+	float k = ( H - h ) * ( 2.0 * EARTH_R + h + H );
+	float b = rh * mu;
+	return k / ( b + sqrt( max( b * b + k, 0.0 ) ) );
+}
+
+// Coverage -> cut-off on the stretched shape noise, so that 'coverage' really is the
+// fraction of the sky covered (cubics fitted offline on the actual noise for the cumulus
+// and the stratus height profiles; the old linear cut filled the sky at 50% coverage).
+float CoverageThreshold( float c, float type )
+{
+	float cu = ( ( -1.0825 * c + 1.6586 ) * c - 1.1291 ) * c + 0.7521;
+	float st = ( ( -1.2365 * c + 1.6690 ) * c - 1.1536 ) * c + 0.7396;
+	return lerp( st, cu, type ) * saturate( ( 1.0 - c ) * 20.0 );
+}
+
+// the Perlin-Worley shape (after the fbm dilation) sits in 0.66..0.93: stretch it to 0..1
+float StretchShape( float s )
+{
+	return saturate( ( s - 0.66 ) * ( 1.0 / 0.27 ) );
+}
+
+float HeightProfile( float h, float type )
+{
+	// stratus: thin flat sheet; cumulus: flat base, rounded top
+	float stratus = saturate( h / 0.07 ) * saturate( ( 0.4 - h ) / 0.25 );
+	float cumulus = saturate( h / 0.1 ) * saturate( ( 1.0 - h ) / 0.5 );
+	return lerp( stratus, cumulus, type );
+}
+
+float CloudDensity( float3 pos, float h01, bool bDetail )
+{
+	if ( h01 < 0.0 || h01 > 1.0 )
+		return 0.0;
+
+	float4 wm = tex2Dlod( sWeather, float4( pos.xy / WEATHER_PERIOD, 0, 0 ) );
+
+	// large scale variation: some areas of the sky are cloudier than others
+	float coverage = saturate( g_vecCloud0.x + ( wm.r - 0.5 ) * 0.45 * ( 1.0 - g_vecCloud0.x * 0.6 ) );
+	float type = saturate( g_vecCloud0.z + ( wm.g - 0.5 ) * 0.5 );
+
+	float3 shapePos = float3( pos.xy, h01 * g_vecCloud1.y * 1.6 + g_vecCloud1.w * 3.0 ) / SHAPE_PERIOD;
+	float4 shapeNoise = Noise3D( shapePos );
+	float shape = StretchShape( Remap( shapeNoise.r, ( shapeNoise.g * 0.625 + shapeNoise.b * 0.25 + shapeNoise.a * 0.125 ) - 1.0, 1.0, 0.0, 1.0 ) );
+
+	float threshold = CoverageThreshold( coverage, type );
+	float base = shape * HeightProfile( h01, type );
+	// narrow transition band: crisp cumulus edges instead of a soft veil
+	base = saturate( ( base - threshold ) / max( ( 1.0 - threshold ) * 0.6, 0.05 ) );
+	base *= 0.35 + 0.65 * coverage;
+
+	if ( bDetail && base > 0.0 )
+	{
+		float3 detailPos = float3( pos.xy * 1.0, h01 * g_vecCloud1.y + g_vecCloud1.w * 12.0 ) / DETAIL_PERIOD;
+		float4 detailNoise = Noise3D( detailPos );
+		float detail = detailNoise.g * 0.625 + detailNoise.b * 0.25 + detailNoise.a * 0.125;
+		// wispy at the bottom, billowy at the top
+		detail = lerp( detail, 1.0 - detail, saturate( h01 * 4.0 ) );
+		base = saturate( Remap( base, detail * 0.38, 1.0, 0.0, 1.0 ) );
+	}
+
+	return base;
+}
+
+float HG( float c, float g )
+{
+	float g2 = g * g;
+	return ( 1.0 - g2 ) / ( 4.0 * PI * pow( max( 1.0 + g2 - 2.0 * g * c, 1e-4 ), 1.5 ) );
+}
+
+float Hash12( float2 p )
+{
+	float3 p3 = frac( float3( p.xyx ) * 0.1031 );
+	p3 += dot( p3, p3.yzx + 33.33 );
+	return frac( ( p3.x + p3.y ) * p3.z );
+}
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	// ---- is this pixel sky? (any of the full-res pixels it covers)
+	float2 uv = In.vTexCoord;
+	float2 fp = g_vecScreen.xy * ( 0.25 / g_vecScreen.z );
+	float4 depths = float4(
+		tex2D( sDepth, uv + float2( -fp.x, -fp.y ) ).x,
+		tex2D( sDepth, uv + float2(  fp.x, -fp.y ) ).x,
+		tex2D( sDepth, uv + float2( -fp.x,  fp.y ) ).x,
+		tex2D( sDepth, uv + float2(  fp.x,  fp.y ) ).x );
+	if ( min( min( depths.x, depths.y ), min( depths.z, depths.w ) ) > 0.1 )
+		return float4( 0, 0, 0, -1 );
+
+	float3 rd = normalize( In.vecWorldRay );
+	if ( rd.z < -0.03 )
+		return float4( 0, 0, 0, 1 );
+
+	const float densityScale = g_vecCloud0.y;
+	const float darkness = g_vecCloud0.w;
+	const float baseH = g_vecCloud1.x;
+	const float topH = g_vecCloud1.x + g_vecCloud1.y;
+
+	// ---- where the ray enters/leaves the cloud layer (camera below the layer)
+	float camH = 2.0;
+	float mu = max( rd.z, 0.0 );
+	float tStart = DistToLayer( mu, camH, baseH );
+	float tEnd = DistToLayer( mu, camH, topH );
+	if ( tStart > MAX_DIST )
+		return float4( 0, 0, 0, 1 );
+	tEnd = min( tEnd, tStart + 12000.0 );
+	tEnd = min( tEnd, MAX_DIST );
+
+	const float flSteps = max( g_vecCloud2.z, 8.0 );
+	const float dt = ( tEnd - tStart ) / flSteps;
+	float jitter = frac( Hash12( In.vScreenPos ) + g_vecScreen.w * 0.61803398 );
+
+	float3 camXY = float3( g_vecCamera.xy * UNITS_TO_M + g_vecWind.xy, 0.0 );
+	float3 L = g_vecLightDir.xyz;
+	float cosTheta = dot( rd, L );
+	// dual-lobe phase: strong forward scattering (silver lining) + some back scatter
+	float phase = lerp( HG( cosTheta, 0.72 ), HG( cosTheta, -0.25 ), 0.28 ) * 4.0 * PI;
+
+	float3 lightColor = g_vecLightColor.rgb * g_vecCloud2.x * ( 1.0 - 0.75 * darkness );
+	float3 flashColor = float3( 0.80, 0.86, 1.0 ) * g_vecLightning.w * 6.0;
+	float flashAim = pow( saturate( dot( rd, normalize( g_vecLightning.xyz ) ) ), 6.0 );
+
+	float3 scatter = 0.0;
+	float T = 1.0;
+	const float sigmaScale = 0.04 * densityScale;
+
+	[loop]
+	for ( int i = 0; i < 72; i++ )
+	{
+		if ( i >= (int)flSteps || T < 0.01 )
+			break;
+
+		float t = tStart + ( i + jitter ) * dt;
+		float3 samplePos = rd * t;
+		// height above the curved ground (small angle form, precise for t << R)
+		float altitude = camH + samplePos.z + dot( samplePos.xy, samplePos.xy ) / ( 2.0 * ( EARTH_R + camH ) );
+		float h01 = ( altitude - baseH ) / g_vecCloud1.y;
+		float3 worldPos = float3( samplePos.xy + camXY.xy, altitude );
+
+		float density = CloudDensity( worldPos, h01, true );
+		if ( density <= 0.001 )
+			continue;
+
+		// light march toward the sun (shape only, growing steps).
+		// A real loop, not unrolled: keeps the shader within the 32 temp registers of ps_3_0.
+		float od = 0.0;
+		float lstep = g_vecCloud1.y * 0.06;
+		float3 lp = worldPos;
+		[loop]
+		for ( int j = 0; j < 5; j++ )
+		{
+			lp += L * lstep;
+			od += CloudDensity( lp, ( lp.z - baseH ) / g_vecCloud1.y, false ) * lstep;
+			lstep *= 1.8;
+		}
+
+		float sigma = density * sigmaScale;
+
+		// multiple scattering approximation (Wrenninge): 3 octaves
+		float3 sun = 0.0;
+		float a = 1.0, b = 1.0, c = 1.0;
+		[unroll]
+		for ( int k = 0; k < 3; k++ )
+		{
+			float ph = lerp( 1.0, phase, c );
+			sun += a * exp( -od * sigmaScale * b ) * ph;
+			a *= 0.5; b *= 0.4; c *= 0.5;
+		}
+		// powder: dark edges facing the light
+		float powder = 1.0 - exp( -sigma * 180.0 );
+		sun *= lerp( 1.0, powder * 2.0, 0.5 * saturate( 1.0 - cosTheta ) );
+
+		float3 ambient = lerp( g_vecSkyHorizon.rgb * 0.9, g_vecSkyZenith.rgb, saturate( h01 * 1.3 ) ) * ( 0.35 + 0.65 * h01 ) * ( 1.0 - darkness * 0.55 );
+		float3 S = sun * lightColor + ambient * g_vecCloud2.x * 2.4 + flashColor * flashAim * ( 0.3 + h01 );
+
+		float stepT = exp( -sigma * dt );
+		scatter += T * S * ( 1.0 - stepT );
+		T *= stepT;
+	}
+
+	// far clouds melt into the horizon haze
+	float fade = exp( -tStart / 30000.0 ) * saturate( ( MAX_DIST - tStart ) / 15000.0 );
+	scatter *= fade;
+	T = lerp( 1.0, T, fade );
+
+	float4 result = float4( scatter, T );
+
+	// ---- temporal accumulation (clouds are at infinity: rotation-only reprojection)
+	if ( g_vecCloud2.w > 0.0 )
+	{
+		float4 p = float4( rd * 1000.0, 1.0 );
+		float4 clip = float4( dot( g_matPrevVP[0], p ), dot( g_matPrevVP[1], p ), dot( g_matPrevVP[2], p ), dot( g_matPrevVP[3], p ) );
+		if ( clip.w > 0.001 )
+		{
+			float2 prevUV = ( clip.xy / clip.w ) * float2( 0.5, -0.5 ) + 0.5;
+			if ( all( prevUV > 0.0 ) && all( prevUV < 1.0 ) )
+			{
+				float4 history = tex2D( sHistory, prevUV * g_vecScreen.z );
+				if ( history.a >= 0.0 )
+					result = lerp( result, history, g_vecCloud2.w );
+			}
+		}
+	}
+
+	return result;
+}

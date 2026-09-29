@@ -193,8 +193,14 @@ bool VGui_Startup( CreateInterfaceFn appSystemFactory )
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
+// HL2RPM: "Graphics" page in the Options dialog (hl2rpm_options_graphics.cpp)
+extern void HL2RPM_CreateOptionsInjector();
+extern void HL2RPM_DestroyOptionsInjector();
+
 void VGui_CreateGlobalPanels( void )
 {
+	HL2RPM_CreateOptionsInjector();
+
 	VPANEL gameToolParent = enginevgui->GetPanel( PANEL_CLIENTDLL_TOOLS );
 	VPANEL toolParent = enginevgui->GetPanel( PANEL_TOOLS );
 #if defined( TRACK_BLOCKING_IO )
@@ -224,6 +230,8 @@ void VGui_CreateGlobalPanels( void )
 
 void VGui_Shutdown()
 {
+	HL2RPM_DestroyOptionsInjector();
+
 	VGUI_DestroyClientDLLRootPanel();
 
 #ifndef _X360

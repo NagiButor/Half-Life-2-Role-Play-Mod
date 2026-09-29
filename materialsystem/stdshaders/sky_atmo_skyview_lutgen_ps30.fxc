@@ -62,14 +62,19 @@ float getRayleighPhase( float cosTheta )
 	return 3.0 / ( 16.0 * PI ) * ( 1.0 + cosTheta * cosTheta );
 }
 
+// HL2RPM: x = aerosol (Mie) multiplier from the weather (haze, fog, rain)
+const float4 g_vecAtmo : register( c2 );
+
 void getScatteringValues( float3 pos, out float3 rayleighScattering, out float mieScattering, out float3 extinction )
 {
-	float height = length( pos ) - groundRadiusMM;
+	// HL2RPM: real scale heights (8 km Rayleigh, 1.2 km Mie) and an ozone layer peaking
+	// at 25 km. These were 10x too large, which made the sky pink/purple.
+	float altitudeKM = ( length( pos ) - groundRadiusMM ) * 1000.0;
 
-	float rayleighDensity = exp( -height / 0.08 );
-	float mieDensity = exp( -height / 0.012 );
+	float rayleighDensity = exp( -altitudeKM / 8.0 );
+	float mieDensity = exp( -altitudeKM / 1.2 ) * max( g_vecAtmo.x, 0.1 );
 
-	float3 ozoneAbsorption = ozoneAbsorptionBase * saturate( ( height - 0.015 ) / 0.03 ) * saturate( ( 0.12 - height ) / 0.03 );
+	float3 ozoneAbsorption = ozoneAbsorptionBase * max( 0.0, 1.0 - abs( altitudeKM - 25.0 ) / 15.0 );
 
 	rayleighScattering = rayleighScatteringBase * rayleighDensity;
 	float3 rayleighAbsorption = rayleighAbsorptionBase * rayleighDensity;
@@ -99,7 +104,7 @@ float3 raymarchScattering( float3 pos, float3 rayDir, float3 sunDir, float tMax 
 	if ( tMax <= 0.0 )
 		return 0.0.xxx;
 
-	const int STEPS = 8;
+	const int STEPS = 20;
 	float dt = tMax / (float)STEPS;
 
 	float3 transmittance = 1.0.xxx;
@@ -139,21 +144,25 @@ float3 raymarchScattering( float3 pos, float3 rayDir, float3 sunDir, float tMax 
 	return lum;
 }
 
+// HL2RPM: sky-view LUT parameterization (must match SkyViewUV in procsky_atmo):
+//   v = view elevation, sqrt-compressed so most texels sit near the horizon
+//   u = azimuth relative to the sun, sqrt-compressed so most texels sit near the sun
+// (the old generator built its rays in the sun's frame while the sky shader looked the
+// LUT up by elevation, so the sky colors ended up in the wrong places)
 float3 DirFromSkyViewUV( float2 uv, float3 sunDir )
 {
-	float mu = lerp( -1.0, 1.0, uv.y );
-	float sinTheta = sqrt( saturate( 1.0 - mu * mu ) );
+	float vv = uv.y * 2.0 - 1.0;
+	float elev = sign( vv ) * vv * vv * ( PI * 0.5 );
 
-	float cosGamma = lerp( -1.0, 1.0, uv.x );
-	float sinGamma = sqrt( saturate( 1.0 - cosGamma * cosGamma ) );
+	float cosAz = 1.0 - 2.0 * uv.x * uv.x;
+	float sinAz = sqrt( saturate( 1.0 - cosAz * cosAz ) );
 
-	float3 up = float3( 0.0, 0.0, 1.0 );
-	float3 t0 = normalize( cross( up, sunDir ) );
-	float3 t1 = cross( sunDir, t0 );
+	float lenH = length( sunDir.xy );
+	float2 sunH = ( lenH > 1e-4 ) ? sunDir.xy / lenH : float2( 1.0, 0.0 );
+	float2 perpH = float2( -sunH.y, sunH.x );
 
-	float3 dirInSunFrame = float3( sinTheta * sinGamma, sinTheta * cosGamma, mu );
-	float3 dir = t0 * dirInSunFrame.x + t1 * dirInSunFrame.y + sunDir * dirInSunFrame.z;
-	return normalize( dir );
+	float2 h = ( sunH * cosAz + perpH * sinAz ) * cos( elev );
+	return normalize( float3( h, sin( elev ) ) );
 }
 
 PS_OUTPUT main( const PS_INPUT In )

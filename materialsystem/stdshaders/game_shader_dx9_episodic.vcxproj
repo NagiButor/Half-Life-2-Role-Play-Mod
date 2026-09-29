@@ -277,6 +277,10 @@
     <ClCompile Include="sky_atmo_multiscattering_lutgen.cpp" />
     <ClCompile Include="sky_atmo_skyview_lutgen.cpp" />
     <ClCompile Include="sun_godrays.cpp" />
+    <ClCompile Include="weather_clouds.cpp" />
+    <ClCompile Include="weather_post.cpp" />
+    <ClCompile Include="weather_rain.cpp" />
+    <ClCompile Include="volumpass_sun.cpp" />
     <ClCompile Include="blur.cpp" />
     <ClCompile Include="debug_lightingctrl.cpp" />
     <ClCompile Include="debug_radiosity_grid.cpp" />

@@ -3,6 +3,7 @@
 #include "deferred/deferred_shared_common.h"
 
 #include "materialsystem/itexture.h"
+#include "weather/weather_render.h"
 
 #include "tier0/memdbgon.h"
 
@@ -42,6 +43,9 @@ static CTextureReference g_tex_SkyAtmoLUT;
 static CTextureReference g_tex_SkyAtmoTransmittanceLUT;
 static CTextureReference g_tex_SkyAtmoMultiScatteringLUT;
 static CTextureReference g_tex_SkyAtmoSkyViewLUT;
+
+static bool g_bRadiosityRTsFullSize = false;
+bool AreRadiosityRTsAvailable() { return g_bRadiosityRTsFullSize; }
 
 static float g_flDepthScalar = 65536.0f;
 static bool g_bDeferredRTRefreshPending = false;
@@ -143,7 +147,8 @@ const ImageFormat fmt_gbuffer0 =
 #else
 		IMAGE_FORMAT_RGBA16161616F;
 #endif
-	const ImageFormat fmt_volumAccum = IMAGE_FORMAT_RGB888;
+	// HL2RPM: HDR so volumetric light (incl. the new sun shafts) doesn't band
+	const ImageFormat fmt_volumAccum = IMAGE_FORMAT_RGBA16161616F;
 	const ImageFormat fmt_projVGUI = IMAGE_FORMAT_RGB888;
 
 	const bool bShadowUseColor =
@@ -257,7 +262,7 @@ const ImageFormat fmt_gbuffer0 =
 			RT_SIZE_NO_CHANGE,
 			IMAGE_FORMAT_RGBA16161616F,
 			MATERIAL_RT_DEPTH_NONE,
-			TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_POINTSAMPLE,
+			TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT,	// HL2RPM: bilinear, point sampling made steps in the sky
 			0 ) );
 
 		g_tex_SkyAtmoTransmittanceLUT.Init( materials->CreateNamedRenderTargetTextureEx2(
@@ -266,7 +271,7 @@ const ImageFormat fmt_gbuffer0 =
 			RT_SIZE_NO_CHANGE,
 			IMAGE_FORMAT_RGBA16161616F,
 			MATERIAL_RT_DEPTH_NONE,
-			TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_POINTSAMPLE,
+			TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT,	// HL2RPM: bilinear, point sampling made steps in the sky
 			0 ) );
 
 		g_tex_SkyAtmoMultiScatteringLUT.Init( materials->CreateNamedRenderTargetTextureEx2(
@@ -275,7 +280,7 @@ const ImageFormat fmt_gbuffer0 =
 			RT_SIZE_NO_CHANGE,
 			IMAGE_FORMAT_RGBA16161616F,
 			MATERIAL_RT_DEPTH_NONE,
-			TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_POINTSAMPLE,
+			TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT,	// HL2RPM: bilinear, point sampling made steps in the sky
 			0 ) );
 
 		g_tex_SkyAtmoSkyViewLUT.Init( materials->CreateNamedRenderTargetTextureEx2(
@@ -284,7 +289,7 @@ const ImageFormat fmt_gbuffer0 =
 			RT_SIZE_NO_CHANGE,
 			IMAGE_FORMAT_RGBA16161616F,
 			MATERIAL_RT_DEPTH_NONE,
-			TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_POINTSAMPLE,
+			TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT,	// HL2RPM: bilinear, point sampling made steps in the sky
 			0 ) );
 
 		for ( int i = 0; i < MAX_SHADOW_ORTHO; i++ )
@@ -315,9 +320,15 @@ const ImageFormat fmt_gbuffer0 =
 				shadowColorFlags, 0 ) );
 
 #if DEFCFG_ENABLE_RADIOSITY
+			// HL2RPM: the radiosity MRT targets must match the shadow atlas, but they're only
+			// used when r_deferred_radiosity is on. Don't burn 2x the atlas in VRAM otherwise.
+			g_bRadiosityRTsFullSize = r_deferred_radiosity.GetBool();
+			const int iRadRes_x = g_bRadiosityRTsFullSize ? iResolution_x : 16;
+			const int iRadRes_y = g_bRadiosityRTsFullSize ? iResolution_y : 16;
+
 			g_tex_ShadowRad_Albedo_Ortho[i].Init( materials->CreateNamedRenderTargetTextureEx2(
 				VarArgs( "%s%02i", DEFRTNAME_SHADOWRAD_ALBEDO_ORTHO, i ),
-				iResolution_x, iResolution_y,
+				iRadRes_x, iRadRes_y,
 				RT_SIZE_NO_CHANGE,
 				fmt_radAlbedo,
 				MATERIAL_RT_DEPTH_NONE,
@@ -325,7 +336,7 @@ const ImageFormat fmt_gbuffer0 =
 
 			g_tex_ShadowRad_Normal_Ortho[i].Init( materials->CreateNamedRenderTargetTextureEx2(
 				VarArgs( "%s%02i", DEFRTNAME_SHADOWRAD_NORMAL_ORTHO, i ),
-				iResolution_x, iResolution_y,
+				iRadRes_x, iRadRes_y,
 				RT_SIZE_NO_CHANGE,
 				fmt_radNormal,
 				MATERIAL_RT_DEPTH_NONE,
@@ -348,6 +359,9 @@ const ImageFormat fmt_gbuffer0 =
 				MATERIAL_RT_DEPTH_NONE,
 				projVGUIFlags, 0 ) );
 		}
+
+		// HL2RPM: clouds, rain occlusion map
+		InitWeatherRTs();
 
 #if DEFCFG_ENABLE_RADIOSITY
 		for ( int i = 0; i < 2; i++ )

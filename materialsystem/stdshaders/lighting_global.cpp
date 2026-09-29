@@ -39,6 +39,8 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 #if !DEFCFG_LIGHTCTRL_PACKING
 			pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
 #endif
+			pShaderShadow->EnableTexture( SHADER_SAMPLER4, true );	// HL2RPM weather map
+			pShaderShadow->EnableTexture( SHADER_SAMPLER5, true );	// HL2RPM cloud noise
 
 			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION, 1, NULL, 0 );
 
@@ -91,6 +93,27 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 
 			float flCSMColorize[4] = { r_csm_color.GetBool() ? 1.0f : 0.0f, 0, 0, 0 };
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 3, flCSMColorize );
+
+			// HL2RPM: moving cloud shadows
+			const weatherData_t &w = GetDeferredExt()->GetWeatherData();
+			ITexture *pWeatherMap = GetDeferredExt()->GetTexture_WeatherMap();
+			ITexture *pCloudNoise = GetDeferredExt()->GetTexture_CloudNoise();
+			const bool bCloudShadows = w.bEnabled && pWeatherMap && pCloudNoise && w.vecCloudParams2.y > 0.001f;
+			if ( bCloudShadows )
+			{
+				BindTexture( SHADER_SAMPLER4, pWeatherMap );
+				BindTexture( SHADER_SAMPLER5, pCloudNoise );
+			}
+			else
+			{
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER4, TEXTURE_GREY );
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER5, TEXTURE_GREY );
+			}
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 4, w.vecCloudParams0.Base() );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 5, w.vecCloudParams1.Base() );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 6, w.vecWind.Base() );
+			float flWeatherFlags[4] = { bCloudShadows ? w.vecCloudParams2.y : 0.0f, 0, 0, 0 };
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 7, flWeatherFlags );
 		}
 
 		Draw();

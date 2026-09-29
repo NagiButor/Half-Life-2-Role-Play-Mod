@@ -1144,6 +1144,7 @@ if ERRORLEVEL 1 exit /b 1
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="hl2rpm_crashhandler_client.cpp" />
+    <ClCompile Include="hl2rpm_options_graphics.cpp" />
     <ClCompile Include="..\..\public\tier0\memoverride.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
@@ -1570,6 +1571,10 @@ echo crc_complete &gt; E:\SourceModding\HL2RPMSOURCE\source-sdk-2013-mapbase-v8.
     <ClCompile Include="..\shared\deferred\**\*.cpp" />
     <ClInclude Include="..\shared\deferred\**\*.h" />
     <ClCompile Include="..\shared\timecycle\**\*.cpp" />
+    <ClCompile Include="..\shared\weather\**\*.cpp" />
+    <ClInclude Include="..\shared\weather\**\*.h" />
+    <ClCompile Include="weather\**\*.cpp" />
+    <ClInclude Include="weather\**\*.h" />
     <ClInclude Include="..\shared\timecycle\**\*.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

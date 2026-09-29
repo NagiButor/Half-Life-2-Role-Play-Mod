@@ -1,0 +1,49 @@
+//========= HL2RPM ============================================================//
+//
+// GPU rain streaks: lit by the sky (and lightning), culled where the rain
+// occlusion map says something is above the drop (roofs, trees, bridges).
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+sampler sRainMap				: register( s0 );	// hardware depth compare
+
+const float4 g_matRainMap[3]	: register( c0 );
+const float4 g_vecRainMap		: register( c3 );	// depth bias, size, texel, valid
+const float4 g_vecSkyHorizon	: register( c4 );
+const float4 g_vecSkyZenith		: register( c5 );
+const float4 g_vecLight			: register( c6 );	// rgb light color, w lightning flash
+const float4 g_vecAlpha			: register( c7 );	// x alpha scale
+
+struct PS_INPUT
+{
+	float2 vCorner		: TEXCOORD0;
+	float3 vWorldPos	: TEXCOORD1;
+	float2 vFade		: TEXCOORD2;
+};
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	if ( g_vecRainMap.w > 0.5 )
+	{
+		float4 wp = float4( In.vWorldPos, 1.0 );
+		float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
+		float exposed = tex2Dproj( sRainMap, float4( uvz.xy, uvz.z - g_vecRainMap.x, 1 ) ).x;
+		// outside the map area rain is allowed
+		float2 edge = abs( uvz.xy * 2.0 - 1.0 );
+		exposed = ( max( edge.x, edge.y ) > 0.98 ) ? 1.0 : exposed;
+		clip( exposed - 0.5 );
+	}
+
+	// thin bright core across the streak, soft ends along it
+	float across = ( In.vCorner.x - 0.5 ) * 2.0;
+	float along = In.vCorner.y;
+	float profile = exp( -across * across * 3.5 ) * smoothstep( 0.0, 0.25, along ) * smoothstep( 1.0, 0.6, along );
+
+	float3 color = ( g_vecSkyHorizon.rgb * 1.1 + g_vecSkyZenith.rgb * 0.5 + g_vecLight.rgb * 0.08 ) * ( 0.7 + 0.6 * In.vFade.y );
+	color += float3( 0.75, 0.82, 1.0 ) * g_vecLight.w * 1.5;
+
+	float alpha = profile * In.vFade.x * g_vecAlpha.x;
+	return float4( color, saturate( alpha ) );
+}

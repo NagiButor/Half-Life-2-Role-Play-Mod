@@ -1,0 +1,78 @@
+//========= HL2RPM ============================================================//
+//
+// GPU rain: every drop is a quad in a static mesh; its position is a pure
+// function of (seed, time), wrapped inside a box that follows the camera, so
+// drops stay fixed in the world while the player moves and cost no CPU.
+//
+//=============================================================================//
+
+#include "common_vs_fxc.h"
+
+const float4 g_vecCamera		: register( SHADER_SPECIFIC_CONST_0 );	// xyz eye, w time
+const float4 g_vecRain			: register( SHADER_SPECIFIC_CONST_1 );	// x drops enabled (0..1), y box width, z box height, w fall speed
+const float4 g_vecWind			: register( SHADER_SPECIFIC_CONST_2 );	// xy slant, z streak length (s), w drop width
+
+struct VS_INPUT
+{
+	float3 vSeed		: POSITION;
+	float2 vCorner		: TEXCOORD0;
+	float4 vRandom		: TEXCOORD1;	// order, size, speed, brightness
+};
+
+struct VS_OUTPUT
+{
+	float4 vProjPos		: POSITION;
+	float2 vCorner		: TEXCOORD0;
+	float3 vWorldPos	: TEXCOORD1;
+	float2 vFade		: TEXCOORD2;	// x alpha, y brightness
+};
+
+VS_OUTPUT main( const VS_INPUT In )
+{
+	VS_OUTPUT Out = (VS_OUTPUT)0;
+
+	// drops are switched on in order as the rain gets heavier
+	if ( In.vRandom.x > g_vecRain.x )
+	{
+		Out.vProjPos = float4( 0, 0, -10, 1 );
+		return Out;
+	}
+
+	const float time = g_vecCamera.w;
+	const float3 boxSize = float3( g_vecRain.y, g_vecRain.y, g_vecRain.z );
+	const float speed = g_vecRain.w * In.vRandom.z;
+
+	float3 vel = float3( g_vecWind.x, g_vecWind.y, -1.0 ) * speed;
+
+	// world-fixed drop position, wrapped into the box around the camera
+	float3 p = In.vSeed * boxSize + vel * time;
+	float3 boxMin = g_vecCamera.xyz - boxSize * float3( 0.5, 0.5, 0.6 );
+	p = boxMin + frac( ( p - boxMin ) / boxSize ) * boxSize;
+
+	float3 toCam = g_vecCamera.xyz - p;
+	float dist = length( toCam );
+	toCam /= max( dist, 1e-3 );
+
+	float3 axis = normalize( vel );
+	float3 side = normalize( cross( axis, toCam ) + float3( 1e-4, 0, 0 ) );
+
+	// streak = motion blur of a falling drop; far drops get at least ~1 pixel wide
+	// and fade instead, so they don't shimmer
+	float width = g_vecWind.w * In.vRandom.y;
+	float minWidth = dist * 0.0016;
+	float widthFade = saturate( width / max( minWidth, 1e-3 ) );
+	width = max( width, minWidth );
+	float len = speed * g_vecWind.z * In.vRandom.y + 6.0;
+
+	float3 pos = p + side * ( In.vCorner.x - 0.5 ) * width + axis * ( In.vCorner.y - 0.5 ) * len;
+
+	Out.vProjPos = mul( float4( pos, 1 ), cViewProj );
+	Out.vCorner = In.vCorner;
+	Out.vWorldPos = pos;
+
+	float nearFade = saturate( ( dist - 24.0 ) / 60.0 );
+	float farFade = saturate( ( g_vecRain.y * 0.48 - dist ) / ( g_vecRain.y * 0.2 ) );
+	Out.vFade = float2( nearFade * farFade * widthFade, In.vRandom.w );
+
+	return Out;
+}

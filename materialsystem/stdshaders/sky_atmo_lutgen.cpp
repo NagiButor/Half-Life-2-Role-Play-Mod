@@ -26,10 +26,12 @@ BEGIN_VS_SHADER( SKY_ATMO_LUTGEN, "" )
  
 	SHADER_INIT
 	{
-		if ( params[TRANSMITTANCELUT]->IsDefined() )
-			LoadTexture( TRANSMITTANCELUT );
-		if ( params[MULTISCATTERINGLUT]->IsDefined() )
-			LoadTexture( MULTISCATTERINGLUT );
+		if ( !params[TRANSMITTANCELUT]->IsDefined() )
+			params[TRANSMITTANCELUT]->SetStringValue( DEFRTNAME_SKY_TRANSMITTANCE_LUT );
+		if ( !params[MULTISCATTERINGLUT]->IsDefined() )
+			params[MULTISCATTERINGLUT]->SetStringValue( DEFRTNAME_SKY_MULTISCATTERING_LUT );
+		LoadTexture( TRANSMITTANCELUT );
+		LoadTexture( MULTISCATTERINGLUT );
 	}
 
 	SHADER_DRAW

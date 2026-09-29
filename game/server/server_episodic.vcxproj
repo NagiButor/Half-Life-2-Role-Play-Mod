@@ -1633,6 +1633,8 @@ echo crc_complete &gt; E:\SourceModding\HL2RPMSOURCE\source-sdk-2013-mapbase-v8.
     <ClCompile Include="..\shared\deferred\**\*.cpp" />
     <ClInclude Include="..\shared\deferred\**\*.h" />
     <ClCompile Include="..\shared\timecycle\**\*.cpp" />
+    <ClCompile Include="..\shared\weather\**\*.cpp" />
+    <ClInclude Include="..\shared\weather\**\*.h" />
     <ClInclude Include="..\shared\timecycle\**\*.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

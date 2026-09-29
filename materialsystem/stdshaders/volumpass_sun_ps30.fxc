@@ -1,0 +1,115 @@
+//========= HL2RPM ============================================================//
+//
+// Volumetric sun light: raymarch the cascaded sun shadow map through the
+// weather's height fog. Rendered at 1/4 resolution into the volumetrics
+// buffer, blurred and added by the existing volumetrics blend pass.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+#include "common_deferred_fxc.h"
+
+sampler sDepth						: register( s0 );
+sampler sShadowDepth				: register( s1 );	// CSM atlas, hardware compare
+sampler sWeatherMap					: register( s2 );
+
+const float3 g_vecViewOrigin		: register( c0 );
+const float3 g_vecLightDir			: register( c1 );	// direction to the light
+
+// same layout as lightingpass_global_ps30 (CommitShadowProjectionConstants_Ortho_Composite at c2)
+const float4x3 g_matOrtho[8]		: register( c2 );
+const float4 g_vecUVTransform[8]	: register( c26 );
+
+const float4 g_vecLightColor		: register( c58 );
+const float4 g_vecFog				: register( c59 );	// density, falloff, base z, volumetric strength
+const float4 g_vecCloud0			: register( c60 );	// coverage, density, type, darkness
+const float4 g_vecCloud1			: register( c61 );	// base (m), thickness, cirrus, time
+const float4 g_vecWind				: register( c62 );	// xy cloud offset (m)
+const float4 g_vecParams			: register( c63 );	// steps, max distance, frame, night
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+	float2 vScreenPos			: VPOS;
+};
+
+float SunShadow( float3 p )
+{
+	[unroll]
+	for ( int c = 0; c < 4; c++ )
+	{
+		float3 uvz = mul( float4( p, 1 ), g_matOrtho[c] );
+		if ( all( uvz.xy > 0.003 ) && all( uvz.xy < 0.997 ) )
+		{
+			float2 uv = uvz.xy * g_vecUVTransform[c].zw + g_vecUVTransform[c].xy;
+			// texldl: no gradients (required inside a loop with break), z is the compare value
+			return tex2Dlod( sShadowDepth, float4( uv, uvz.z - 0.0005, 0 ) ).x;
+		}
+	}
+	return 1.0;
+}
+
+float CloudShadow( float3 p )
+{
+	// project to the cloud base along the light and look at the large scale coverage
+	float3 pm = p * 0.0254;
+	float tBase = ( g_vecCloud1.x - pm.z ) / max( g_vecLightDir.z, 0.08 );
+	float2 cxy = pm.xy + g_vecLightDir.xy * tBase + g_vecWind.xy;
+	float wm = tex2Dlod( sWeatherMap, float4( cxy / 40000.0, 0, 0 ) ).r;
+	float cov = saturate( g_vecCloud0.x * lerp( 0.55, 1.45, wm ) );
+	return 1.0 - saturate( ( cov - 0.25 ) * 1.6 ) * saturate( g_vecCloud0.y * 0.7 );
+}
+
+float Hash12( float2 p )
+{
+	float3 p3 = frac( float3( p.xyx ) * 0.1031 );
+	p3 += dot( p3, p3.yzx + 33.33 );
+	return frac( ( p3.x + p3.y ) * p3.z );
+}
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	float depth = tex2D( sDepth, In.vTexCoord ).x;
+	float rayLen = length( In.vecWorldRay );
+	float3 rd = In.vecWorldRay / rayLen;
+
+	float maxDist = g_vecParams.y;
+	float dist = ( depth < 0.1 ) ? maxDist : min( depth * rayLen, maxDist );
+
+	const float steps = max( g_vecParams.x, 4.0 );
+	float dt = dist / steps;
+	float jitter = frac( Hash12( In.vScreenPos ) + g_vecParams.z * 0.61803398 );
+
+	const float k = g_vecFog.y * 0.001;
+	// base haze always present, weather fog on top
+	const float sigma0 = ( 0.00006 + g_vecFog.x * 0.00030 ) * g_vecFog.w;
+
+	float inscatter = 0.0;
+	float T = 1.0;
+
+	[loop]
+	for ( int i = 0; i < 48; i++ )
+	{
+		if ( i >= (int)steps )
+			break;
+
+		float t = ( i + jitter ) * dt;
+		float3 p = g_vecViewOrigin + rd * t;
+
+		float sigma = sigma0 * exp( -k * ( p.z - g_vecFog.z ) );
+		float lit = SunShadow( p );
+		if ( lit > 0.0 )
+			lit *= CloudShadow( p );
+
+		inscatter += T * sigma * lit * dt;
+		T *= exp( -sigma * dt );
+	}
+
+	float cosTheta = dot( rd, g_vecLightDir );
+	float g = 0.58;
+	float phase = ( 1.0 - g * g ) / pow( max( 1.0 + g * g - 2.0 * g * cosTheta, 1e-3 ), 1.5 ) * ( 1.0 / ( 4.0 * 3.14159265 ) );
+
+	float3 light = g_vecLightColor.rgb * phase * inscatter * 6.5;
+	return float4( light, 1.0 );
+}

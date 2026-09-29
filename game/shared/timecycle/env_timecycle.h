@@ -26,6 +26,11 @@ public:
 	void SetTimeOfDayHours( float hours );
 	void SetTimeScale( float scale );
 
+	// HL2RPM: game hours that pass per real second (used by env_weather durations)
+	float GetHoursPerSecond() const { return ( m_flDayLengthSeconds > 0.0f ) ? ( 24.0f / m_flDayLengthSeconds ) * m_flTimeScale : 0.0f; }
+	float GetSunriseHour() const { return m_flSunriseHour; }
+	float GetSunsetHour() const { return m_flSunsetHour; }
+
 private:
 	void TimecycleThink();
 	void UpdateSun();

@@ -53,4 +53,7 @@ ITexture *GetProjectableVguiRT( int index );
 ITexture *GetRadiosityAlbedoRT_Ortho( int index );
 ITexture *GetRadiosityNormalRT_Ortho( int index );
 
+// HL2RPM
+bool AreRadiosityRTsAvailable();
+
 #endif

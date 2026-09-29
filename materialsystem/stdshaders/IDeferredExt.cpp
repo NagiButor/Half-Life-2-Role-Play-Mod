@@ -38,6 +38,12 @@ CDeferredExtension::CDeferredExtension()
 	Q_memset( m_pTexRadBuffer, 0, sizeof( ITexture* ) * 2 );
 	Q_memset( m_pTexRadNormal, 0, sizeof( ITexture* ) * 2 );
 
+	m_pTexClouds = NULL;
+	m_pTexCloudHistory = NULL;
+	m_pTexCloudNoise = NULL;
+	m_pTexWeatherMap = NULL;
+	m_pTexRainMap = NULL;
+
 	m_pflCommonLightData = NULL;
 	m_iCommon_NumRows = 0;
 	m_iNumCommon_ShadowedCookied = 0;
@@ -211,4 +217,27 @@ void CDeferredExtension::CommitTexture_Radiosity( ITexture *pTexRadBuffer0, ITex
 	m_pTexRadBuffer[1] = pTexRadBuffer1;
 	m_pTexRadNormal[0] = pTexRadNormal0;
 	m_pTexRadNormal[1] = pTexRadNormal1;
+}
+
+// HL2RPM weather
+void CDeferredExtension::CommitWeatherData( const weatherData_t &data )
+{
+	const bool bCloudValid = m_dataWeather.bCloudTextureValid;
+	m_dataWeather = data;
+	m_dataWeather.bCloudTextureValid = bCloudValid; // toggled separately around the main view
+}
+
+void CDeferredExtension::CommitWeatherCloudTextureValid( const bool &bValid )
+{
+	m_dataWeather.bCloudTextureValid = bValid;
+}
+
+void CDeferredExtension::CommitTexture_Weather( ITexture *pCloudTexture, ITexture *pCloudHistory,
+	ITexture *pCloudNoise, ITexture *pWeatherMap, ITexture *pRainMap )
+{
+	m_pTexClouds = pCloudTexture;
+	m_pTexCloudHistory = pCloudHistory;
+	m_pTexCloudNoise = pCloudNoise;
+	m_pTexWeatherMap = pWeatherMap;
+	m_pTexRainMap = pRainMap;
 }

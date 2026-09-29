@@ -1,23 +1,45 @@
 // DYNAMIC: "WRITE_DEPTH_TO_DESTALPHA" "0..1"
 
+//========= HL2RPM ============================================================//
+// Procedural sky: Hillaire-style atmosphere (sky-view LUT) + dynamic weather:
+// volumetric clouds (screen-space RT), cirrus, overcast greying, horizon fog,
+// moon, stars and lightning.
+//=============================================================================//
+
 #include "common_ps_fxc.h"
 
-const float3 g_vecSunDir					: register( c1 );
-const float4 g_procParams0					: register( c2 ); // x faceIndex (unused), y exposure, z starsIntensity, w sunDiskIntensity
+const float3 g_vecSunDir					: register( c1 );	// global light direction (sun by day, moon at night)
+const float4 g_procParams0					: register( c2 ); // x useLUT, y exposure, z starsIntensity, w sunDiskIntensity
+const float4 g_procParams1					: register( c3 ); // x sunriseBias (-1 auto), y aerosol (1 default), z star rotation
+
+// HL2RPM weather (see weatherData_t)
+const float4 g_wCloud0						: register( c4 );	// coverage, density, type, darkness
+const float4 g_wCloud1						: register( c5 );	// base, thickness, cirrus, time
+const float4 g_wAtmo						: register( c6 );	// haze, desaturation, brightness, flash
+const float4 g_wFogColor					: register( c7 );	// rgb, w max opacity
+const float4 g_wFog							: register( c8 );	// density, falloff, base z, volumetric
+const float4 g_wScreen						: register( c9 );	// 1/w, 1/h, cloud uv scale, x: clouds valid (sign)
+const float4 g_wMoon						: register( c10 );	// moon dir, w night factor
+const float4 g_wSun							: register( c11 );	// real sun dir, w sun altitude (deg)
+const float4 g_wLightning					: register( c12 );	// flash dir, w intensity
+const float4 g_wWind						: register( c13 );	// xy cloud offset (m)
+const float4 g_wSkyHorizon					: register( c14 );	// rgb horizon sky light
+const float4 g_wFlags						: register( c15 );	// x weather enabled, y clouds valid
 
 const float3 g_light_diffuse				: register( c16 );
 const float3 g_light_ambient_high			: register( c17 );
 const float3 g_light_ambient_low_half		: register( c18 );
 
-const float4 g_procParams1					: register( c3 ); // x sunriseBias (-1 auto), y aerosol (1 default)
-
 sampler2D sSkyLut : register( s0 );
 sampler2D sTransmittanceLut : register( s1 );
 sampler2D sSkyViewLut : register( s2 );
+sampler2D sClouds : register( s3 );
+sampler2D sWeatherMap : register( s4 );
 
 struct PS_INPUT
 {
 	float3 dir : TEXCOORD0;
+	float2 vScreenPos : VPOS;
 };
 
 static const float PI = 3.14159265358;
@@ -26,8 +48,6 @@ static const float groundRadiusMM = 6.360;
 static const float atmosphereRadiusMM = 6.460;
 static const float3 viewPos = float3( 0.0, 0.0, groundRadiusMM + 0.0002 );
 
-static const float3 groundAlbedo = float3( 0.3, 0.3, 0.3 );
-
 static const float3 rayleighScatteringBase = float3( 5.802, 13.558, 33.1 );
 static const float rayleighAbsorptionBase = 0.0;
 
@@ -35,11 +55,6 @@ static const float mieScatteringBase = 3.996;
 static const float mieAbsorptionBase = 4.4;
 
 static const float3 ozoneAbsorptionBase = float3( 0.650, 1.881, 0.085 );
-
-float safeacos( const float x )
-{
-	return acos( clamp( x, -1.0, 1.0 ) );
-}
 
 float rayIntersectSphere( float3 ro, float3 rd, float rad )
 {
@@ -92,85 +107,30 @@ void getScatteringValues( float3 pos, out float3 rayleighScattering, out float m
 
 float3 getSunTransmittance( float3 pos, float3 sunDir )
 {
-	if ( g_procParams0.x > 0.5 )
-	{
-		if ( rayIntersectSphere( pos, sunDir, groundRadiusMM ) > 0.0 )
-			return 0.0.xxx;
-
-		float r = clamp( length( pos ), groundRadiusMM, atmosphereRadiusMM );
-		float mu = dot( normalize( pos ), sunDir );
-		mu = clamp( mu, -1.0, 1.0 );
-
-		float u = ( mu * 0.5 + 0.5 );
-		float v = ( r - groundRadiusMM ) / ( atmosphereRadiusMM - groundRadiusMM );
-		return tex2D( sTransmittanceLut, float2( u, v ) ).rgb;
-	}
-
 	if ( rayIntersectSphere( pos, sunDir, groundRadiusMM ) > 0.0 )
 		return 0.0.xxx;
 
-	float atmoDist = rayIntersectSphere( pos, sunDir, atmosphereRadiusMM );
-	float t = 0.0;
-	float3 transmittance = 1.0.xxx;
+	float r = clamp( length( pos ), groundRadiusMM, atmosphereRadiusMM );
+	float mu = dot( normalize( pos ), sunDir );
+	mu = clamp( mu, -1.0, 1.0 );
 
-	const int sunSteps = 4;
-	[unroll(4)]
-	for ( int i = 0; i < 4; i++ )
-	{
-		float newT = ( ( float( i ) + 0.3 ) / 4.0 ) * atmoDist;
-		float dt = newT - t;
-		t = newT;
-
-		float3 newPos = pos + t * sunDir;
-		float3 rayleighScattering, extinction;
-		float mieScattering;
-		getScatteringValues( newPos, rayleighScattering, mieScattering, extinction );
-
-		transmittance *= exp( -dt * extinction );
-	}
-
-	return transmittance;
+	float u = ( mu * 0.5 + 0.5 );
+	float v = ( r - groundRadiusMM ) / ( atmosphereRadiusMM - groundRadiusMM );
+	return tex2D( sTransmittanceLut, float2( u, v ) ).rgb;
 }
 
-float3 raymarchScattering( float3 pos, float3 rayDir, float3 sunDir, float tMax )
+// HL2RPM: must match DirFromSkyViewUV in sky_atmo_skyview_lutgen_ps30
+float2 SkyViewUV( float3 rayDir, float3 sunDir )
 {
-	float cosTheta = dot( rayDir, sunDir );
-	float miePhaseValue = getMiePhase( cosTheta );
-	float rayleighPhaseValue = getRayleighPhase( -cosTheta );
+	float lenS = length( sunDir.xy );
+	float2 sunH = ( lenS > 1e-4 ) ? sunDir.xy / lenS : float2( 1.0, 0.0 );
+	float lenR = length( rayDir.xy );
+	float2 rayH = ( lenR > 1e-4 ) ? rayDir.xy / lenR : sunH;
+	float u = sqrt( saturate( 0.5 - 0.5 * dot( rayH, sunH ) ) );
 
-	float3 lum = 0.0.xxx;
-	float3 transmittance = 1.0.xxx;
-
-	float t = 0.0;
-	const int scatteringSteps = 6;
-	[unroll(6)]
-	for ( int i = 0; i < 6; i++ )
-	{
-		float newT = ( ( float( i ) + 0.3 ) / 6.0 ) * tMax;
-		float dt = newT - t;
-		t = newT;
-
-		float3 newPos = pos + t * rayDir;
-
-		float3 rayleighScattering, extinction;
-		float mieScattering;
-		getScatteringValues( newPos, rayleighScattering, mieScattering, extinction );
-
-		float3 sampleTransmittance = exp( -dt * extinction );
-
-		float3 sunTransmittance = getSunTransmittance( newPos, sunDir );
-
-		float3 rayleighInScattering = rayleighScattering * ( rayleighPhaseValue * sunTransmittance );
-		float3 mieInScattering = mieScattering * ( miePhaseValue * sunTransmittance );
-		float3 inScattering = ( rayleighInScattering + mieInScattering );
-
-		float3 scatteringIntegral = ( inScattering - inScattering * sampleTransmittance ) / max( extinction, 1e-4.xxx );
-		lum += scatteringIntegral * transmittance;
-
-		transmittance *= sampleTransmittance;
-	}
-
-	return lum;
+	float elev = asin( clamp( rayDir.z, -1.0, 1.0 ) );
+	float v = 0.5 + 0.5 * sign( elev ) * sqrt( abs( elev ) * ( 2.0 / PI ) );
+	return float2( u, v );
 }
 
 float3 jodieReinhardTonemap( float3 c )
@@ -195,11 +155,6 @@ float3 sunWithBloom( float3 rayDir, float3 sunDir )
 	return ( gaussianBloom + invBloom ).xxx;
 }
 
-float hash01( float3 p )
-{
-	return frac( sin( dot( p, float3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 );
-}
-
 float hash12( float2 p )
 {
 	return frac( sin( dot( p, float2( 127.1, 311.7 ) ) ) * 43758.5453 );
@@ -222,66 +177,101 @@ float smooth01( float x )
 	return x * x * ( 3.0 - 2.0 * x );
 }
 
+// Moon: a lit disk with a phase terminator and darker "maria"
+float3 MoonDisk( float3 rayDir, float3 moonDir, float3 sunDir )
+{
+	const float moonRadius = 0.0105;	// a bit bigger than real for readability
+	float3 fwd = moonDir;
+	float3 right = normalize( cross( float3( 0, 0, 1 ), fwd ) + float3( 1e-5, 0, 0 ) );
+	float3 up = cross( fwd, right );
+
+	float cosAng = dot( rayDir, fwd );
+	if ( cosAng < 0.99 )
+		return 0.0;
+
+	float2 local = float2( dot( rayDir, right ), dot( rayDir, up ) ) / moonRadius;
+	float r2 = dot( local, local );
+	float glow = exp( -max( r2 - 1.0, 0.0 ) * 0.9 ) * 0.035;
+	if ( r2 > 1.0 )
+		return glow.xxx;
+
+	// sphere normal on the moon's visible face, lit from the sun
+	float3 n = normalize( local.x * right + local.y * up - sqrt( 1.0 - r2 ) * fwd );
+	float lit = saturate( dot( n, sunDir ) * 0.9 + 0.12 );
+
+	float maria = hash12( floor( local * 3.5 + 7.0 ) ) * 0.25 + hash12( floor( local * 9.0 + 3.0 ) ) * 0.12;
+	float limb = 0.75 + 0.25 * sqrt( 1.0 - r2 );
+	return float3( 0.92, 0.94, 1.0 ) * ( lit * ( 1.0 - maria ) * limb + glow );
+}
+
+// High thin cirrus sheet at ~9 km, stretched along the wind
+float4 Cirrus( float3 rayDir )
+{
+	float amount = g_wCloud1.z;
+	if ( amount <= 0.01 || rayDir.z <= 0.02 )
+		return 0.0;
+
+	float t = 9000.0 / rayDir.z;
+	float2 p = rayDir.xy * t + g_wWind.xy * 0.6;
+	float2 windDir = normalize( g_wWind.xy + float2( 1e-3, 0 ) );
+	float2 windPerp = float2( -windDir.y, windDir.x );
+	float2 uv = float2( dot( p, windDir ) / 70000.0, dot( p, windPerp ) / 35000.0 );
+
+	float n = tex2D( sWeatherMap, uv ).b * 0.65 + tex2D( sWeatherMap, uv * 3.1 + 0.37 ).b * 0.35;
+	float d = saturate( ( n - ( 1.0 - amount * 0.6 ) ) / 0.3 );
+	d *= saturate( rayDir.z * 5.0 ) * saturate( ( 0.97 - rayDir.z ) * 4.0 );	// thin toward the horizon and the zenith
+	return float4( 1.0, 1.0, 1.0, d * 0.4 );
+}
+
 float4 main( const PS_INPUT In ) : COLOR
 {
 	float exposure = max( g_procParams0.y, 0.0 );
 	float starsIntensity = max( g_procParams0.z, 0.0 );
 	float sunDiskIntensity = max( g_procParams0.w, 0.0 );
 
-	float3 sunDir = normalize( g_vecSunDir );
+	const bool bWeather = g_wFlags.x > 0.5;
+
+	float3 lightDir = normalize( g_vecSunDir );
+	float3 sunDir = bWeather ? normalize( g_wSun.xyz ) : lightDir;
 	float3 rayDir = normalize( In.dir );
 
 	float3 ambientLow = max( 2.0 * g_light_ambient_low_half - g_light_ambient_high, 0.0.xxx );
 	float hemi = saturate( rayDir.z * 0.5 + 0.5 );
 	float3 ambientHemi = lerp( ambientLow, g_light_ambient_high, hemi );
 
-	float atmoDist = rayIntersectSphere( viewPos, rayDir, atmosphereRadiusMM );
 	float groundDist = rayIntersectSphere( viewPos, rayDir, groundRadiusMM );
-	float tMax = ( groundDist < 0.0 ) ? atmoDist : groundDist;
 
-	float3 lum = 0.0.xxx;
-	if ( g_procParams0.x > 0.5 )
-	{
-		float cosGamma = dot( rayDir, sunDir );
-		float u = cosGamma * 0.5 + 0.5;
-		float v = rayDir.z * 0.5 + 0.5;
-		lum = tex2D( sSkyViewLut, float2( u, v ) ).rgb;
-	}
-	else
-	{
-		lum = raymarchScattering( viewPos, rayDir, sunDir, tMax );
-	}
-
-	float3 sunLum = sunWithBloom( rayDir, sunDir );
-	sunLum = smoothstep( 0.002, 1.0, sunLum );
-	if ( dot( sunLum, 1.0.xxx ) > 0.0 )
-	{
-		if ( groundDist >= 0.0 )
-		{
-			sunLum = 0.0.xxx;
-		}
-		else
-		{
-			sunLum *= getSunTransmittance( viewPos, sunDir );
-		}
-	}
-
-	lum += sunLum * g_light_diffuse * sunDiskIntensity;
+	// ---- clear-sky atmosphere (lit by the global light: the sun, or the moon at night)
+	float3 lum = tex2D( sSkyViewLut, SkyViewUV( rayDir, lightDir ) ).rgb;
 
 	float sunAltDeg = asin( clamp( sunDir.z, -1.0, 1.0 ) ) * 57.2957795;
+
+	// ---- sun disk (at night the global light is the moon, handled below)
+	float3 sunLum = 0.0;
+	if ( !bWeather || g_wMoon.w < 0.5 )
+	{
+		sunLum = sunWithBloom( rayDir, lightDir );
+		sunLum = smoothstep( 0.002, 1.0, sunLum );
+		if ( groundDist >= 0.0 )
+			sunLum = 0.0.xxx;
+		else
+			sunLum *= getSunTransmittance( viewPos, lightDir );
+		sunLum *= g_light_diffuse * sunDiskIntensity;
+	}
 
 	float nightVis = smooth01( remap01_clamped( -sunAltDeg, 2.0, 18.0 ) );
 	float ambientFactor = lerp( 0.012, 0.00035, nightVis );
 	lum += ambientHemi * ambientFactor;
 
-	float golden = smooth01( 1.0 - remap01_clamped( sunAltDeg, 0.0, 10.0 ) ) * step( 0.0, sunAltDeg );
-	float civil = smooth01( remap01_clamped( sunAltDeg, -6.0, 0.0 ) );
-	float nautical = smooth01( remap01_clamped( sunAltDeg, -12.0, -6.0 ) );
-	float astro = smooth01( remap01_clamped( sunAltDeg, -18.0, -12.0 ) );
-	float night = smooth01( remap01_clamped( -sunAltDeg, 18.0, 28.0 ) );
-
-	float twilight = saturate( golden + civil + nautical + astro );
-	float starMask = saturate( rayDir.z * 2.0 );
+	// HL2RPM: twilight effects are windows around their sun altitude range. They used to be
+	// "sun above X" ramps, so the red civil glow and the pink belt of Venus were added all
+	// day long (purple/pink midday sky). The timecycle's sun never sinks below -12 degrees,
+	// so "night" starts there.
+	float golden = smooth01( 1.0 - remap01_clamped( sunAltDeg, 1.0, 10.0 ) ) * smooth01( remap01_clamped( sunAltDeg, -2.0, 1.0 ) );
+	float civil = smooth01( remap01_clamped( sunAltDeg, -7.0, -2.0 ) ) * ( 1.0 - smooth01( remap01_clamped( sunAltDeg, 0.0, 4.0 ) ) );
+	float nautical = smooth01( remap01_clamped( sunAltDeg, -8.0, -3.0 ) ) * ( 1.0 - smooth01( remap01_clamped( sunAltDeg, -2.0, 1.0 ) ) );
+	float blueHourAmt = smooth01( remap01_clamped( -sunAltDeg, 2.0, 7.0 ) );
+	float night = smooth01( remap01_clamped( -sunAltDeg, 8.0, 12.0 ) );
 
 	{
 		float horizonWide = pow( saturate( 1.0 - rayDir.z ), 2.2 );
@@ -300,76 +290,128 @@ float4 main( const PS_INPUT In ) : COLOR
 		float3 goldenTintSunset = float3( 1.00, 0.76, 0.40 );
 		float3 goldenTintSunrise = float3( 1.00, 0.88, 0.58 );
 		float3 goldenTint = lerp( goldenTintSunset, goldenTintSunrise, sunriseBias );
-		lum += golden * aerosol * ( 0.060 + 0.220 * sunSide ) * horizonWide * goldenTint * lightCol;
+		lum += golden * aerosol * ( 0.025 + 0.100 * sunSide ) * horizonWide * goldenTint * lightCol;
 
 		float3 civilTintSunset = float3( 1.00, 0.42, 0.18 );
 		float3 civilTintSunrise = float3( 1.00, 0.65, 0.40 );
 		float3 civilTint = lerp( civilTintSunset, civilTintSunrise, sunriseBias );
-		lum += civil * aerosol * ( 0.040 + 0.650 * sunSide ) * horizonTight * civilTint * lightCol;
-		lum += civil * aerosol * 0.055 * horizonWide * civilTint;
+		lum += civil * aerosol * ( 0.020 + 0.250 * sunSide ) * horizonTight * civilTint * lightCol;
+		lum += civil * aerosol * 0.020 * horizonWide * civilTint;
 
 		float3 venusTint = float3( 0.95, 0.52, 0.92 );
-		lum += nautical * ( 0.004 + 0.080 * antiSunSide ) * horizonTight * venusTint;
+		lum += nautical * ( 0.002 + 0.030 * antiSunSide ) * horizonTight * venusTint;
 
-		float blueHour = nautical + astro * 0.85;
+		float blueHour = blueHourAmt;
 		float3 blueTint = lerp( float3( 0.60, 0.78, 1.35 ), float3( 0.52, 0.72, 1.28 ), sunriseBias );
 		lum = lerp( lum, lum * blueTint, saturate( blueHour * 0.65 ) );
 
-		lum = lerp( lum, lum * float3( 0.25, 0.30, 0.45 ), saturate( night * 0.45 ) );
+		// HL2's night sky is a dark teal, not black
+		lum = lerp( lum, lum * float3( 0.25, 0.34, 0.42 ), saturate( night * 0.45 ) );
 	}
+
+	// ---- stars
+	float3 stars = 0.0;
 	{
-		float u = atan2( rayDir.y, rayDir.x ) * ( 1.0 / ( 2.0 * PI ) ) + 0.5;
-		float v = asin( clamp( rayDir.z, -1.0, 1.0 ) ) * ( 1.0 / PI ) + 0.5;
+		float starU = atan2( rayDir.y, rayDir.x ) * ( 1.0 / ( 2.0 * PI ) ) + 0.5;
+		float starV = asin( clamp( rayDir.z, -1.0, 1.0 ) ) * ( 1.0 / PI ) + 0.5;
 
 		float starRot = g_procParams1.z;
-		float2 uv = float2( frac( u + 0.37 + starRot ), saturate( v ) );
-
+		float2 uv = float2( frac( starU + 0.37 + starRot ), saturate( starV ) );
 		float2x2 rot = float2x2( 0.9659, -0.2588, 0.2588, 0.9659 );
 
 		float starsVis = smooth01( remap01_clamped( -sunAltDeg, 6.0, 18.0 ) );
-
+		float starMask = saturate( rayDir.z * 2.0 );
 		float starSum = 0.0;
 
 		{
 			float2 uv1 = mul( rot, ( uv - 0.5 ) ) + 0.5;
-			float2 grid = float2( 512.0, 256.0 );
-			float2 p = uv1 * grid;
+			float2 p = uv1 * float2( 512.0, 256.0 );
 			float2 cell = floor( p );
 			float2 jitter = ( hash22( cell + 11.7 ) - 0.5 ) * 0.95;
 			float2 f = frac( p ) - ( 0.5 + jitter * 0.30 );
-
 			float rnd = hash12( cell + 19.19 );
 			float bright = smooth01( remap01_clamped( rnd, 0.9975, 1.0 ) );
-
 			float size = lerp( 0.16, 0.05, rnd );
-			float d2 = dot( f, f );
-			float core = exp2( -d2 / max( size * size, 1e-4 ) );
-
-			starSum += bright * core;
+			starSum += bright * exp2( -dot( f, f ) / max( size * size, 1e-4 ) );
 		}
-
 		{
 			float2 uv2 = mul( transpose( rot ), ( uv - 0.5 ) ) + 0.5;
-			float2 grid = float2( 256.0, 128.0 );
-			float2 p = uv2 * grid;
+			float2 p = uv2 * float2( 256.0, 128.0 );
 			float2 cell = floor( p );
 			float2 jitter = ( hash22( cell + 33.3 ) - 0.5 ) * 0.98;
 			float2 f = frac( p ) - ( 0.5 + jitter * 0.35 );
-
 			float rnd = hash12( cell + 71.77 );
 			float bright = smooth01( remap01_clamped( rnd, 0.9955, 1.0 ) );
-
 			float size = lerp( 0.22, 0.07, rnd );
-			float d2 = dot( f, f );
-			float core = exp2( -d2 / max( size * size, 1e-4 ) );
-
-			starSum += bright * core * 0.65;
+			starSum += bright * exp2( -dot( f, f ) / max( size * size, 1e-4 ) ) * 0.65;
 		}
 
-		lum += ( starSum * starsIntensity * starsVis * pow( starMask, 0.92 ) * 3.0 ).xxx;
+		stars = ( starSum * starsIntensity * starsVis * pow( starMask, 0.92 ) * 3.0 ).xxx;
 	}
 
+	float3 moon = 0.0;
+	if ( bWeather )
+	{
+		// ---- weather greys out and darkens the clear sky behind the clouds
+		float desat = saturate( g_wAtmo.y );
+		float skyLum = dot( lum, float3( 0.2126, 0.7152, 0.0722 ) );
+		lum = lerp( lum, skyLum * float3( 0.93, 0.97, 1.03 ), desat );
+		lum *= g_wAtmo.z;
+
+		// haze brightens and whitens the horizon
+		float hazeK = saturate( ( g_wAtmo.x - 1.0 ) * 0.25 );
+		float horizon = pow( saturate( 1.0 - abs( rayDir.z ) ), 4.0 );
+		lum = lerp( lum, max( lum, skyLum * 1.15 ), hazeK * horizon );
+
+		// ---- moon
+		if ( g_wMoon.z > -0.05 && groundDist < 0.0 )
+			moon = MoonDisk( rayDir, normalize( g_wMoon.xyz ), sunDir ) * 0.35 * smooth01( g_wMoon.w * 1.5 );
+
+		// ---- cirrus (behind the volumetric clouds)
+		float4 cirrus = Cirrus( rayDir );
+		if ( cirrus.a > 0.0 )
+		{
+			float3 cirrusCol = g_light_diffuse * 0.035 * ( 0.6 + 0.8 * getMiePhase( dot( rayDir, lightDir ) ) ) + skyLum * 1.4;
+			lum = lerp( lum, cirrusCol, cirrus.a );
+			stars *= 1.0 - cirrus.a;
+		}
+
+		// ---- volumetric clouds (screen space, only valid for the main view)
+		if ( g_wFlags.y > 0.5 )
+		{
+			float2 cuv = ( In.vScreenPos + 0.5 ) * g_wScreen.xy * g_wScreen.z;
+			float4 clouds = tex2D( sClouds, cuv );
+			if ( clouds.a >= 0.0 )
+			{
+				float T = saturate( clouds.a );
+				lum = lum * T + clouds.rgb;
+				sunLum *= T;
+				stars *= T;
+				moon *= T;
+			}
+		}
+
+		// ---- lightning lights up the sky
+		float flash = g_wLightning.w;
+		if ( flash > 0.001 )
+		{
+			float aim = pow( saturate( dot( rayDir, normalize( g_wLightning.xyz ) ) ), 3.0 );
+			lum += float3( 0.55, 0.60, 0.72 ) * flash * ( 0.012 + 0.05 * aim );
+		}
+	}
+
+	lum += sunLum + stars + moon;
 	lum = jodieReinhardTonemap( lum * exposure );
+
+	// ---- the horizon melts into the weather fog (same color the world fog uses)
+	if ( bWeather && g_wFog.x > 0.0 )
+	{
+		float fogDensity = g_wFog.x * 0.001;
+		float pathToHorizon = 12000.0 / max( abs( rayDir.z ) + 0.03, 0.03 );
+		float fogSky = 1.0 - exp( -fogDensity * pathToHorizon * 0.35 );
+		fogSky *= saturate( 1.0 - rayDir.z * 1.5 );
+		lum = lerp( lum, g_wFogColor.rgb, saturate( fogSky ) * g_wFogColor.a );
+	}
 
 	float alphaOut = 1.0;
 	if ( WRITE_DEPTH_TO_DESTALPHA )

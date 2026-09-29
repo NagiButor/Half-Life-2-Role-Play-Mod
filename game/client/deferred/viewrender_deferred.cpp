@@ -32,6 +32,8 @@
 
 #include "deferred/deferred_rt.h"
 #include "deferred/cdeferred_manager_client.h"
+#include "weather/weather_render.h"
+#include "weather/c_weather_system.h"
 
 #include "vgui_int.h"
 #include "vgui/IPanel.h"
@@ -69,6 +71,28 @@ static ConVar r_deferred_skyatmo_skyview_lut_update_interval( "r_deferred_skyatm
 static ConVar r_deferred_light_global_smooth( "r_deferred_light_global_smooth", "1" );
 static ConVar r_deferred_light_global_smooth_tau( "r_deferred_light_global_smooth_tau", "0.6" );
 
+static lightData_Global_t& GetActiveGlobalLightState();
+
+static void DrawSkyLUTPass( IMaterial *pMat, ITexture *pLut )
+{
+	if ( !pMat || !pLut )
+		return;
+
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->PushRenderTargetAndViewport( pLut );
+	pRenderContext->ClearColor3ub( 0, 0, 0 );
+	pRenderContext->ClearBuffers( true, false );
+	const int w = pLut->GetActualWidth();
+	const int h = pLut->GetActualHeight();
+	pRenderContext->DrawScreenSpaceRectangle( pMat, 0, 0, w, h, 0, 0, w - 1, h - 1, w, h );
+	pRenderContext->PopRenderTargetAndViewport();
+}
+
+// HL2RPM: the atmosphere LUTs used to be regenerated (all four, including an
+// unused 512x256 one) every single frame while the time of day was running.
+// Now each LUT is only rebuilt when something it depends on changed:
+//   transmittance / multi-scattering -> air turbidity (weather haze)
+//   sky-view                         -> sun direction, light color, haze
 static void UpdateSkyAtmoLUT()
 {
 	if ( !r_deferred_skyatmo_lut.GetBool() )
@@ -76,15 +100,55 @@ static void UpdateSkyAtmoLUT()
 	if ( !GetGlobalLight() )
 		return;
 
-	// Only regenerate LUTs when the sun direction actually changes.
-	// Initial value is impossible so the first frame always triggers.
-	static Vector s_prevSunDir( FLT_MAX, FLT_MAX, FLT_MAX );
-	const lightData_Global_t state = GetGlobalLight()->GetState();
-	Vector curSunDir( state.vecLight.x, state.vecLight.y, state.vecLight.z );
-	if ( ( curSunDir - s_prevSunDir ).LengthSqr() < 1e-8f )
-		return;
-	s_prevSunDir = curSunDir;
+	const lightData_Global_t &state = GetActiveGlobalLightState();
+	const Vector curSunDir( state.vecLight.x, state.vecLight.y, state.vecLight.z );
+	C_WeatherSystem *pWeather = GetWeatherSystem();
+	// the LUT is built for WeatherRender_GetSkyLightIlluminance() when the weather is active
+	const float flSkyLight = pWeather->IsActive() ? WeatherRender_GetSkyLightIlluminance() : 0.0f;
+	const Vector curDiff = pWeather->IsActive() ? Vector( flSkyLight, flSkyLight, flSkyLight )
+		: Vector( state.diff.x, state.diff.y, state.diff.z );
+	const float flHaze = pWeather->IsActive() ? pWeather->GetParams().flHaze : 1.0f;
 
+	static bool s_bInitialized = false;
+	static Vector s_prevSunDir( 0, 0, 1 );
+	static Vector s_prevDiff( 0, 0, 0 );
+	static float s_flPrevHaze = -1.0f;
+	static float s_flLastSkyView = -1000.0f;
+
+	const bool bHazeChanged = fabsf( flHaze - s_flPrevHaze ) > 0.01f;
+	const bool bTransmittance = !s_bInitialized || bHazeChanged;
+
+	const float flDiffDelta = ( curDiff - s_prevDiff ).Length();
+	const bool bSkyView = bTransmittance
+		|| DotProduct( curSunDir, s_prevSunDir ) < 0.9999996f	// ~0.05 degrees
+		|| flDiffDelta > 0.004f * Max( 0.05f, s_prevDiff.Length() );
+
+	if ( !bSkyView )
+		return;
+
+	const float flInterval = r_deferred_skyatmo_skyview_lut_update_interval.GetFloat();
+	if ( !bTransmittance && flInterval > 0.0f && gpGlobals->realtime - s_flLastSkyView < flInterval )
+		return;
+
+	s_bInitialized = true;
+	s_prevSunDir = curSunDir;
+	s_prevDiff = curDiff;
+	s_flPrevHaze = flHaze;
+	s_flLastSkyView = gpGlobals->realtime;
+
+	if ( bTransmittance )
+	{
+		DrawSkyLUTPass( GetDeferredManager()->GetDeferredMaterial( DEF_MAT_SKY_ATMO_TRANSMITTANCE_LUTGEN ), GetDefRT_SkyAtmoTransmittanceLUT() );
+		DrawSkyLUTPass( GetDeferredManager()->GetDeferredMaterial( DEF_MAT_SKY_ATMO_MULTISCATTERING_LUTGEN ), GetDefRT_SkyAtmoMultiScatteringLUT() );
+	}
+
+	DrawSkyLUTPass( GetDeferredManager()->GetDeferredMaterial( DEF_MAT_SKY_ATMO_SKYVIEW_LUTGEN ), GetDefRT_SkyAtmoSkyViewLUT() );
+}
+
+// old implementation, kept for reference: regenerated every LUT whenever the sun moved
+#if 0
+static void UpdateSkyAtmoLUT_Old()
+{
 	// Transmittance LUT
 	{
 		IMaterial *pTransMat = GetDeferredManager()->GetDeferredMaterial( DEF_MAT_SKY_ATMO_TRANSMITTANCE_LUTGEN );
@@ -165,6 +229,7 @@ static void UpdateSkyAtmoLUT()
 		}
 	}
 }
+#endif
 
 void SetClearColorToFogColor()
 {
@@ -365,6 +430,9 @@ protected:
 	virtual void	DrawWorldDeferred( float waterZAdjust );
 	virtual void	DrawOpaqueRenderablesDeferred(bool);
 
+	// HL2RPM: called after the opaque scene, before translucents
+	virtual void	OnPostOpaque() {}
+
 protected:
 
 	static void PushComposite();
@@ -384,6 +452,9 @@ public:
 	void			Draw();
 
 	virtual bool	ShouldCacheLists() { return true; }
+
+	// HL2RPM: wet surfaces + weather fog on the lit opaque scene
+	virtual void	OnPostOpaque() { WeatherRender_PostOpaque( *this ); }
 
 private:
 	VisibleFogVolumeInfo_t m_fogInfo;
@@ -493,6 +564,8 @@ public:
 
 	virtual int		GetShadowMode() = 0;
 
+	void			AddExtraVisOrigin( const Vector &vecOrigin ) { shadowVis.AddVisOrigin( vecOrigin ); }
+
 private:
 
 	ITexture *m_pDepthTexture;
@@ -503,6 +576,73 @@ private:
 
 	bool m_bOutputRadiosity;
 };
+
+// HL2RPM: top-down depth map of everything that can block rain ("rain occlusion map").
+// Rendered through the regular shadow depth pass, only when the player moved or
+// every second, and only while it's raining or surfaces are wet.
+class CRainOcclusionView : public CBaseShadowView
+{
+	DECLARE_CLASS( CRainOcclusionView, CBaseShadowView );
+public:
+	CRainOcclusionView( CViewRender *pMainView, const Vector &vecCenter, float flSize )
+		: CBaseShadowView( pMainView )
+	{
+		m_vecCenter = vecCenter;
+		m_flSize = flSize;
+	}
+
+	virtual void	CalcShadowView();
+	virtual void	CommitData();
+	virtual int		GetShadowMode() { return DEFERRED_SHADOW_MODE_ORTHO; }
+
+private:
+	Vector m_vecCenter;
+	float m_flSize;
+};
+
+#define RAINMAP_HEIGHT_ABOVE	6000.0f
+#define RAINMAP_ZFAR			14000.0f
+
+void CRainOcclusionView::CalcShadowView()
+{
+	const int iRes = GetWeatherRainMapResolution();
+
+	origin = m_vecCenter + Vector( 0, 0, RAINMAP_HEIGHT_ABOVE );
+	angles.Init( 90.0f, 0.0f, 0.0f );	// straight down
+
+	x = 0;
+	y = 0;
+	width = iRes;
+	height = iRes;
+
+	const float flHalf = m_flSize * 0.5f;
+	m_bOrtho = true;
+	m_OrthoLeft = -flHalf;
+	m_OrthoTop = -flHalf;
+	m_OrthoRight = flHalf;
+	m_OrthoBottom = flHalf;
+
+	zNear = zNearViewmodel = 0.0f;
+	zFar = zFarViewmodel = RAINMAP_ZFAR;
+	m_flAspectRatio = 1.0f;
+	fov = fovViewmodel = 90.0f;
+}
+
+void CRainOcclusionView::CommitData()
+{
+	VMatrix a, b, c, d, screenToTexture;
+	render->GetMatricesForView( *this, &a, &b, &c, &d );
+	MatrixBuildScale( screenToTexture, 0.5f, -0.5f, 1.0f );
+	screenToTexture[0][3] = 0.5f;
+	screenToTexture[1][3] = 0.5f;
+
+	VMatrix matWorldToTexture;
+	MatrixMultiply( screenToTexture, c, matWorldToTexture );
+	WeatherRender_OnRainMapRendered( matWorldToTexture, m_vecCenter, m_flSize, RAINMAP_ZFAR );
+
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_SHADOW_INDEX, 0 );
+}
 
 class COrthoShadowView : public CBaseShadowView
 {
@@ -866,6 +1006,9 @@ void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, f
 
 	//if ( m_DrawFlags & DF_DRAW_ENTITITES )
 	DrawOpaqueRenderablesDeferred( false );
+
+	if ( !bShadowDepth )
+		OnPostOpaque();
 
 	//if (!m_bDrawWorldNormal)
 	{
@@ -1680,18 +1823,41 @@ void COrthoShadowView::CalcShadowView()
 {
 	const cascade_t &m_data = GetCascadeInfo( iCascadeIndex );
 
-	C_BasePlayer *pPlayer = C_BasePlayer::GetLocalPlayer();
-	if ( pPlayer )
+	// HL2RPM: at this point 'this' still holds the main camera (copied in Setup).
+	// Fit the cascade to the bounding sphere of its slice of the view frustum
+	// instead of centering every cascade on the player's feet: the old way
+	// wasted half of each shadow map on what's behind the camera.
+	const Vector vecViewOrigin = origin;
+	Vector vecViewFwd;
+	AngleVectors( angles, &vecViewFwd );
+
+	float flSphereCenter, flSphereRadius;
 	{
-		Vector anchor = pPlayer->GetAbsOrigin();
+		const float flTanX = tanf( DEG2RAD( clamp( fov, 1.0f, 170.0f ) * 0.5f ) );
+		const float flTanY = flTanX / Max( m_flAspectRatio, 0.01f );
+		const float k2 = flTanX * flTanX + flTanY * flTanY;
+		const float n = m_data.flSplitNear;
+		const float f = Max( m_data.flSplitFar, n + 1.0f );
 
-		trace_t tr;
-		UTIL_TraceLine( anchor + Vector( 0, 0, 64 ), anchor - Vector( 0, 0, 8192 ), MASK_SOLID, pPlayer, COLLISION_GROUP_NONE, &tr );
-		if ( tr.fraction < 1.0f )
-			anchor = tr.endpos;
+		// sphere through the near and far corners of the slice, centered on the view axis
+		flSphereCenter = 0.5f * ( n + f ) * ( 1.0f + k2 );
+		if ( flSphereCenter >= f )
+		{
+			flSphereCenter = f;
+			flSphereRadius = Max( f * sqrtf( k2 ), sqrtf( ( f - n ) * ( f - n ) + n * n * k2 ) );
+		}
+		else
+		{
+			flSphereRadius = sqrtf( ( f - flSphereCenter ) * ( f - flSphereCenter ) + f * f * k2 );
+		}
 
-		origin = anchor;
+		// Quantize so tiny fov/aspect jitter doesn't change the texel size,
+		// and pad for the shadow filter kernel.
+		flSphereRadius = ceilf( flSphereRadius / 16.0f ) * 16.0f;
+		flSphereRadius *= (float)m_data.iResolution / (float)Max( m_data.iResolution - 8, 64 );
 	}
+
+	origin = vecViewOrigin + vecViewFwd * flSphereCenter;
 
 	const lightData_Global_t& state = GetActiveGlobalLightState();
 	QAngle lightAng;
@@ -1700,13 +1866,16 @@ void COrthoShadowView::CalcShadowView()
 	// Smooth the light direction to prevent shadow jitter at high time speeds
 	static QAngle s_smoothedLightAng( 0, 0, 0 );
 	static bool s_bLightAngInit = false;
+	static int s_iLightAngFrame = -1;
 	if ( !s_bLightAngInit )
 	{
 		s_smoothedLightAng = lightAng;
 		s_bLightAngInit = true;
+		s_iLightAngFrame = gpGlobals->framecount;
 	}
-	else
+	else if ( s_iLightAngFrame != gpGlobals->framecount ) // once per frame, not once per cascade
 	{
+		s_iLightAngFrame = gpGlobals->framecount;
 		float dt = gpGlobals->frametime;
 		float rate = 1.0f - expf( -dt * 15.0f );
 		for ( int i = 0; i < 3; i++ )
@@ -1720,7 +1889,7 @@ void COrthoShadowView::CalcShadowView()
 	Vector viewFwd, viewRight, viewUp;
 	AngleVectors( lightAng, &viewFwd, &viewRight, &viewUp );
 
-	const float halfOrthoSize = m_data.flProjectionSize * 0.5f;
+	const float halfOrthoSize = flSphereRadius;
 
 	origin += -viewFwd * m_data.flOriginOffset;
 
@@ -1738,10 +1907,12 @@ void COrthoShadowView::CalcShadowView()
 	m_OrthoBottom = halfOrthoSize;
 
 	zNear = zNearViewmodel = 0;
-	zFar = zFarViewmodel = m_data.flFarZ;
+	zFar = zFarViewmodel = m_data.flOriginOffset + flSphereRadius + 1024.0f;
 	m_flAspectRatio = 1.0f;
 
-	float mapping_world = m_data.flProjectionSize / m_data.iResolution;
+	// Snap to the shadow texel grid in light space so the shadow doesn't shimmer
+	// when the camera moves (texels always land on the same world positions).
+	float mapping_world = ( 2.0f * halfOrthoSize ) / m_data.iResolution;
 	origin -= fmod( DotProduct( viewRight, origin ), mapping_world ) * viewRight;
 	origin -= fmod( DotProduct( viewUp, origin ), mapping_world ) * viewUp;
 
@@ -1765,8 +1936,6 @@ void COrthoShadowView::CommitData()
 		};
 	};
 
-	const cascade_t &data = GetCascadeInfo( iCascadeIndex );
-
 	Vector fwd, right, down;
 	AngleVectors( angles, &fwd, &right, &down );
 	down *= -1.0f;
@@ -1783,7 +1952,7 @@ void COrthoShadowView::CommitData()
 
 	// Compute adaptive per-cascade bias parameters from texel size & depth range.
 	// These replace the old hand-tuned flSlopeScaleMin / flSlopeScaleMax / flNormalScaleMax.
-	const float texelWorldSize = data.flProjectionSize / (float)data.iResolution;
+	const float texelWorldSize = ( m_OrthoRight - m_OrthoLeft ) / (float)Max( width, 1 );	// HL2RPM: real fitted size
 	const float oneTexelDepth  = texelWorldSize / zFar;   // one-texel depth in [0,1] range
 
 	shadowData.vecSlopeSettings.Init(
@@ -2008,10 +2177,62 @@ void CDeferredViewRender::LevelInit()
 	ResetCascadeDelay();
 }
 
+// HL2RPM: staggered cascade updates. A cascade that isn't re-rendered this frame keeps
+// both its shadow map tile and its world->texture matrix from the frame it was drawn,
+// so it stays correct in world space; it only has to be redrawn when it may no longer
+// cover what the camera sees, or when the sun moved.
+struct CascadeUpdateState_t
+{
+	bool bValid;
+	bool bZeroed;
+	int iLastFrame;
+	Vector vecViewPos;
+	Vector vecViewFwd;
+	Vector vecLightDir;
+	float flFov;
+	float flSplitFar;
+};
+static CascadeUpdateState_t s_CascadeUpdateState[SHADOW_NUM_CASCADES];
+
+static ConVar r_csm_stagger( "r_csm_stagger", "1", FCVAR_ARCHIVE, "Update distant sun shadow cascades less often (big performance win)" );
+
 void CDeferredViewRender::ResetCascadeDelay()
 {
 	for ( int i = 0; i < SHADOW_NUM_CASCADES; i++ )
+	{
 		m_flRenderDelay[i] = 0;
+		s_CascadeUpdateState[i].bValid = false;
+		s_CascadeUpdateState[i].bZeroed = false;
+	}
+}
+
+static bool ShouldUpdateCascade( int iCascade, const cascade_t &cascade, const CViewSetup &view,
+	const Vector &vecViewFwd, const Vector &vecLightDir )
+{
+	const CascadeUpdateState_t &st = s_CascadeUpdateState[iCascade];
+	if ( !st.bValid || !r_csm_stagger.GetBool() )
+		return true;
+
+	if ( gpGlobals->framecount - st.iLastFrame >= cascade.iUpdateInterval )
+		return true;
+
+	// camera moved far enough that the stale tile may not cover the slice anymore
+	const float flMoveTolerance = Max( 16.0f, cascade.flSplitFar * 0.04f );
+	if ( ( view.origin - st.vecViewPos ).LengthSqr() > flMoveTolerance * flMoveTolerance )
+		return true;
+
+	// camera turned (cascades are centered in front of the camera)
+	if ( DotProduct( vecViewFwd, st.vecViewFwd ) < 0.9925f )	// ~7 degrees
+		return true;
+
+	// sun moved
+	if ( DotProduct( vecLightDir, st.vecLightDir ) < 0.99996f )	// ~0.5 degree
+		return true;
+
+	if ( fabsf( view.fov - st.flFov ) > 0.5f || fabsf( cascade.flSplitFar - st.flSplitFar ) > 1.0f )
+		return true;
+
+	return false;
 }
 
 void CDeferredViewRender::ViewDrawSceneDeferred( const CViewSetup &view, int nClearFlags, view_id_t viewID, bool bDrawViewModel )
@@ -2025,11 +2246,17 @@ void CDeferredViewRender::ViewDrawSceneDeferred( const CViewSetup &view, int nCl
 
 	PerformLighting( view );
 
+	// HL2RPM: volumetric clouds, read by the sky shader during the composite
+	WeatherRender_Clouds( view );
+
 #if DEFCFG_DEFERRED_SHADING
 	ViewCombineDeferredShading( view, viewID );
 #else
 	ViewDrawComposite( view, bDrew3dSkybox, nSkyboxVisible, nClearFlags, viewID, bDrawViewModel );
 #endif
+
+	// other views (monitors, cubemaps...) must not sample this view's screen-space clouds
+	WeatherRender_SetCloudTextureValid( false );
 
 #if DEFCFG_ENABLE_RADIOSITY
 	if ( r_deferred_radiosity_nodes.GetBool() )
@@ -2060,6 +2287,9 @@ void CDeferredViewRender::ViewDrawSceneDeferred( const CViewSetup &view, int nCl
 
 	// Draw rain..
 	DrawPrecipitation();
+
+	// HL2RPM: dynamic weather rain
+	WeatherRender_Rain( view );
 
 	// Make sure sound doesn't stutter
 	engine->Sound_ExtraUpdate();
@@ -2306,7 +2536,7 @@ void CDeferredViewRender::DrawWorldComposite( const CViewSetup &view, int nClear
 void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 {
 	bool bResetLightAccum = false;
-	const bool bRadiosityEnabled = DEFCFG_ENABLE_RADIOSITY != 0 && r_deferred_radiosity.GetBool();
+	const bool bRadiosityEnabled = DEFCFG_ENABLE_RADIOSITY != 0 && r_deferred_radiosity.GetBool() && AreRadiosityRTsAvailable();
 	bool bDrawDebugShadow = false;
 
 	if ( bRadiosityEnabled )
@@ -2391,6 +2621,12 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 
 		QUEUE_FIRE( CommitLightData_Global, lightDataState );
 
+		// HL2RPM: weather constants for this frame (clouds, sky, fog, rain...)
+		WeatherRender_CommitFrame( view, lightDataState );
+
+		// HL2RPM: top-down depth map that tells where rain can fall
+		RenderRainOcclusion( view );
+
 		if ( lightDataState.bEnabled )
 		{
 			if ( lightDataState.bShadow )
@@ -2406,7 +2642,13 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 			bResetLightAccum = true;
 	}
 	else
+	{
 		bResetLightAccum = true;
+
+		// no global light: weather is disabled for this frame
+		lightData_Global_t noLight;
+		WeatherRender_CommitFrame( view, noLight );
+	}
 
 	CViewSetup lightingView = view;
 
@@ -2773,11 +3015,50 @@ void CDeferredViewRender::RenderCascadedShadows( const CViewSetup &view, const b
 		pRenderContext->SetShadowDepthBiasFactors( 0.5f, 0.000005f );
 	}
 
+	// HL2RPM: fit cascades to the current camera and only redraw what's needed.
+	UpdateCascadeSplits( view.zNear, view.fov, view.m_flAspectRatio );
+	const int iActiveCascades = GetActiveCascadeCount();
+
+	Vector vecViewFwd;
+	AngleVectors( view.angles, &vecViewFwd );
+	const Vector vecLightDir = GetActiveGlobalLightState().vecLight.AsVector3D();
+
 	for ( int i = 0; i < SHADOW_NUM_CASCADES; i++ )
 	{
+		CascadeUpdateState_t &st = s_CascadeUpdateState[i];
+
+		if ( i >= iActiveCascades )
+		{
+			// Unused slot: an all-zero matrix projects everything outside the tile,
+			// so the shader's cascade search skips it.
+			if ( !st.bZeroed )
+			{
+				shadowData_ortho_t zeroData;
+				Q_memset( &zeroData, 0, sizeof( zeroData ) );
+				zeroData.iRes_x = CSM_COMP_RES_X;
+				zeroData.iRes_y = CSM_COMP_RES_Y;
+				QUEUE_FIRE( CommitShadowData_Ortho, i, zeroData );
+				st.bZeroed = true;
+				st.bValid = false;
+			}
+			continue;
+		}
+		st.bZeroed = false;
+
 		const cascade_t &cascade = GetCascadeInfo(i);
 		const bool bDoRadiosity = bEnableRadiosity && cascade.bOutputRadiosityData;
 		const int iRadTarget = cascade.iRadiosityCascadeTarget;
+
+		if ( !bDoRadiosity && !ShouldUpdateCascade( i, cascade, view, vecViewFwd, vecLightDir ) )
+			continue;
+
+		st.bValid = true;
+		st.iLastFrame = gpGlobals->framecount;
+		st.vecViewPos = view.origin;
+		st.vecViewFwd = vecViewFwd;
+		st.vecLightDir = vecLightDir;
+		st.flFov = view.fov;
+		st.flSplitFar = cascade.flSplitFar;
 
 #if CSM_USE_COMPOSITED_TARGET == 0
 		int textureIndex = i;
@@ -2810,6 +3091,29 @@ void CDeferredViewRender::RenderCascadedShadows( const CViewSetup &view, const b
 		CMatRenderContextPtr pRenderContext( materials );
 		pRenderContext->SetShadowDepthBiasFactors( 2.0f, 0.00001f );
 	}
+}
+
+void CDeferredViewRender::RenderRainOcclusion( const CViewSetup &view )
+{
+	Vector vecCenter;
+	float flSize = 3072.0f;
+	if ( !WeatherRender_ShouldUpdateRainMap( view, vecCenter, flSize ) )
+		return;
+
+	ITexture *pDepth = GetWeatherRT_RainMapDepth();
+	ITexture *pDummy = GetWeatherRT_RainMapDummy();
+	if ( !pDepth || !pDummy )
+		return;
+
+	CRefPtr<CRainOcclusionView> pRainView = new CRainOcclusionView( this, vecCenter, flSize );
+	pRainView->Setup( view, pDepth, pDummy );
+	pRainView->AddExtraVisOrigin( view.origin );
+
+	C_BasePlayer *pLocal = C_BasePlayer::GetLocalPlayer();
+	if ( pLocal )
+		pRainView->m_iShadowExcludeEntIndex = pLocal->entindex();
+
+	AddViewToScene( pRainView );
 }
 
 void CDeferredViewRender::DrawLightShadowView( const CViewSetup &view, int iDesiredShadowmap, def_light_t *l )

@@ -628,7 +628,9 @@ float PerformCascadedShadowEx( sampler sShadowMap, float3 worldPos,
 
 	const float3 shadow_uvz_base = ToShadowSpace_Ortho( worldPos, viewFwdDot, flNormal, vecSlopeData[curCascade], viewProjOrtho[curCascade] );
 
-	const float blendStart = 0.65f;
+	// HL2RPM: narrower band (was 0.65): the blend doubles the 5x5 filter cost,
+	// view-fitted cascades overlap enough for a short transition
+	const float blendStart = 0.85f;
 	float2 centered = abs( shadow_uvz_base.xy * 2.0f - 1.0f );
 	float maxCoord = max( centered.x, centered.y );
 	float blendFactor = smoothstep( blendStart, 1.0f, maxCoord );

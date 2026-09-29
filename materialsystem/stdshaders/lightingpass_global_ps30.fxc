@@ -36,6 +36,51 @@ const float3 g_light_ambient_high			: register( c59 );
 const float3 g_light_ambient_low_half		: register( c60 );
 const float g_flCSMColorize				: register( c61 );
 
+// ---- HL2RPM weather: moving cloud shadows ----
+const float4 g_vecCloud0					: register( c62 );	// coverage, density, type, darkness
+const float4 g_vecCloud1					: register( c63 );	// base (m), thickness (m), cirrus, time
+const float4 g_vecWind						: register( c64 );	// xy cloud offset (m)
+const float4 g_vecWeatherFlags				: register( c65 );	// x cloud shadow strength
+
+sampler sWeatherMap							: register( s4 );
+sampler sCloudNoise							: register( s5 );
+
+// Density of the cloud column above a point, looking toward the light.
+// Uses the same weather map / shape noise as the volumetric clouds so the
+// shadows on the ground match the clouds in the sky.
+float CloudShadow( float3 worldPos, float3 lightDir )
+{
+	float3 pm = worldPos * 0.0254;
+	float midH = g_vecCloud1.x + g_vecCloud1.y * 0.35;
+	float tMid = ( midH - pm.z ) / max( lightDir.z, 0.1 );
+	float2 cxy = pm.xy + lightDir.xy * tMid + g_vecWind.xy;
+
+	float2 wm = tex2Dlod( sWeatherMap, float4( cxy / 40000.0, 0, 0 ) ).rg;
+	float coverage = saturate( g_vecCloud0.x + ( wm.x - 0.5 ) * 0.45 * ( 1.0 - g_vecCloud0.x * 0.6 ) );
+	float type = saturate( g_vecCloud0.z + ( wm.y - 0.5 ) * 0.5 );
+
+	// one slice of the shape noise where the height profile peaks (same parameterization as the clouds)
+	float hs = lerp( 0.11, 0.3, type );
+	float3 p = float3( cxy, hs * g_vecCloud1.y * 1.6 + g_vecCloud1.w * 3.0 ) / 8000.0;
+	p = frac( p );
+	float zs = p.z * 64.0 - 0.5;
+	float z0 = floor( zs );
+	z0 = ( z0 < 0.0 ) ? 63.0 : z0;
+	float2 inTile = ( 1.0 + p.xy * 62.0 ) / 512.0;
+	float2 t0 = float2( fmod( z0, 8.0 ), floor( z0 / 8.0 ) ) * 0.125;
+	float4 n = tex2Dlod( sCloudNoise, float4( t0 + inTile, 0, 0 ) );
+	float fbm = n.g * 0.625 + n.b * 0.25 + n.a * 0.125;
+	float shape = saturate( ( ( n.r - ( fbm - 1.0 ) ) / ( 2.0 - fbm ) - 0.66 ) * ( 1.0 / 0.27 ) );
+
+	// same coverage cut as weather_clouds_ps30 (CoverageThreshold)
+	float cu = ( ( -1.0825 * coverage + 1.6586 ) * coverage - 1.1291 ) * coverage + 0.7521;
+	float st = ( ( -1.2365 * coverage + 1.6690 ) * coverage - 1.1536 ) * coverage + 0.7396;
+	float threshold = lerp( st, cu, type ) * saturate( ( 1.0 - coverage ) * 20.0 );
+	float density = saturate( ( shape - threshold ) / max( ( 1.0 - threshold ) * 0.6, 0.05 ) ) * ( 0.35 + 0.65 * coverage );
+	float opticalDepth = density * g_vecCloud0.y * 6.0;
+	return 1.0 - g_vecWeatherFlags.x * ( 1.0 - exp( -opticalDepth ) );
+}
+
 struct PS_INPUT
 {
 	float2 vTexCoord				: TEXCOORD0;
@@ -86,7 +131,15 @@ PS_OUTPUT main( const PS_INPUT In )
 
 	float sunVis = saturate( ( g_vecLightVec_Forward.z + 0.02 ) / 0.08 );
 	lightAmount *= sunVis;
-	float3 ambient = lerp( g_light_ambient_low_half, g_light_ambient_high, viewFwdDot );
+
+	// HL2RPM: sky light comes from above and bounce light from below (it used to be
+	// oriented along the sun direction, which made overcast lighting wrong).
+	float3 ambientLow = max( 2.0 * g_light_ambient_low_half - g_light_ambient_high, 0.0 );
+	float skyFacing = saturate( flNormal.z * 0.5 + 0.5 ) * 0.75 + saturate( viewFwdDot * 0.5 + 0.5 ) * 0.25;
+	float3 ambient = lerp( ambientLow, g_light_ambient_high, skyFacing );
+
+	if ( g_vecWeatherFlags.x > 0.0 && lightAmount > 0.0 && flDepth < DEPTH_RECONSTRUCTION_LIMIT )
+		lightAmount *= CloudShadow( g_vecViewOrigin + In.vecWorldRay * flDepth, g_vecLightVec_Forward );
 
 #if HAS_SHADOW
 	if ( flDepth < DEPTH_RECONSTRUCTION_LIMIT )
@@ -120,7 +173,10 @@ PS_OUTPUT main( const PS_INPUT In )
 	}
 #endif
 
-	float4 lighting = float4( lerp( ambient, diffuse * ( litDot ), lightAmount ), flSpecular * lightAmount );
+	// HL2RPM: sky light + direct light (the old lerp *replaced* the sky light with the
+	// sun wherever it was lit, so lit areas under a weak overcast sun got darker than shadow)
+	// (lightAmount already contains saturate( litDot ) * sun visibility * shadows)
+	float4 lighting = float4( ambient + diffuse * lightAmount, flSpecular * lightAmount );
 
 	Out.vColor_0 = WriteLighting( lighting );
 

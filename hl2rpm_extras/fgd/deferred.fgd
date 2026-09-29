@@ -134,3 +134,32 @@
 	twilight_hours(float) : "Twilight duration (hours)" : "1.25" : ""
 	night_altitude(float) : "Night sun altitude (deg)" : "-12.0" : ""
 ]
+
+//Pravka: HL2RPM dynamic weather
+@PointClass base(Targetname) iconsprite("editor/fog_controller.vmt") = env_weather : "HL2RPM dynamic weather: volumetric clouds, rain, fog, wet surfaces and lightning. Created automatically on maps with light_deferred_global; place one to choose the start weather or to control it with inputs."
+[
+	start_weather(choices) : "Start weather" : -1 : "Weather when the map starts." =
+	[
+		-1 : "Random (calm)"
+		0 : "Clear"
+		1 : "Fair"
+		2 : "Partly cloudy"
+		3 : "Overcast"
+		4 : "Fog"
+		5 : "Drizzle"
+		6 : "Rain"
+		7 : "Thunderstorm"
+		8 : "Misty"
+	]
+	auto_weather(choices) : "Automatic weather changes" : 1 : "The weather changes by itself over time (plausible sequences, fog in the morning, storms in the afternoon)." =
+	[
+		0 : "No"
+		1 : "Yes"
+	]
+	duration_scale(float) : "Weather duration scale" : "1.0" : "Multiplier for how long each automatic weather lasts."
+
+	input SetWeather(string) : "Blend to a weather: clear, fair, partlycloudy, overcast, fog, drizzle, rain, thunderstorm, misty. Optional transition time in seconds after the name, e.g. 'rain 30'."
+	input SetWeatherInstant(string) : "Switch to a weather immediately (same names as SetWeather)."
+	input EnableAuto(void) : "Enable automatic weather changes."
+	input DisableAuto(void) : "Disable automatic weather changes."
+]

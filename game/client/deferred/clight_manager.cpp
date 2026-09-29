@@ -12,6 +12,8 @@
 #include "tier1/callqueue.h"
 
 #include "deferred/deferred_rt.h"
+#include "weather/weather_render.h"
+#include "weather/c_weather_system.h"
 
 #include "tier0/memdbgon.h"
 
@@ -1597,7 +1599,31 @@ void CLightingManager::RenderVolumetrics( const CViewSetup& view )
 		}
 	}
 
-	if ( !m_bDrawVolumetrics && !drawSunVolumetrics && !drawSunRays )
+	// HL2RPM: raymarched sun shafts through the weather fog (see weather_render)
+	bool bSunShafts = false;
+	if ( WeatherRender_GetSunShaftQuality() > 0 && GetWeatherSystem()->IsActive() &&
+		GetWeatherSystem()->GetParams().flVolumetricDensity > 0.001f && GetGlobalLight() )
+	{
+		const lightData_Global_t globalState = GetGlobalLight()->GetState();
+		bSunShafts = globalState.bEnabled && globalState.bShadow;
+	}
+
+	static ConVarRef cl_weather_debug( "cl_weather_debug" );
+	if ( cl_weather_debug.IsValid() && cl_weather_debug.GetBool() )
+	{
+		static float s_flNext = 0.0f;
+		if ( gpGlobals->realtime > s_flNext )
+		{
+			s_flNext = gpGlobals->realtime + 1.0f;
+			const lightData_Global_t dbgState = GetGlobalLight() ? GetGlobalLight()->GetState() : lightData_Global_t();
+			Msg( "[volumetrics] shafts %d (quality %d, active %d, vol %.2f, light en %d sh %d) volumetrics %d sunvol %d rays %d\n",
+				bSunShafts ? 1 : 0, WeatherRender_GetSunShaftQuality(), GetWeatherSystem()->IsActive() ? 1 : 0,
+				GetWeatherSystem()->GetParams().flVolumetricDensity, dbgState.bEnabled ? 1 : 0, dbgState.bShadow ? 1 : 0,
+				m_bDrawVolumetrics ? 1 : 0, drawSunVolumetrics ? 1 : 0, drawSunRays ? 1 : 0 );
+		}
+	}
+
+	if ( !m_bDrawVolumetrics && !drawSunVolumetrics && !drawSunRays && !bSunShafts )
 		return;
 
 	if ( !m_bDrawVolumetrics )
@@ -1643,7 +1669,10 @@ void CLightingManager::RenderVolumetrics( const CViewSetup& view )
 		}
 	}
 
-	const bool doBlur = r_deferred_volumetrics_blur.GetBool() && ( m_bDrawVolumetrics || drawSunVolumetrics );
+	if ( bSunShafts )
+		WeatherRender_SunShafts( view, pVolumBuffer0 );
+
+	const bool doBlur = r_deferred_volumetrics_blur.GetBool() && ( m_bDrawVolumetrics || drawSunVolumetrics || bSunShafts );
 	if ( doBlur )
 	{
 		pRenderContext->PushRenderTargetAndViewport( pVolumBuffer1 );

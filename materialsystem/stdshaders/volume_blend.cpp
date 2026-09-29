@@ -58,6 +58,12 @@ BEGIN_VS_SHADER( VOLUME_BLEND, "" )
 			SET_DYNAMIC_PIXEL_SHADER( volume_blend_ps30 );
 
 			BindTexture( SHADER_SAMPLER0, BASETEXTURE );
+
+			// HL2RPM: GAMMA_LIGHT_SCALE is cLightScale (c30), which the engine does not restore
+			// per draw. The passes before this one (sun shafts: cascade UV transforms c26-c33)
+			// leave junk there, which zeroed all volumetric light. Same fix as the composite.
+			float flNeutralLightScale[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+			pShaderAPI->SetPixelShaderConstant( 30, flNeutralLightScale );
 		}
 
 		Draw();

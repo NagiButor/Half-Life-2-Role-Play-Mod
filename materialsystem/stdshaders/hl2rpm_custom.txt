@@ -28,3 +28,12 @@ volume_blend_ps30.fxc
 volume_prepass_ps30.fxc
 volume_prepass_vs30.fxc
 volumpass_point_ps30.fxc
+weather_clouds_ps30.fxc
+weather_post_ps30.fxc
+weather_rain_ps30.fxc
+weather_rain_vs30.fxc
+volumpass_sun_ps30.fxc
+procsky_atmo_ps20b.fxc
+sky_atmo_transmittance_lutgen_ps30.fxc
+sky_atmo_multiscattering_lutgen_ps30.fxc
+sky_atmo_skyview_lutgen_ps30.fxc

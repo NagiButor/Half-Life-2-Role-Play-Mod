@@ -173,7 +173,9 @@ void CEnvTimecycle::UpdateSun()
 		float x = ( m_flTwilightHours > 0.0f ) ? clamp( delta / m_flTwilightHours, 0.0f, 1.0f ) : 1.0f;
 		x = x * x * ( 3.0f - 2.0f * x );
 
-		altitudeDeg = Lerp( 0.0f, m_flNightAltitudeDeg, x );
+		// HL2RPM: Lerp( percent, a, b ) - the arguments were swapped, so the sun dropped to
+		// the night altitude the moment it set (no twilight at all)
+		altitudeDeg = Lerp( x, 0.0f, m_flNightAltitudeDeg );
 	}
 
 	const float azimuthDeg = m_flAzimuthOffsetDeg + ( t / 24.0f ) * 360.0f;

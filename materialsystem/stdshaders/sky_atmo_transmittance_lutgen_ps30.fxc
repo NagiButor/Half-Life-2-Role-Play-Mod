@@ -39,14 +39,19 @@ float rayIntersectSphere( float3 ro, float3 rd, float rad )
 	return ( -b - s );
 }
 
+// HL2RPM: x = aerosol (Mie) multiplier from the weather (haze, fog, rain)
+const float4 g_vecAtmo : register( c2 );
+
 void getScatteringValues( float3 pos, out float3 rayleighScattering, out float mieScattering, out float3 extinction )
 {
-	float height = length( pos ) - groundRadiusMM;
+	// HL2RPM: real scale heights (8 km Rayleigh, 1.2 km Mie) and an ozone layer peaking
+	// at 25 km. These were 10x too large, which made the sky pink/purple.
+	float altitudeKM = ( length( pos ) - groundRadiusMM ) * 1000.0;
 
-	float rayleighDensity = exp( -height / 0.08 );
-	float mieDensity = exp( -height / 0.012 );
+	float rayleighDensity = exp( -altitudeKM / 8.0 );
+	float mieDensity = exp( -altitudeKM / 1.2 ) * max( g_vecAtmo.x, 0.1 );
 
-	float3 ozoneAbsorption = ozoneAbsorptionBase * saturate( ( height - 0.015 ) / 0.03 ) * saturate( ( 0.12 - height ) / 0.03 );
+	float3 ozoneAbsorption = ozoneAbsorptionBase * max( 0.0, 1.0 - abs( altitudeKM - 25.0 ) / 15.0 );
 
 	rayleighScattering = rayleighScatteringBase * rayleighDensity;
 	float3 rayleighAbsorption = rayleighAbsorptionBase * rayleighDensity;
@@ -70,7 +75,7 @@ float3 IntegrateTransmittance( float r, float mu )
 	if ( t <= 0.0 )
 		return 1.0.xxx;
 
-	const int STEPS = 12;
+	const int STEPS = 40;	// rebuilt only when the weather haze changes, can afford accuracy
 	float dt = t / (float)STEPS;
 
 	float3 tau = 0.0.xxx;

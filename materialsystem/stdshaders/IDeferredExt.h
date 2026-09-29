@@ -110,6 +110,62 @@ struct radiosityData_t
 	Vector vecOrigin[2];
 };
 
+// HL2RPM: dynamic weather / sky state, committed by the client once per frame.
+struct weatherData_t
+{
+	weatherData_t()
+	{
+		bEnabled = false;
+		bCloudTextureValid = false;
+		bRainMapValid = false;
+		vecCloudParams0.Init();
+		vecCloudParams1.Init();
+		vecCloudParams2.Init();
+		vecWind.Init();
+		vecAtmoParams.Init( 1, 0, 1, 0 );
+		vecFogParams.Init();
+		vecFogColor.Init();
+		vecRainParams.Init();
+		vecSunColor.Init();
+		vecSkyZenith.Init();
+		vecSkyHorizon.Init();
+		vecMoonDir.Init( 0, 0, -1, 0 );
+		vecSunDir.Init( 0, 0, 1, 90 );
+		vecLightning.Init();
+		vecCameraParams.Init();
+		vecScreenParams.Init();
+		matPrevViewProj.Identity();
+		matRainMap.Identity();
+		vecRainMapParams.Init();
+		vecSkyLight.Init( 1, 1, 1, 0 );
+	}
+
+	bool bEnabled;
+	bool bCloudTextureValid;	// screen-space cloud RT matches the view being drawn
+	bool bRainMapValid;
+
+	Vector4D vecCloudParams0;	// x coverage, y density, z type, w darkness
+	Vector4D vecCloudParams1;	// x base (m), y thickness (m), z cirrus, w cloud time (s)
+	Vector4D vecCloudParams2;	// x brightness, y shadow strength, z quality steps, w temporal blend
+	Vector4D vecWind;			// xy cloud offset (m), zw rain slant (unit/unit)
+	Vector4D vecAtmoParams;		// x haze, y sky desaturation, z sky brightness, w lightning flash
+	Vector4D vecFogParams;		// x density /1000u, y falloff /1000u, z base height (units), w volumetric density
+	Vector4D vecFogColor;		// rgb fog color (linear), w max opacity
+	Vector4D vecRainParams;		// x rain, y wetness, z puddles, w time (s)
+	Vector4D vecSunColor;		// rgb direct light color reaching the clouds, w night factor
+	Vector4D vecSkyZenith;		// rgb sky ambient from above
+	Vector4D vecSkyHorizon;		// rgb sky ambient at the horizon
+	Vector4D vecMoonDir;		// xyz moon direction, w moon brightness
+	Vector4D vecSunDir;			// xyz real sun direction (the global light may be the moon), w sun altitude (deg)
+	Vector4D vecLightning;		// xyz flash direction, w flash intensity
+	Vector4D vecCameraParams;	// xyz camera world pos, w camera altitude (m)
+	Vector4D vecScreenParams;	// x 1/w, y 1/h, z cloud RT uv scale, w frame index
+	VMatrix matPrevViewProj;	// rotation-only view projection of the previous frame (cloud reprojection)
+	VMatrix matRainMap;			// world -> rain occlusion map texture space
+	Vector4D vecRainMapParams;	// x depth bias, y map size (units), z texel size, w unused
+	Vector4D vecSkyLight;		// rgb illuminance of the light the sky LUT is built for (untinted sun, or the moon)
+};
+
 #include "tier0/memdbgon.h"
 
 struct lightDataCommon_t
@@ -177,9 +233,15 @@ public:
 	virtual void CommitTexture_ShadowRadOutput_Ortho( ITexture *pAlbedo, ITexture *pNormal ) = 0;
 	virtual void CommitTexture_Radiosity( ITexture *pTexRadBuffer0, ITexture *pTexRadBuffer1,
 		ITexture *pTexRadNormal0, ITexture *pTexRadNormal1 ) = 0;
+
+	// HL2RPM weather
+	virtual void CommitWeatherData( const weatherData_t &data ) = 0;
+	virtual void CommitWeatherCloudTextureValid( const bool &bValid ) = 0;
+	virtual void CommitTexture_Weather( ITexture *pCloudTexture, ITexture *pCloudHistory,
+		ITexture *pCloudNoise, ITexture *pWeatherMap, ITexture *pRainMap ) = 0;
 };
 
-#define DEFERRED_EXTENSION_VERSION "DeferredExtensionVersion002"
+#define DEFERRED_EXTENSION_VERSION "DeferredExtensionVersion003"
 
 #ifdef STDSHADER_DX9_DLL_EXPORT
 
@@ -230,6 +292,18 @@ public:
 	virtual void CommitTexture_ShadowRadOutput_Ortho( ITexture *pAlbedo, ITexture *pNormal );
 	virtual void CommitTexture_Radiosity( ITexture *pTexRadBuffer0, ITexture *pTexRadBuffer1,
 		ITexture *pTexRadNormal0, ITexture *pTexRadNormal1 );
+
+	virtual void CommitWeatherData( const weatherData_t &data );
+	virtual void CommitWeatherCloudTextureValid( const bool &bValid );
+	virtual void CommitTexture_Weather( ITexture *pCloudTexture, ITexture *pCloudHistory,
+		ITexture *pCloudNoise, ITexture *pWeatherMap, ITexture *pRainMap );
+
+	inline const weatherData_t &GetWeatherData() { return m_dataWeather; }
+	inline ITexture *GetTexture_Clouds() { return m_pTexClouds; }
+	inline ITexture *GetTexture_CloudHistory() { return m_pTexCloudHistory; }
+	inline ITexture *GetTexture_CloudNoise() { return m_pTexCloudNoise; }
+	inline ITexture *GetTexture_WeatherMap() { return m_pTexWeatherMap; }
+	inline ITexture *GetTexture_RainMap() { return m_pTexRainMap; }
 
 	inline float *GetOriginBase();
 	inline float *GetForwardBase();
@@ -319,6 +393,13 @@ private:
 	ITexture *m_pTexShadowRad_Ortho[ 2 ];
 	ITexture *m_pTexRadBuffer[ 2 ];
 	ITexture *m_pTexRadNormal[ 2 ];
+
+	weatherData_t m_dataWeather;
+	ITexture *m_pTexClouds;
+	ITexture *m_pTexCloudHistory;
+	ITexture *m_pTexCloudNoise;
+	ITexture *m_pTexWeatherMap;
+	ITexture *m_pTexRainMap;
 };
 
 float *CDeferredExtension::GetOriginBase()

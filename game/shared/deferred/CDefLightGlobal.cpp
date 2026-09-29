@@ -3,8 +3,10 @@
 #include "deferred/deferred_shared_common.h"
 #include "deferred/deferred_verbose.h"
 
-#ifdef GAME_DLL
 #include "timecycle/env_timecycle.h"
+#include "weather/env_weather.h"
+#ifdef CLIENT_DLL
+#include "weather/c_weather_system.h"
 #endif
 
 #include "tier0/memdbgon.h"
@@ -93,6 +95,17 @@ void CDeferredLightGlobal::Activate()
 		}
 	}
 
+	// HL2RPM: outdoor maps get dynamic weather unless the mapper placed an env_weather
+	if ( !GetWeatherEntity() )
+	{
+		CBaseEntity *ent = CreateEntityByName( "env_weather" );
+		if ( ent )
+		{
+			DispatchSpawn( ent );
+			ent->Activate();
+		}
+	}
+
 	if ( DeferredVerboseLevel() >= 1 )
 	{
 		DevMsg( "light_deferred_global[%d] Activate: flags=0x%x ang=(%.1f %.1f %.1f) diff=(%.3f %.3f %.3f) ambh=(%.3f %.3f %.3f) ambl=(%.3f %.3f %.3f) fadetime=%.3f\n",
@@ -155,7 +168,8 @@ lightData_Global_t CDeferredLightGlobal::GetState()
 
 	{
 		const float sunZ = data.vecLight.z;
-		const float day = DeferredSaturate( ( sunZ + 0.02f ) / 0.12f );
+		// HL2RPM: the sky stays bright through civil twilight (sun down to about -5 degrees)
+		const float day = DeferredSaturate( ( sunZ + 0.08f ) / 0.18f );
 		const float twilight = DeferredSaturate( 1.0f - fabsf( sunZ ) / 0.10f ) * ( 1.0f - day );
 		const float sunAltDeg = RAD2DEG( asinf( clamp( sunZ, -1.0f, 1.0f ) ) );
 
@@ -163,10 +177,16 @@ lightData_Global_t CDeferredLightGlobal::GetState()
 		Vector baseAmbH( data.ambh.x, data.ambh.y, data.ambh.z );
 		Vector baseAmbL( data.ambl.x, data.ambl.y, data.ambl.z );
 
-		const float warm = DeferredSaturate( ( 0.25f - sunZ ) / 0.25f ) * day;
-		Vector warmTint( 1.0f, 0.55f, 0.25f );
-		Vector neutralTint( 1.0f, 1.0f, 1.0f );
-		Vector diffTint = DeferredLerp( warm, neutralTint, warmTint );
+		// HL2RPM: color and strength of the sunlight come from the atmosphere (air mass through
+		// the same Rayleigh / Mie / ozone as the sky shaders): white at noon, golden in the
+		// afternoon, deep orange at sunset. The luminance drop is softened for gameplay.
+		const float flHaze = GetWeatherSystem()->IsActive() ? GetWeatherSystem()->GetParams().flHaze : 1.0f;
+		Vector sunCol = Weather_SunlightColor( sunAltDeg, 0.0f, flHaze );
+		const float flSunLum = sunCol.x * 0.2126f + sunCol.y * 0.7152f + sunCol.z * 0.0722f;
+		if ( flSunLum > 1e-4f )
+			sunCol *= powf( flSunLum, 0.6f ) / flSunLum;
+		// the disk sinks below the horizon
+		const float flDisk = DeferredSaturate( ( sunZ + 0.015f ) / 0.03f );
 
 		float nightFade = DeferredSaturate( ( -sunAltDeg - 6.0f ) / 12.0f );
 		nightFade = nightFade * nightFade * ( 3.0f - 2.0f * nightFade );
@@ -183,10 +203,8 @@ lightData_Global_t CDeferredLightGlobal::GetState()
 		nightAmbL.y *= 0.50f;
 		nightAmbL.z *= 1.30f;
 
-		Vector diff = baseDiff * ( day * day );
-		diff.x *= diffTint.x;
-		diff.y *= diffTint.y;
-		diff.z *= diffTint.z;
+		Vector diff( baseDiff.x * sunCol.x, baseDiff.y * sunCol.y, baseDiff.z * sunCol.z );
+		diff *= flDisk;
 
 		Vector ambH = DeferredLerp( day, nightAmbH, baseAmbH );
 		Vector ambL = DeferredLerp( day, nightAmbL, baseAmbL );
@@ -205,6 +223,14 @@ lightData_Global_t CDeferredLightGlobal::GetState()
 		data.bEnabled = true;
 		const float sunAltDeg = RAD2DEG( asinf( clamp( data.vecLight.z, -1.0f, 1.0f ) ) );
 		data.bShadow = HasShadow() && sunAltDeg > -2.0f;
+	}
+
+	// HL2RPM: moonlight at night and weather (cloud cover, overcast sky light, lightning)
+	{
+		const bool bCanShadow = HasShadow();
+		GetWeatherSystem()->ModifyGlobalLight( data, GetColor_Diffuse(), GetColor_Ambient_High() );
+		if ( !bCanShadow )
+			data.bShadow = false;
 	}
 
 	if ( DeferredVerboseLevel() >= 2 )

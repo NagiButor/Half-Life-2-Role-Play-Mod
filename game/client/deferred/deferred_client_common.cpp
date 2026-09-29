@@ -50,7 +50,7 @@ static void ApplyPointSpotShadowQualityPreset( int quality )
 }
 
 static void OnPointSpotShadowQualityChanged( IConVar *var, const char *pOldValue, float flOldValue );
-ConVar r_deferred_shadow_quality_pointspot( "r_deferred_shadow_quality_pointspot", "5", FCVAR_ARCHIVE,
+ConVar r_deferred_shadow_quality_pointspot( "r_deferred_shadow_quality_pointspot", "3", FCVAR_ARCHIVE,
 	"Point/Spot shadow quality preset (0=Very Low, 1=Low, 2=Medium, 3=High, 4=Very High, 5=Ultra)",
 	true, 0.0f, true, 5.0f, OnPointSpotShadowQualityChanged );
 

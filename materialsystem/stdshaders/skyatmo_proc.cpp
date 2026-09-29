@@ -35,12 +35,17 @@ BEGIN_VS_SHADER( SkyAtmoProc, "" )
 
 	SHADER_INIT
 	{
-		if ( params[SKYLUT]->IsDefined() )
-			LoadTexture( SKYLUT );
-		if ( params[TRANSMITTANCELUT]->IsDefined() )
-			LoadTexture( TRANSMITTANCELUT );
-		if ( params[SKYVIEWLUT]->IsDefined() )
-			LoadTexture( SKYVIEWLUT );
+		// HL2RPM: default values don't count as "defined" -> the transmittance LUT was
+		// never loaded (the sun disk sampled the error texture).
+		if ( !params[SKYLUT]->IsDefined() )
+			params[SKYLUT]->SetStringValue( DEFRTNAME_SKY_ATMO_LUT );
+		if ( !params[TRANSMITTANCELUT]->IsDefined() )
+			params[TRANSMITTANCELUT]->SetStringValue( DEFRTNAME_SKY_TRANSMITTANCE_LUT );
+		if ( !params[SKYVIEWLUT]->IsDefined() )
+			params[SKYVIEWLUT]->SetStringValue( DEFRTNAME_SKY_SKYVIEW_LUT );
+		LoadTexture( SKYLUT );
+		LoadTexture( TRANSMITTANCELUT );
+		LoadTexture( SKYVIEWLUT );
 	}
 
 	SHADER_DRAW
@@ -55,6 +60,8 @@ BEGIN_VS_SHADER( SkyAtmoProc, "" )
 			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
 			pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
 			pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );	// HL2RPM clouds
+			pShaderShadow->EnableTexture( SHADER_SAMPLER4, true );	// HL2RPM weather map
 
 			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION, 1, NULL, 0 );
 
@@ -103,6 +110,36 @@ BEGIN_VS_SHADER( SkyAtmoProc, "" )
 			pShaderAPI->SetPixelShaderConstant( 16, data.diff.Base() );
 			pShaderAPI->SetPixelShaderConstant( 17, data.ambh.Base() );
 			pShaderAPI->SetPixelShaderConstant( 18, MakeHalfAmbient( data.ambl, data.ambh ).Base() );
+
+			// HL2RPM: dynamic weather
+			const weatherData_t &w = GetDeferredExt()->GetWeatherData();
+			ITexture *pClouds = GetDeferredExt()->GetTexture_Clouds();
+			ITexture *pWeatherMap = GetDeferredExt()->GetTexture_WeatherMap();
+			const bool bCloudsValid = w.bEnabled && w.bCloudTextureValid && pClouds != NULL;
+
+			if ( bCloudsValid )
+				BindTexture( SHADER_SAMPLER3, pClouds );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER3, TEXTURE_BLACK );
+
+			if ( w.bEnabled && pWeatherMap )
+				BindTexture( SHADER_SAMPLER4, pWeatherMap );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER4, TEXTURE_GREY );
+
+			pShaderAPI->SetPixelShaderConstant( 4, w.vecCloudParams0.Base() );
+			pShaderAPI->SetPixelShaderConstant( 5, w.vecCloudParams1.Base() );
+			pShaderAPI->SetPixelShaderConstant( 6, w.vecAtmoParams.Base() );
+			pShaderAPI->SetPixelShaderConstant( 7, w.vecFogColor.Base() );
+			pShaderAPI->SetPixelShaderConstant( 8, w.vecFogParams.Base() );
+			pShaderAPI->SetPixelShaderConstant( 9, w.vecScreenParams.Base() );
+			pShaderAPI->SetPixelShaderConstant( 10, w.vecMoonDir.Base() );
+			pShaderAPI->SetPixelShaderConstant( 11, w.vecSunDir.Base() );
+			pShaderAPI->SetPixelShaderConstant( 12, w.vecLightning.Base() );
+			pShaderAPI->SetPixelShaderConstant( 13, w.vecWind.Base() );
+			pShaderAPI->SetPixelShaderConstant( 14, w.vecSkyHorizon.Base() );
+			float flFlags[4] = { w.bEnabled ? 1.0f : 0.0f, bCloudsValid ? 1.0f : 0.0f, 0.0f, 0.0f };
+			pShaderAPI->SetPixelShaderConstant( 15, flFlags );
 		}
 
 		Draw();

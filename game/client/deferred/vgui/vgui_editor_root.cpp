@@ -1019,6 +1019,20 @@ CON_COMMAND( r_deferred_light_editor_toggle, "" )
 	CVGUILightEditor::ToggleEditor();
 }
 
+// HL2RPM: opens the F1 editor straight on the "time of day and weather" window
+CON_COMMAND( r_deferred_timecycle_editor, "Open the time of day / weather editor" )
+{
+	if ( !engine->IsInGame() )
+		return;
+
+	if ( !CVGUILightEditor::IsEditorVisible() )
+		CVGUILightEditor::ToggleEditor();
+
+	VPANEL hEditor = CVGUILightEditor::GetEditorPanel();
+	if ( hEditor )
+		ivgui()->PostMessage( hEditor, new KeyValues( "EditTimecycleWeather" ), NULL );
+}
+
 static class CLightEditorHelper : public CAutoGameSystemPerFrame
 {
 public:
