@@ -12,6 +12,7 @@
 
 #if defined( CLIENT_DLL )
 #include "c_pixel_visibility.h"
+#include "weather/weather_precip.h"
 #endif
 
 #ifdef TF_CLIENT_DLL
@@ -107,6 +108,10 @@ void CParticleSystemQuery::GetLightingAtPoint( const Vector& vecOrigin, Color &c
 		// Compute our lighting at our position
 		Vector totalColor = engine->GetLightForPoint( vecOrigin, true );
 		s_LightMutex.Unlock();
+
+		// HL2RPM: the lightmaps are baked for one time of day and weather; outdoors,
+		// follow the current sky and sun of the deferred renderer (rain at night, smoke in a storm)
+		totalColor *= WeatherPrecip_GetParticleLightScale( vecOrigin );
 
 		// Get our lighting information
 		cTint.SetColor( totalColor.x*255, totalColor.y*255, totalColor.z*255, 0 );

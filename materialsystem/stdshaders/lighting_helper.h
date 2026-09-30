@@ -24,6 +24,18 @@ FORCEINLINE void CommitBaseDeferredConstants_Origin( IShaderDynamicAPI* pShaderA
 FORCEINLINE void CommitShadowcastingConstants_Ortho( IShaderDynamicAPI *pShaderAPI, const int index,
 	int iForwardRegister, int iSlopeRegister, int iOriginRegister )
 {
+	// HL2RPM: the rain occlusion map looks straight down with its own origin/depth range
+	// (it used the sun cascade 0 data, so its depths were measured along the sun)
+	if ( index == DEFERRED_SHADOW_INDEX_RAIN )
+	{
+		const shadowData_ortho_t &rain = GetDeferredExt()->GetShadowData_Rain();
+		const float flDown[4] = { 0.0f, 0.0f, -1.0f, 0.0f };
+		pShaderAPI->SetVertexShaderConstant( iForwardRegister, flDown );
+		pShaderAPI->SetVertexShaderConstant( iSlopeRegister, rain.vecSlopeSettings.Base() );
+		pShaderAPI->SetVertexShaderConstant( iOriginRegister, rain.vecOrigin.Base() );
+		return;
+	}
+
 	Vector4D fwd = GetDeferredExt()->GetLightData_Global().vecLight;
 	fwd.Negate();
 	const shadowData_ortho_t &data = GetDeferredExt()->GetShadowData_Ortho( index );

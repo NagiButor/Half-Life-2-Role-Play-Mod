@@ -14,11 +14,22 @@
 
 #include "igamesystem.h"
 #include "weather/weather_shared.h"
-#include "particles_simple.h"
+#include "weather/weather_precip.h"
 
 struct lightData_Global_t;
 struct weatherData_t;
 class CViewSetup;
+
+// The visible channel of the current lightning strike (see WeatherRender_Lightning)
+struct LightningBoltInfo_t
+{
+	Vector vecDir;			// horizontal direction from the camera toward the strike
+	float flDistance;		// meters
+	float flCloudBase;		// meters above the ground
+	int iSeed;				// channel shape
+	float flBrightness;		// channel brightness now (return strokes + afterglow)
+	float flVisibility;		// 0..1 haze / rain between the camera and the strike
+};
 
 class C_WeatherSystem : public CAutoGameSystemPerFrame
 {
@@ -46,17 +57,26 @@ public:
 	// strength of the moonlight relative to the map's sunlight (0 by day)
 	float GetMoonLightScale() const;
 	float GetSkyExposure() const { return m_flSkyExposure; }
+	// open sky on a ring ~300 units around the camera (rain seen through doors and windows)
+	float GetOuterSkyExposure() const { return m_flOuterExposure; }
+	// outdoor light now relative to the map's baked daylight (particle lighting)
+	float GetParticleLightScale() const { return m_flParticleLightScale; }
 	const Vector &GetMoonDir() const { return m_vecMoonDir; }
 	const Vector &GetSunDir() const { return m_vecSunDir; }
 	Vector2D GetWindDir() const { return m_vecWindDir; }
 
 	// called by CDeferredLightGlobal::GetState (sun/moon + weather lighting)
 	void ModifyGlobalLight( lightData_Global_t &data, const Vector &vecBaseDiffuse, const Vector &vecBaseAmbHigh ) const;
+	// Lightning flash on top of the (time-smoothed) global light: brightens the sky
+	// light and, for close strikes, turns the global light into the bolt (with shadows)
+	void ApplyLightningFlash( lightData_Global_t &data, bool bCanShadow ) const;
+	// visible channel of the current strike, false when there is none
+	bool GetLightningBolt( LightningBoltInfo_t &info ) const;
 	// called once per rendered frame to build the shader constants
 	void FillRenderData( weatherData_t &data, const CViewSetup &view ) const;
 
 	// Offset added to the map fog (EnableWorldFog). Only used for translucents, see weather_render.
-	void ForceLightning();
+	void ForceLightning( int iClass = 0 );
 
 private:
 	void UpdateTargetFromEntity();
@@ -67,10 +87,12 @@ private:
 	void UpdateLightning( float dt );
 	void UpdateSkyExposure( float dt );
 	void UpdateAudio( float dt );
-	void UpdateSplashes( float dt );
+	void UpdatePrecipitation();
+	Vector2D GetRainSlant() const;
 	void StopAudio();
 
-	void TriggerLightning( bool bForceClose );
+	void TriggerLightning( int iForceClass );
+	float GetStrikeEnvelope( float flTime, bool bChannel ) const;
 
 	bool m_bActive;
 
@@ -102,17 +124,40 @@ private:
 	float m_flPuddles;
 
 	// lightning
+	enum
+	{
+		STRIKE_CLOSE = 0,	// < 1.2 km: crack + boom, lights the scene with shadows
+		STRIKE_MID,			// 1.2..4 km: rolling thunder, visible bolt
+		STRIKE_FAR,			// > 4 km: distant rumble, glow in the clouds
+		STRIKE_CLASS_COUNT
+	};
 	float m_flNextLightning;
-	float m_flFlash;
-	Vector m_vecFlashDir;
+	float m_flFlash;			// sky / ambient flash now
+	float m_flFlashLight;		// directional part (close strikes)
+	Vector m_vecFlashDir;		// toward the flash in the sky (sky / clouds)
+	Vector m_vecBoltLightDir;	// toward the middle of the channel (scene lighting)
 	struct FlashPulse_t { float flStart; float flDecay; float flAmp; };
-	FlashPulse_t m_Pulses[4];
+	FlashPulse_t m_Pulses[6];
 	int m_nPulses;
-	struct Thunder_t { float flTime; float flVolume; bool bClose; };
+	float m_flStrikeTime;
+	float m_flStrikeDistance;	// meters
+	float m_flStrikeCloudBase;	// meters
+	float m_flStrikeFade;		// haze / rain between the camera and the strike
+	int m_iStrikeClass;
+	int m_iStrikeSeed;
+	bool m_bStrikeChannel;		// cloud-to-ground with a visible channel
+	bool m_bLightningWasActive;
+	bool m_bFirstStrike;		// the first strike of a storm uses its own roll
+	struct Thunder_t { float flTime; float flVolume; int iClass; bool bFirst; };
 	CUtlVector<Thunder_t> m_Thunder;
+	// base light of the map, for the flash strength (set in ModifyGlobalLight)
+	mutable float m_flBaseSunLum;
+	mutable float m_flBaseSkyLum;
 
 	// audio / exposure
 	float m_flSkyExposure;
+	float m_flOuterExposure;
+	mutable float m_flParticleLightScale;
 	float m_flNextExposureTrace;
 	float m_flRainVolumeOut;
 	float m_flRainVolumeIn;
@@ -121,9 +166,7 @@ private:
 	bool m_bRainInPlaying;
 	bool m_bWindPlaying;
 
-	float m_flSplashAccum;
-	CSmartPtr<CSimpleEmitter> m_pSplashEmitter;
-	PMaterialHandle m_hSplashMaterial;
+	CWeatherPrecipitation m_Precip;
 };
 
 C_WeatherSystem *GetWeatherSystem();

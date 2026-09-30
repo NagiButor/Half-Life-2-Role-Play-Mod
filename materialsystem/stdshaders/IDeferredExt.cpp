@@ -40,9 +40,12 @@ CDeferredExtension::CDeferredExtension()
 
 	m_pTexClouds = NULL;
 	m_pTexCloudHistory = NULL;
+	m_pTexCloudRaw = NULL;
 	m_pTexCloudNoise = NULL;
 	m_pTexWeatherMap = NULL;
 	m_pTexRainMap = NULL;
+	m_pTexSSAO = NULL;
+	m_pTexSSAOBlur = NULL;
 
 	m_pflCommonLightData = NULL;
 	m_iCommon_NumRows = 0;
@@ -98,6 +101,11 @@ void CDeferredExtension::CommitCommonData( const Vector& origin,
 void CDeferredExtension::CommitZScale( const float &zFar )
 {
 	m_flZDists[2] = zFar;
+}
+
+void CDeferredExtension::CommitShadowData_Rain( const shadowData_ortho_t &data )
+{
+	m_dataRainShadow = data;
 }
 
 void CDeferredExtension::CommitShadowData_Ortho( const int &index, const shadowData_ortho_t &data )
@@ -232,12 +240,25 @@ void CDeferredExtension::CommitWeatherCloudTextureValid( const bool &bValid )
 	m_dataWeather.bCloudTextureValid = bValid;
 }
 
-void CDeferredExtension::CommitTexture_Weather( ITexture *pCloudTexture, ITexture *pCloudHistory,
+void CDeferredExtension::CommitTexture_Weather( ITexture *pCloudTexture, ITexture *pCloudHistory, ITexture *pCloudRaw,
 	ITexture *pCloudNoise, ITexture *pWeatherMap, ITexture *pRainMap )
 {
 	m_pTexClouds = pCloudTexture;
 	m_pTexCloudHistory = pCloudHistory;
+	m_pTexCloudRaw = pCloudRaw;
 	m_pTexCloudNoise = pCloudNoise;
 	m_pTexWeatherMap = pWeatherMap;
 	m_pTexRainMap = pRainMap;
+}
+
+// HL2RPM ambient occlusion
+void CDeferredExtension::CommitSSAOData( const ssaoData_t &data )
+{
+	m_dataSSAO = data;
+}
+
+void CDeferredExtension::CommitTexture_SSAO( ITexture *pAO, ITexture *pBlur )
+{
+	m_pTexSSAO = pAO;
+	m_pTexSSAOBlur = pBlur;
 }

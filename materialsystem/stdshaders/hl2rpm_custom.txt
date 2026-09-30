@@ -37,3 +37,7 @@ procsky_atmo_ps20b.fxc
 sky_atmo_transmittance_lutgen_ps30.fxc
 sky_atmo_multiscattering_lutgen_ps30.fxc
 sky_atmo_skyview_lutgen_ps30.fxc
+weather_cloudresolve_ps30.fxc
+deferred_ssao_ps30.fxc
+deferred_ssaoblur_ps30.fxc
+weather_godrays_ps30.fxc

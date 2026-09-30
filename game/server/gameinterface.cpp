@@ -723,6 +723,11 @@ bool CServerGameDLL::DLLInit( CreateInterfaceFn appSystemFactory,
 	// Add sound emitter
 	IGameSystem::Add( SoundEmitterSystem() );
 
+	// HL2RPM: the deferred manager converts the classic lights of a map (light_environment,
+	// lamps, texture lights) at level start; it was never registered, so nothing was converted
+	extern IGameSystem *DeferredManagerSystem();
+	IGameSystem::Add( DeferredManagerSystem() );
+
 	// load Mod specific game events ( MUST be before InitAllSystems() so it can pickup the mod specific events)
 #ifdef MAPBASE
 	gameeventmanager->LoadEventsFromFile("resource/MapbaseEvents.res");

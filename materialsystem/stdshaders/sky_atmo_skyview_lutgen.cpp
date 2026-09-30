@@ -78,9 +78,9 @@ BEGIN_VS_SHADER( SKY_ATMO_SKYVIEW_LUTGEN, "" )
 			// is lit by the untinted sun (the atmosphere colors it and casts the earth's shadow
 			// at dusk; the global light's diffuse is tinted and faded out at the horizon).
 			const weatherData_t &w = GetDeferredExt()->GetWeatherData();
-			pShaderAPI->SetPixelShaderConstant( 16, w.bEnabled ? w.vecSkyLight.Base() : data.diff.Base() );
+			pShaderAPI->SetPixelShaderConstant( 16, w.bEnabled ? w.vecSkyLight.Base() : data.diff.Base(), 1, true );
 			float flAtmo[4] = { w.bEnabled ? w.vecAtmoParams.x : 1.0f, 0, 0, 0 };
-			pShaderAPI->SetPixelShaderConstant( 2, flAtmo );
+			pShaderAPI->SetPixelShaderConstant( 2, flAtmo, 1, true );
 		}
 
 		Draw();

@@ -1,0 +1,79 @@
+//========= HL2RPM ============================================================//
+//
+// Temporal resolve for the screen-space clouds (weather_clouds_ps30).
+//
+// The raymarch is jittered every frame; this pass reprojects last frame's
+// result (clouds are at infinity, so only the camera rotation matters) and
+// clamps it to the 3x3 neighbourhood of the new frame before blending, so
+// edges never smear behind a turning camera (no ghosting).
+//
+// rgb = in-scattered light, a = transmittance, a < 0 = covered by geometry.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+sampler sRaw					: register( s0 );	// this frame's raymarch
+sampler sHistory				: register( s1 );	// last frame's resolved clouds
+
+const float4 g_vecResolve		: register( c0 );	// xy texel size of the RTs, z uv scale (1/divisor), w history weight
+const float4 g_matPrevVP[4]		: register( c1 );	// rows, rotation-only previous view projection
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+};
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	const float2 texel = g_vecResolve.xy;
+	const float2 uvRaw = In.vTexCoord * g_vecResolve.z;
+
+	float4 cur = tex2D( sRaw, uvRaw );
+	if ( cur.a < 0.0 )
+		return cur;
+
+	// neighbourhood of the current frame (ignoring texels covered by geometry)
+	float4 mn = cur;
+	float4 mx = cur;
+	[unroll]
+	for ( int y = -1; y <= 1; y++ )
+	{
+		[unroll]
+		for ( int x = -1; x <= 1; x++ )
+		{
+			if ( x == 0 && y == 0 )
+				continue;
+			float4 s = tex2D( sRaw, uvRaw + float2( x, y ) * texel );
+			if ( s.a >= 0.0 )
+			{
+				mn = min( mn, s );
+				mx = max( mx, s );
+			}
+		}
+	}
+
+	if ( g_vecResolve.w <= 0.0 )
+		return cur;
+
+	float3 rd = normalize( In.vecWorldRay );
+	float4 p = float4( rd * 1000.0, 1.0 );
+	float4 clip = float4( dot( g_matPrevVP[0], p ), dot( g_matPrevVP[1], p ), dot( g_matPrevVP[2], p ), dot( g_matPrevVP[3], p ) );
+	if ( clip.w <= 0.001 )
+		return cur;
+
+	float2 prevUV = ( clip.xy / clip.w ) * float2( 0.5, -0.5 ) + 0.5;
+	if ( any( prevUV < 0.0 ) || any( prevUV > 1.0 ) )
+		return cur;
+
+	float4 hist = tex2D( sHistory, prevUV * g_vecResolve.z );
+	if ( hist.a < 0.0 )
+		return cur;
+
+	// a little slack around the box keeps the accumulation effective on the jitter noise
+	float4 slack = ( mx - mn ) * 0.15;
+	hist = clamp( hist, mn - slack, mx + slack );
+
+	return lerp( cur, hist, g_vecResolve.w );
+}

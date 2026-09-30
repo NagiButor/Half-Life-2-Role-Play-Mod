@@ -4,6 +4,7 @@
 
 #include "materialsystem/itexture.h"
 #include "weather/weather_render.h"
+#include "deferred/deferred_ssao.h"
 
 #include "tier0/memdbgon.h"
 
@@ -360,8 +361,9 @@ const ImageFormat fmt_gbuffer0 =
 				projVGUIFlags, 0 ) );
 		}
 
-		// HL2RPM: clouds, rain occlusion map
+		// HL2RPM: clouds, rain occlusion map, ambient occlusion
 		InitWeatherRTs();
+		InitSSAORTs();
 
 #if DEFCFG_ENABLE_RADIOSITY
 		for ( int i = 0; i < 2; i++ )

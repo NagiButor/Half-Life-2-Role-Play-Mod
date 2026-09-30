@@ -70,18 +70,19 @@ BEGIN_VS_SHADER( WEATHER_CLOUDS, "" )
 
 			CommitBaseDeferredConstants_Frustum( pShaderAPI, VERTEX_SHADER_SHADER_SPECIFIC_CONST_0 );
 
-			pShaderAPI->SetPixelShaderConstant( 0, w.vecCameraParams.Base() );
-			pShaderAPI->SetPixelShaderConstant( 1, light.vecLight.Base() );
-			pShaderAPI->SetPixelShaderConstant( 2, w.vecSunColor.Base() );
-			pShaderAPI->SetPixelShaderConstant( 3, w.vecSkyZenith.Base() );
-			pShaderAPI->SetPixelShaderConstant( 4, w.vecSkyHorizon.Base() );
-			pShaderAPI->SetPixelShaderConstant( 5, w.vecCloudParams0.Base() );
-			pShaderAPI->SetPixelShaderConstant( 6, w.vecCloudParams1.Base() );
-			pShaderAPI->SetPixelShaderConstant( 7, w.vecCloudParams2.Base() );
-			pShaderAPI->SetPixelShaderConstant( 8, w.vecWind.Base() );
-			pShaderAPI->SetPixelShaderConstant( 9, w.vecScreenParams.Base() );
-			pShaderAPI->SetPixelShaderConstant( 10, w.matPrevViewProj.Base(), 4 );
-			pShaderAPI->SetPixelShaderConstant( 14, w.vecLightning.Base() );
+			pShaderAPI->SetPixelShaderConstant( 0, w.vecCameraParams.Base(), 1, true );
+			// the sun / moon, not a lightning flash that took over the global light
+			pShaderAPI->SetPixelShaderConstant( 1, w.bEnabled ? w.vecSkyLightDir.Base() : light.vecLight.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 2, w.vecSunColor.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 3, w.vecSkyZenith.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 4, w.vecSkyHorizon.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 5, w.vecCloudParams0.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 6, w.vecCloudParams1.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 7, w.vecCloudParams2.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 8, w.vecWind.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 9, w.vecScreenParams.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 10, w.vecCloudParams3.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 14, w.vecLightning.Base(), 1, true );
 		}
 
 		Draw();

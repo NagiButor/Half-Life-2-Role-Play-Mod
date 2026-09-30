@@ -180,6 +180,8 @@ extern vgui::IInputInternal *g_InputInternal;
 #endif
 
 // memdbgon must be the last include file in a .cpp file!!!
+#include "deferred/deferred_dlight_bridge.h"
+
 #include "tier0/memdbgon.h"
 
 static bool s_bNoDecalRearmRequested = false;
@@ -1017,6 +1019,8 @@ int CHLClient::Init( CreateInterfaceFn appSystemFactory, CreateInterfaceFn physi
 		return false;
 	if ( (effects = (IVEfx *)appSystemFactory( VENGINE_EFFECTS_INTERFACE_VERSION, NULL )) == NULL )
 		return false;
+	// HL2RPM: the deferred renderer mirrors engine dynamic lights and needs the elight keys
+	effects = DeferredDLights_WrapEffects( effects );
 	if ( (enginetrace = (IEngineTrace *)appSystemFactory( INTERFACEVERSION_ENGINETRACE_CLIENT, NULL )) == NULL )
 		return false;
 	if ( (render = (IVRenderView *)appSystemFactory( VENGINE_RENDERVIEW_INTERFACE_VERSION, NULL )) == NULL )

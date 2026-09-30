@@ -45,6 +45,43 @@ const float4 g_vecWeatherFlags				: register( c65 );	// x cloud shadow strength
 sampler sWeatherMap							: register( s4 );
 sampler sCloudNoise							: register( s5 );
 
+// ---- HL2RPM: ambient occlusion + sky visibility of the ambient light ----
+sampler sSSAO								: register( s6 );	// half resolution AO (top left of a full size RT)
+sampler sRainMap							: register( s7 );	// top-down occlusion map (hardware depth compare)
+const float4 g_matRainMap[3]				: register( c66 );	// rows of world -> rain map texture
+const float4 g_vecRainMap					: register( c69 );	// depth bias, size, texel size, valid
+const float4 g_vecAmbientCtrl				: register( c70 );	// x sky visibility on, y indoor ambient, z sample radius (units), w AO uv scale (0 = off)
+
+// How much of the sky a point sees, from the top-down map: open straight above and
+// on a disk around it. Deep inside buildings the sky light fades to the indoor level.
+float SkyVisibility( float3 worldPos, float3 normal )
+{
+	if ( g_vecAmbientCtrl.x < 0.5 || g_vecRainMap.w < 0.5 )
+		return 1.0;
+
+	float4 wp = float4( worldPos + normal * 4.0, 1.0 );
+	float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
+
+	// outside the map: no information, treat as outdoors
+	float2 edge = abs( uvz.xy * 2.0 - 1.0 );
+	float inside = saturate( ( 1.0 - max( edge.x, edge.y ) ) * 10.0 );
+
+	float z = uvz.z - g_vecRainMap.x;
+	float r = g_vecAmbientCtrl.z / g_vecRainMap.y;
+	float sum = tex2Dproj( sRainMap, float4( uvz.xy, z, 1 ) ).x * 2.0;
+	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2(  r,  0 ), z, 1 ) ).x;
+	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2( -r,  0 ), z, 1 ) ).x;
+	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2(  0,  r ), z, 1 ) ).x;
+	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2(  0, -r ), z, 1 ) ).x;
+	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2(  r,  r ) * 0.7071, z, 1 ) ).x;
+	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2( -r,  r ) * 0.7071, z, 1 ) ).x;
+	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2(  r, -r ) * 0.7071, z, 1 ) ).x;
+	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2( -r, -r ) * 0.7071, z, 1 ) ).x;
+	float vis = sum / 10.0;
+
+	return lerp( 1.0, vis, inside );
+}
+
 // Density of the cloud column above a point, looking toward the light.
 // Uses the same weather map / shape noise as the volumetric clouds so the
 // shadows on the ground match the clouds in the sky.
@@ -56,8 +93,8 @@ float CloudShadow( float3 worldPos, float3 lightDir )
 	float2 cxy = pm.xy + lightDir.xy * tMid + g_vecWind.xy;
 
 	float2 wm = tex2Dlod( sWeatherMap, float4( cxy / 40000.0, 0, 0 ) ).rg;
-	float coverage = saturate( g_vecCloud0.x + ( wm.x - 0.5 ) * 0.45 * ( 1.0 - g_vecCloud0.x * 0.6 ) );
-	float type = saturate( g_vecCloud0.z + ( wm.y - 0.5 ) * 0.5 );
+	float coverage = saturate( g_vecCloud0.x + ( wm.x - 0.5 ) * 0.5 * ( 1.0 - g_vecCloud0.x * 0.6 ) );
+	float type = saturate( g_vecCloud0.z + ( wm.y - 0.5 ) * 0.7 );
 
 	// one slice of the shape noise where the height profile peaks (same parameterization as the clouds)
 	float hs = lerp( 0.11, 0.3, type );
@@ -137,6 +174,16 @@ PS_OUTPUT main( const PS_INPUT In )
 	float3 ambientLow = max( 2.0 * g_light_ambient_low_half - g_light_ambient_high, 0.0 );
 	float skyFacing = saturate( flNormal.z * 0.5 + 0.5 ) * 0.75 + saturate( viewFwdDot * 0.5 + 0.5 ) * 0.25;
 	float3 ambient = lerp( ambientLow, g_light_ambient_high, skyFacing );
+
+	// HL2RPM: the sky light is occluded - by the geometry right around the point (SSAO)
+	// and by roofs (indoors it drops to a dim bounce level)
+	if ( g_vecAmbientCtrl.w > 0.0 )
+		ambient *= tex2D( sSSAO, In.vTexCoord * g_vecAmbientCtrl.w ).r;
+	if ( flDepth < DEPTH_RECONSTRUCTION_LIMIT )
+	{
+		float skyVis = SkyVisibility( g_vecViewOrigin + In.vecWorldRay * flDepth, flNormal );
+		ambient *= lerp( g_vecAmbientCtrl.y, 1.0, skyVis );
+	}
 
 	if ( g_vecWeatherFlags.x > 0.0 && lightAmount > 0.0 && flDepth < DEPTH_RECONSTRUCTION_LIMIT )
 		lightAmount *= CloudShadow( g_vecViewOrigin + In.vecWorldRay * flDepth, g_vecLightVec_Forward );

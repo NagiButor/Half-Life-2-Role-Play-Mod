@@ -98,18 +98,18 @@ BEGIN_VS_SHADER( SkyAtmoProc, "" )
 			procParams0[1] = ( params[EXPOSURE]->IsDefined() ) ? params[EXPOSURE]->GetFloatValue() : 20.0f;
 			procParams0[2] = ( params[STARSINTENSITY]->IsDefined() ) ? params[STARSINTENSITY]->GetFloatValue() : 1.0f;
 			procParams0[3] = ( params[SUNDISKINTENSITY]->IsDefined() ) ? params[SUNDISKINTENSITY]->GetFloatValue() : 1.0f;
-			pShaderAPI->SetPixelShaderConstant( 2, procParams0, 1 );
+			pShaderAPI->SetPixelShaderConstant( 2, procParams0, 1, true );
 
 			float procParams1[4] = { 0, 0, 0, 0 };
 			procParams1[0] = ( params[SUNRISEBIAS]->IsDefined() ) ? params[SUNRISEBIAS]->GetFloatValue() : -1.0f;
 			procParams1[1] = ( params[AEROSOL]->IsDefined() ) ? params[AEROSOL]->GetFloatValue() : 1.0f;
 			const float starSpeed = ( params[STARROTATIONSPEED]->IsDefined() ) ? params[STARROTATIONSPEED]->GetFloatValue() : 0.00001157f;
 			procParams1[2] = pShaderAPI->CurrentTime() * starSpeed;
-			pShaderAPI->SetPixelShaderConstant( 3, procParams1, 1 );
+			pShaderAPI->SetPixelShaderConstant( 3, procParams1, 1, true );
 
-			pShaderAPI->SetPixelShaderConstant( 16, data.diff.Base() );
-			pShaderAPI->SetPixelShaderConstant( 17, data.ambh.Base() );
-			pShaderAPI->SetPixelShaderConstant( 18, MakeHalfAmbient( data.ambl, data.ambh ).Base() );
+			pShaderAPI->SetPixelShaderConstant( 16, data.diff.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 17, data.ambh.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 18, MakeHalfAmbient( data.ambl, data.ambh ).Base(), 1, true );
 
 			// HL2RPM: dynamic weather
 			const weatherData_t &w = GetDeferredExt()->GetWeatherData();
@@ -127,19 +127,26 @@ BEGIN_VS_SHADER( SkyAtmoProc, "" )
 			else
 				pShaderAPI->BindStandardTexture( SHADER_SAMPLER4, TEXTURE_GREY );
 
-			pShaderAPI->SetPixelShaderConstant( 4, w.vecCloudParams0.Base() );
-			pShaderAPI->SetPixelShaderConstant( 5, w.vecCloudParams1.Base() );
-			pShaderAPI->SetPixelShaderConstant( 6, w.vecAtmoParams.Base() );
-			pShaderAPI->SetPixelShaderConstant( 7, w.vecFogColor.Base() );
-			pShaderAPI->SetPixelShaderConstant( 8, w.vecFogParams.Base() );
-			pShaderAPI->SetPixelShaderConstant( 9, w.vecScreenParams.Base() );
-			pShaderAPI->SetPixelShaderConstant( 10, w.vecMoonDir.Base() );
-			pShaderAPI->SetPixelShaderConstant( 11, w.vecSunDir.Base() );
-			pShaderAPI->SetPixelShaderConstant( 12, w.vecLightning.Base() );
-			pShaderAPI->SetPixelShaderConstant( 13, w.vecWind.Base() );
-			pShaderAPI->SetPixelShaderConstant( 14, w.vecSkyHorizon.Base() );
+			pShaderAPI->SetPixelShaderConstant( 4, w.vecCloudParams0.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 5, w.vecCloudParams1.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 6, w.vecAtmoParams.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 7, w.vecFogColor.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 8, w.vecFogParams.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 9, w.vecScreenParams.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 10, w.vecMoonDir.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 11, w.vecSunDir.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 12, w.vecLightning.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 13, w.vecWind.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 14, w.vecSkyHorizon.Base(), 1, true );
 			float flFlags[4] = { w.bEnabled ? 1.0f : 0.0f, bCloudsValid ? 1.0f : 0.0f, 0.0f, 0.0f };
-			pShaderAPI->SetPixelShaderConstant( 15, flFlags );
+			pShaderAPI->SetPixelShaderConstant( 15, flFlags, 1, true );
+
+			// a lightning flash briefly turns the global light into the bolt: the sky keeps the sun / moon
+			if ( w.bEnabled )
+			{
+				pShaderAPI->SetPixelShaderConstant( 1, w.vecSkyLightDir.Base(), 1, true );
+				pShaderAPI->SetPixelShaderConstant( 16, w.vecSkyLightDiff.Base(), 1, true );
+			}
 		}
 
 		Draw();

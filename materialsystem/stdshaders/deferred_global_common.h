@@ -189,6 +189,8 @@
 /* Shadowing modes
  */
 #define	DEFERRED_SHADOW_MODE_ORTHO 0
+// HL2RPM: shadow index of the top-down rain occlusion map (its own data, looks straight down)
+#define DEFERRED_SHADOW_INDEX_RAIN 100
 #define	DEFERRED_SHADOW_MODE_PROJECTED 1
 #define	DEFERRED_SHADOW_MODE_DPSM 2
 

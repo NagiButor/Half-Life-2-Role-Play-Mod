@@ -16,6 +16,7 @@
 #include "view_shared.h"
 #include "tier0/vprof.h"
 #include "materialsystem/imaterialvar.h"
+#include "weather/c_weather_system.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -510,6 +511,15 @@ void CGlowOverlay::DrawOverlays( bool bCacheFullSceneState )
 		
 		if( !pOverlay->m_bActivated )
 			continue;
+
+		// HL2RPM: env_sun points where the map's static skybox had its sun; the procedural
+		// sky draws the moving sun itself (time of day, clouds), so the old one stays hidden
+		if ( pOverlay->m_bDirectional && pOverlay->m_bInSky && GetWeatherSystem()->IsActive() )
+		{
+			static ConVarRef sv_skyname( "sv_skyname", true );
+			if ( sv_skyname.IsValid() && !Q_strnicmp( sv_skyname.GetString(), "sky_proc_", 9 ) )
+				continue;
+		}
 
 		if( pOverlay->Update() )
 		{

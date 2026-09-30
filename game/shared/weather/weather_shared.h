@@ -25,6 +25,8 @@ enum WeatherPreset_e
 	WEATHER_RAIN,			// steady rain
 	WEATHER_THUNDERSTORM,	// cumulonimbus, downpour, lightning, wind
 	WEATHER_MISTY,			// hazy morning, soft light, strong light shafts
+	WEATHER_SNOW,			// snowfall under a bright grey sky (never chosen automatically)
+	WEATHER_ASH,			// falling ash in a smoky, hazy air (never chosen automatically)
 
 	WEATHER_PRESET_COUNT
 };
@@ -65,6 +67,11 @@ struct WeatherParams_t
 	float flWetness;			// 0..1 target surface wetness
 	float flLightning;			// lightning strikes per minute
 	float flWind;				// 0..1 wind strength (rain slant, gusts)
+	float flSnow;				// 0..1 snowfall intensity
+	float flAsh;				// 0..1 falling ash intensity
+
+	// Mid-level clouds
+	float flAltocumulus;		// 0..1 patchy layer of small cells at ~5 km
 };
 
 struct WeatherPresetInfo_t

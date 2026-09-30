@@ -7,6 +7,7 @@
 #include "cbase.h"
 #include "weather/weather_render.h"
 #include "weather/c_weather_system.h"
+#include "deferred/deferred_ssao.h"
 #include "deferred/deferred_shared_common.h"
 
 #include "materialsystem/itexture.h"
@@ -15,6 +16,7 @@
 #include "view_shared.h"
 #include "tier1/KeyValues.h"
 #include "tier1/callqueue.h"
+#include "vstdlib/random.h"
 
 #include "tier0/memdbgon.h"
 
@@ -32,6 +34,9 @@ static ConVar r_weather_fog( "r_weather_fog", "1", FCVAR_ARCHIVE, "Weather heigh
 static ConVar r_weather_cloud_temporal( "r_weather_cloud_temporal", "1", FCVAR_ARCHIVE, "Temporal accumulation for clouds (less noise)" );
 static ConVar r_weather_cloud_brightness( "r_weather_cloud_brightness", "1.0", FCVAR_ARCHIVE, "Cloud lighting multiplier" );
 static ConVar r_weather_rainmap_size( "r_weather_rainmap_size", "3072", 0, "World size (units) covered by the rain occlusion map" );
+static ConVar r_weather_godrays( "r_weather_godrays", "1", FCVAR_ARCHIVE, "Crepuscular rays through the gaps in the clouds (screen space)" );
+static ConVar r_weather_godrays_strength( "r_weather_godrays_strength", "1.0", FCVAR_ARCHIVE, "Strength of the crepuscular rays" );
+static ConVar r_weather_debug_view( "r_weather_debug_view", "0", FCVAR_CHEAT, "Weather debug view: 1 = rain exposure (red = open sky, blue = covered)" );
 
 int WeatherRender_GetCloudQuality()
 {
@@ -54,7 +59,8 @@ bool WeatherRender_WantsRainMap()
 	C_WeatherSystem *pSys = GetWeatherSystem();
 	if ( !pSys->IsActive() )
 		return false;
-	return WeatherRender_WantsRain() || ( r_weather_wetness.GetBool() && pSys->GetWetness() > 0.005f );
+	// also the sky visibility of the ambient light (deferred_ssao.cpp) reads it
+	return WeatherRender_WantsRain() || ( r_weather_wetness.GetBool() && pSys->GetWetness() > 0.005f ) || DeferredSSAO_WantsSkyVisibility();
 }
 
 // ---------------------------------------------------------------------------
@@ -62,7 +68,8 @@ bool WeatherRender_WantsRainMap()
 // ---------------------------------------------------------------------------
 #define RAINMAP_RES 1024
 
-static CTextureReference g_tex_Clouds[2];
+static CTextureReference g_tex_Clouds[2];		// resolved clouds, ping-pong history
+static CTextureReference g_tex_CloudRaw;		// this frame's raymarch
 static CTextureReference g_tex_RainDepth;
 static CTextureReference g_tex_RainDummy;
 
@@ -80,6 +87,14 @@ void InitWeatherRTs()
 			MATERIAL_RT_DEPTH_NONE,
 			cloudFlags, 0 ) );
 	}
+
+	g_tex_CloudRaw.Init( materials->CreateNamedRenderTargetTextureEx2(
+		"_rt_hl2rpm_clouds_raw",
+		128, 128,
+		RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP,
+		IMAGE_FORMAT_RGBA16161616F,
+		MATERIAL_RT_DEPTH_NONE,
+		cloudFlags | TEXTUREFLAGS_POINTSAMPLE, 0 ) );
 
 	g_tex_RainDepth.Init( materials->CreateNamedRenderTargetTextureEx2(
 		"_rt_hl2rpm_rainmap",
@@ -122,9 +137,11 @@ int GetWeatherRainMapResolution()
 // Materials
 // ---------------------------------------------------------------------------
 static IMaterial *g_pMatClouds = NULL;
+static IMaterial *g_pMatCloudResolve = NULL;
 static IMaterial *g_pMatPost = NULL;
 static IMaterial *g_pMatRain = NULL;
 static IMaterial *g_pMatSunShafts = NULL;
+static IMaterial *g_pMatGodRays = NULL;
 
 static IMaterial *CreateWeatherMaterial( const char *pszName, const char *pszShader )
 {
@@ -144,9 +161,11 @@ static void EnsureWeatherMaterials()
 		return;
 
 	g_pMatClouds = CreateWeatherMaterial( "__hl2rpm_weather_clouds", "WEATHER_CLOUDS" );
+	g_pMatCloudResolve = CreateWeatherMaterial( "__hl2rpm_weather_cloudresolve", "WEATHER_CLOUDRESOLVE" );
 	g_pMatPost = CreateWeatherMaterial( "__hl2rpm_weather_post", "WEATHER_POST" );
 	g_pMatRain = CreateWeatherMaterial( "__hl2rpm_weather_rain", "WEATHER_RAIN" );
 	g_pMatSunShafts = CreateWeatherMaterial( "__hl2rpm_volume_sun", "VOLUME_SUN" );
+	g_pMatGodRays = CreateWeatherMaterial( "__hl2rpm_godrays", "WEATHER_GODRAYS" );
 }
 
 // ---------------------------------------------------------------------------
@@ -194,14 +213,34 @@ float WeatherRender_GetSkyLightIlluminance()
 // orientation matters when reprojecting last frame's clouds.
 static void BuildRotationViewProj( const CViewSetup &view, VMatrix &out )
 {
-	VMatrix matView, matPerspective;
-	matView.Identity();
-	matView.SetupMatrixOrgAngles( vec3_origin, view.angles );
-	MatrixSourceToDeviceSpace( matView );
-	matView = matView.Transpose3x3();
-	matView.SetTranslation( vec3_origin );
-	MatrixBuildPerspectiveX( matPerspective, view.fov, view.m_flAspectRatio, 1.0f, 100000.0f );
-	MatrixMultiply( matPerspective, matView, out );
+	// the engine's exact matrices for this view (a hand-built one was mirrored, which
+	// made the reprojected history drift the wrong way while turning)
+	VMatrix matWorldToView, matViewToProj, matWorldToProj, matWorldToPixels;
+	render->GetMatricesForView( view, &matWorldToView, &matViewToProj, &matWorldToProj, &matWorldToPixels );
+	matWorldToView.SetTranslation( vec3_origin );
+	MatrixMultiply( matViewToProj, matWorldToView, out );
+}
+
+static Vector4D s_vecSkyLightDir( 0, 0, 1, 0 );
+static Vector s_vecWeatherFogColor( 0.5f, 0.5f, 0.5f );
+static bool s_bWeatherFogColorValid = false;
+
+bool WeatherRender_GetSkyboxFogColor( float *pColor )
+{
+	if ( !GetWeatherSystem()->IsActive() || !s_bWeatherFogColorValid )
+		return false;
+	// the fog color is linear scene light, the engine fog wants gamma space
+	for ( int i = 0; i < 3; i++ )
+		pColor[i] = powf( clamp( s_vecWeatherFogColor[i], 0.0f, 1.0f ), 1.0f / 2.2f );
+	return true;
+}
+static Vector4D s_vecSkyLightDiff( 0, 0, 0, 0 );
+static bool s_bGodRaysVisible = false;	// this frame's sun / moon is on (or near) the screen
+
+void WeatherRender_SetSkyLight( const lightData_Global_t &light )
+{
+	s_vecSkyLightDir = light.vecLight;
+	s_vecSkyLightDiff = light.diff;
 }
 
 void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t &light )
@@ -256,6 +295,46 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 	// it and casts the earth's shadow at dusk) or, once it has taken over, the moon
 	const float flSkyLight = WeatherRender_GetSkyLightIlluminance();
 	data.vecSkyLight.Init( flSkyLight, flSkyLight, flSkyLight, 0.0f );
+	data.vecDebug.Init( (float)r_weather_debug_view.GetInt(), 0.0f, 0.0f, 0.0f );
+	data.vecSkyLightDir = s_vecSkyLightDir;
+	data.vecSkyLightDiff = s_vecSkyLightDiff;
+
+	// --- crepuscular rays: where the sun (or the moon) is on screen
+	data.vecGodRays0.Init();
+	data.vecGodRays1.Init();
+	s_bGodRaysVisible = false;
+	if ( r_weather_godrays.GetBool() && r_weather_sunshafts.GetInt() > 0 )
+	{
+		const Vector vecLightDir = s_vecSkyLightDir.AsVector3D().Normalized();
+		Vector vecForward;
+		AngleVectors( view.angles, &vecForward );
+		const float flFacing = DotProduct( vecForward, vecLightDir );
+		if ( flFacing > 0.05f && vecLightDir.z > -0.03f )
+		{
+			VMatrix matWorldToView, matViewToProj, matWorldToProj, matWorldToPixels;
+			render->GetMatricesForView( view, &matWorldToView, &matViewToProj, &matWorldToProj, &matWorldToPixels );
+			Vector4D vecClip;
+			matWorldToProj.V4Mul( Vector4D( view.origin.x + vecLightDir.x * 1000.0f, view.origin.y + vecLightDir.y * 1000.0f,
+				view.origin.z + vecLightDir.z * 1000.0f, 1.0f ), vecClip );
+			if ( vecClip.w > 0.001f )
+			{
+				const float flX = vecClip.x / vecClip.w * 0.5f + 0.5f;
+				const float flY = -vecClip.y / vecClip.w * 0.5f + 0.5f;
+				// fade out as the sun leaves the screen and near the horizon
+				const float flOff = Max( fabsf( flX - 0.5f ), fabsf( flY - 0.5f ) );
+				const float flOnScreen = clamp( ( 1.1f - flOff ) / 0.5f, 0.0f, 1.0f );
+				const float flHorizon = clamp( ( vecLightDir.z + 0.03f ) / 0.08f, 0.0f, 1.0f );
+				const float flNight = pSys->GetNightFactor();
+				float flStrength = ( 0.15f + p.flVolumetricDensity * 0.85f ) * flOnScreen * flHorizon * r_weather_godrays_strength.GetFloat();
+				flStrength *= Lerp( flNight, 1.0f, 0.25f );
+				// light: the direct light above the clouds, dimmed like the sky it shines through
+				Vector vecColor = vecDirect * 0.18f;
+				data.vecGodRays0.Init( flX, flY, flStrength, (float)view.width / Max( view.height, 1 ) );
+				data.vecGodRays1.Init( vecColor.x, vecColor.y, vecColor.z, 0.965f );
+				s_bGodRaysVisible = flStrength > 0.0f;
+			}
+		}
+	}
 
 	// --- sky light, used for cloud ambient, fog and wet reflections
 	Vector vecAmbHigh = light.ambh.AsVector3D();
@@ -284,6 +363,8 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 	const Vector vecGrey = Vector( 0.93f, 0.96f, 1.0f ) * flHorizonLum;
 	Vector vecFog = Lerp( Clamp( p.flFogSkyColor, 0.0f, 1.0f ), vecGrey, vecHorizon );
 	data.vecFogColor.Init( vecFog.x, vecFog.y, vecFog.z, 0.985f );
+	s_vecWeatherFogColor = vecFog;
+	s_bWeatherFogColorValid = true;
 
 	if ( !r_weather_fog.GetBool() )
 		data.vecFogParams.x = 0.0f;
@@ -299,22 +380,23 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 	const bool bMainSized = true;
 	const bool bConsecutive = ( gpGlobals->framecount - g_iLastCloudFrame ) <= 2;
 	const bool bHistory = r_weather_cloud_temporal.GetBool() && g_bCloudHistoryValid && bConsecutive
-		&& g_iLastCloudDivisor == g_iCloudDivisor && bMainSized;
+		&& g_iLastCloudDivisor == g_iCloudDivisor && bMainSized && g_bHavePrevViewProj;
 
 	static const float s_flSteps[4] = { 0.0f, 28.0f, 36.0f, 52.0f };
 	data.vecCloudParams2.Init( r_weather_cloud_brightness.GetFloat(),
 		clamp( ( p.flCloudCoverage - 0.08f ) * 1.4f, 0.0f, 0.85f ),
 		s_flSteps[ clamp( iQuality, 0, 3 ) ],
-		bHistory ? 0.88f : 0.0f );
+		bHistory ? 0.9f : 0.0f );
 
 	data.vecScreenParams.Init( 1.0f / Max( view.width, 1 ), 1.0f / Max( view.height, 1 ),
 		1.0f / g_iCloudDivisor, (float)( gpGlobals->framecount & 1023 ) );
 
-	VMatrix matCurViewProj;
-	BuildRotationViewProj( view, matCurViewProj );
-	data.matPrevViewProj = g_bHavePrevViewProj ? g_matPrevViewProj : matCurViewProj;
-	g_matPrevViewProj = matCurViewProj;
-	g_bHavePrevViewProj = true;
+	// last frame's main view (updated by WeatherRender_Clouds only, other views
+	// such as reflections must not overwrite it)
+	if ( g_bHavePrevViewProj )
+		data.matPrevViewProj = g_matPrevViewProj;
+	else
+		BuildRotationViewProj( view, data.matPrevViewProj );
 
 	// --- rain occlusion map
 	data.bRainMapValid = g_bRainMapValid;
@@ -329,10 +411,11 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 	g_iCloudCurrent = 1 - g_iCloudCurrent;
 	ITexture *pCloud = g_tex_Clouds[ g_iCloudCurrent ];
 	ITexture *pHistory = g_tex_Clouds[ 1 - g_iCloudCurrent ];
+	ITexture *pCloudRaw = g_tex_CloudRaw;
 	ITexture *pNoise = GetWeatherTexture_CloudNoise();
 	ITexture *pWeatherMap = GetWeatherTexture_WeatherMap();
 	ITexture *pRainMap = g_tex_RainDepth;
-	QUEUE_FIRE( CommitTexture_Weather, pCloud, pHistory, pNoise, pWeatherMap, pRainMap );
+	QUEUE_FIRE( CommitTexture_Weather, pCloud, pHistory, pCloudRaw, pNoise, pWeatherMap, pRainMap );
 }
 
 void WeatherRender_SetCloudTextureValid( bool bValid )
@@ -358,12 +441,25 @@ void WeatherRender_Clouds( const CViewSetup &view )
 	const int h = Max( 1, view.height / g_iCloudDivisor );
 
 	CMatRenderContextPtr pRenderContext( materials );
-	pRenderContext->PushRenderTargetAndViewport( g_tex_Clouds[ g_iCloudCurrent ], 0, 0, w, h );
+
+	// 1. jittered raymarch of this frame
+	pRenderContext->PushRenderTargetAndViewport( g_tex_CloudRaw, 0, 0, w, h );
 	pRenderContext->DrawScreenSpaceRectangle( g_pMatClouds,
 		0, 0, w, h,
 		0, 0, w - 1, h - 1,
 		w, h );
 	pRenderContext->PopRenderTargetAndViewport();
+
+	// 2. temporal resolve: reprojected history clamped to this frame's neighbourhood
+	pRenderContext->PushRenderTargetAndViewport( g_tex_Clouds[ g_iCloudCurrent ], 0, 0, w, h );
+	pRenderContext->DrawScreenSpaceRectangle( g_pMatCloudResolve ? g_pMatCloudResolve : g_pMatClouds,
+		0, 0, w, h,
+		0, 0, w - 1, h - 1,
+		w, h );
+	pRenderContext->PopRenderTargetAndViewport();
+
+	BuildRotationViewProj( view, g_matPrevViewProj );
+	g_bHavePrevViewProj = true;
 
 	g_bCloudHistoryValid = true;
 	g_iLastCloudDivisor = g_iCloudDivisor;
@@ -384,7 +480,7 @@ void WeatherRender_PostOpaque( const CViewSetup &view )
 	const WeatherParams_t &p = pSys->GetParams();
 	const bool bWet = r_weather_wetness.GetBool() && pSys->GetWetness() > 0.005f;
 	const bool bFog = r_weather_fog.GetBool() && p.flFogDensity > 0.001f;
-	if ( !bWet && !bFog )
+	if ( !bWet && !bFog && r_weather_debug_view.GetInt() == 0 )
 		return;
 
 	DrawLightPassFullscreen( g_pMatPost, view.width, view.height );
@@ -465,6 +561,218 @@ void WeatherRender_Rain( const CViewSetup &view )
 }
 
 // ---------------------------------------------------------------------------
+// Lightning channel: a branching bolt drawn far away in the strike direction,
+// sized so that it spans from the horizon to the cloud base as seen from the
+// camera. Depth tested: buildings and terrain hide its lower part.
+// ---------------------------------------------------------------------------
+static IMaterial *g_pMatLightning = NULL;
+
+struct BoltSegment_t
+{
+	Vector a, b;		// in bolt space: z up (0 ground .. 1 cloud base), x sideways, y depth; units of height
+	float flWidthA, flWidthB;
+	float flBrightA, flBrightB;
+};
+static CUtlVector<BoltSegment_t> s_BoltSegments;
+static int s_iBoltSeed = 0;
+
+static void BoltPath( CUniformRandomStream &rng, const Vector &a, const Vector &b, float flRough, int nLevels, CUtlVector<Vector> &pts )
+{
+	pts.RemoveAll();
+	pts.AddToTail( a );
+	pts.AddToTail( b );
+	CUtlVector<Vector> next;
+	for ( int lvl = 0; lvl < nLevels; lvl++ )
+	{
+		next.RemoveAll();
+		for ( int i = 0; i < pts.Count() - 1; i++ )
+		{
+			const Vector &p0 = pts[i];
+			const Vector &p1 = pts[i + 1];
+			const float flLen = ( p1 - p0 ).Length();
+			Vector mid = ( p0 + p1 ) * 0.5f;
+			mid.x += rng.RandomFloat( -1.0f, 1.0f ) * flLen * flRough;
+			mid.y += rng.RandomFloat( -1.0f, 1.0f ) * flLen * flRough * 0.5f;
+			mid.z += rng.RandomFloat( -0.25f, 0.25f ) * flLen * flRough;
+			next.AddToTail( p0 );
+			next.AddToTail( mid );
+		}
+		next.AddToTail( pts.Tail() );
+		pts.Swap( next );
+	}
+}
+
+static void BoltAddPath( const CUtlVector<Vector> &pts, float flWidth0, float flWidth1, float flBright0, float flBright1 )
+{
+	const int n = pts.Count() - 1;
+	for ( int i = 0; i < n; i++ )
+	{
+		const float t0 = i / (float)n;
+		const float t1 = ( i + 1 ) / (float)n;
+		BoltSegment_t &seg = s_BoltSegments[ s_BoltSegments.AddToTail() ];
+		seg.a = pts[i];
+		seg.b = pts[i + 1];
+		seg.flWidthA = Lerp( t0, flWidth0, flWidth1 );
+		seg.flWidthB = Lerp( t1, flWidth0, flWidth1 );
+		seg.flBrightA = Lerp( t0, flBright0, flBright1 );
+		seg.flBrightB = Lerp( t1, flBright0, flBright1 );
+	}
+}
+
+static void BuildBoltShape( int iSeed )
+{
+	if ( iSeed == s_iBoltSeed && s_BoltSegments.Count() )
+		return;
+	s_iBoltSeed = iSeed;
+	s_BoltSegments.RemoveAll();
+
+	CUniformRandomStream rng;
+	rng.SetSeed( iSeed );
+
+	// main channel: cloud base to the ground (a little below the horizon)
+	CUtlVector<Vector> main;
+	const Vector vecTop( 0.0f, 0.0f, 1.0f );
+	const Vector vecGround( rng.RandomFloat( -0.25f, 0.25f ), rng.RandomFloat( -0.1f, 0.1f ), -0.04f );
+	BoltPath( rng, vecTop, vecGround, 0.22f, 7, main );
+	BoltAddPath( main, 1.0f, 1.0f, 1.0f, 1.0f );
+
+	// branches leave the upper part of the channel and die out on the way down
+	CUtlVector<Vector> branch, sub;
+	const int nBranches = rng.RandomInt( 3, 7 );
+	for ( int i = 0; i < nBranches; i++ )
+	{
+		const int iStart = rng.RandomInt( main.Count() / 20, main.Count() * 7 / 10 );
+		const Vector &p = main[iStart];
+		const float flSide = rng.RandomFloat( 0.0f, 1.0f ) < 0.5f ? -1.0f : 1.0f;
+		const float flLen = rng.RandomFloat( 0.15f, 0.45f ) * Max( p.z, 0.2f );
+		const Vector vecEnd = p + Vector( flSide * rng.RandomFloat( 0.3f, 0.9f ) * flLen, rng.RandomFloat( -0.3f, 0.3f ) * flLen, -flLen );
+		BoltPath( rng, p, vecEnd, 0.28f, 5, branch );
+		const float flBright = rng.RandomFloat( 0.35f, 0.65f );
+		BoltAddPath( branch, 0.6f, 0.25f, flBright, flBright * 0.15f );
+
+		if ( rng.RandomFloat( 0.0f, 1.0f ) < 0.5f )
+		{
+			const Vector &q = branch[ rng.RandomInt( branch.Count() / 4, branch.Count() * 3 / 4 ) ];
+			const float flSubLen = flLen * rng.RandomFloat( 0.3f, 0.6f );
+			const Vector vecSubEnd = q + Vector( -flSide * rng.RandomFloat( 0.2f, 0.7f ) * flSubLen, 0.0f, -flSubLen );
+			BoltPath( rng, q, vecSubEnd, 0.3f, 4, sub );
+			BoltAddPath( sub, 0.35f, 0.15f, flBright * 0.5f, 0.0f );
+		}
+	}
+}
+
+void WeatherRender_Lightning( const CViewSetup &view )
+{
+	LightningBoltInfo_t bolt;
+	if ( !GetWeatherSystem()->GetLightningBolt( bolt ) )
+		return;
+
+	if ( !g_pMatLightning )
+	{
+		g_pMatLightning = materials->FindMaterial( "hl2rpm/weather/lightning_bolt", TEXTURE_GROUP_OTHER );
+		if ( !g_pMatLightning || g_pMatLightning->IsErrorMaterial() )
+		{
+			g_pMatLightning = NULL;
+			return;
+		}
+		g_pMatLightning->IncrementReferenceCount();
+	}
+
+	BuildBoltShape( bolt.iSeed );
+	if ( !s_BoltSegments.Count() )
+		return;
+
+	// place it far away (in front of the sky, behind almost everything) keeping its angular size
+	const float flRenderDist = clamp( view.zFar * 0.8f, 3000.0f, 24000.0f );
+	const float flHeight = flRenderDist * clamp( bolt.flCloudBase / Max( bolt.flDistance, 100.0f ), 0.03f, 1.2f );
+	const Vector vecBase = view.origin + bolt.vecDir * flRenderDist;
+	const Vector vecUp( 0, 0, 1 );
+	Vector vecRight = CrossProduct( bolt.vecDir, vecUp );
+	VectorNormalize( vecRight );
+
+	// channel width: a few meters of glow at the real distance
+	const float flCoreWidth = flRenderDist * clamp( 5.0f / bolt.flDistance, 0.0006f, 0.004f );
+	const float flBright = Min( bolt.flBrightness * 1.8f, 1.0f ) * ( 0.35f + 0.65f * bolt.flVisibility );
+	const Vector vecCoreColor( 0.92f, 0.95f, 1.0f );
+	const Vector vecGlowColor( 0.60f, 0.66f, 1.0f );
+
+	static ConVarRef cl_weather_debug( "cl_weather_debug" );
+	if ( cl_weather_debug.IsValid() && cl_weather_debug.GetBool() )
+	{
+		Msg( "[lightning] draw: %d segs, dist %.0f units height %.0f width %.1f bright %.2f zfar %.0f\n",
+			s_BoltSegments.Count(), flRenderDist, flHeight, flCoreWidth, flBright, view.zFar );
+	}
+
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->MatrixMode( MATERIAL_MODEL );
+	pRenderContext->PushMatrix();
+	pRenderContext->LoadIdentity();
+
+	pRenderContext->Bind( g_pMatLightning );
+	IMesh *pMesh = pRenderContext->GetDynamicMesh();
+
+	const int nSegs = s_BoltSegments.Count();
+	CMeshBuilder mb;
+	mb.Begin( pMesh, MATERIAL_QUADS, nSegs * 2 );
+
+	for ( int pass = 0; pass < 2; pass++ )
+	{
+		// pass 0: wide dim glow, pass 1: hot core
+		const float flWidthScale = pass == 0 ? 6.0f : 1.0f;
+		const Vector &vecColor = pass == 0 ? vecGlowColor : vecCoreColor;
+		const float flPassBright = pass == 0 ? 0.45f : 1.0f;
+
+		for ( int i = 0; i < nSegs; i++ )
+		{
+			const BoltSegment_t &seg = s_BoltSegments[i];
+			const Vector a = vecBase + vecRight * ( seg.a.x * flHeight ) + bolt.vecDir * ( seg.a.y * flHeight ) + vecUp * ( seg.a.z * flHeight );
+			const Vector b = vecBase + vecRight * ( seg.b.x * flHeight ) + bolt.vecDir * ( seg.b.y * flHeight ) + vecUp * ( seg.b.z * flHeight );
+
+			Vector vecSide = CrossProduct( b - a, view.origin - ( a + b ) * 0.5f );
+			if ( VectorNormalize( vecSide ) < 1e-4f )
+				continue;
+
+			// the top disappears into the cloud base
+			const float flFadeA = clamp( ( 1.0f - seg.a.z ) / 0.18f, 0.0f, 1.0f );
+			const float flFadeB = clamp( ( 1.0f - seg.b.z ) / 0.18f, 0.0f, 1.0f );
+			const float flA = clamp( seg.flBrightA * flFadeA * flBright * flPassBright, 0.0f, 1.0f );
+			const float flB = clamp( seg.flBrightB * flFadeB * flBright * flPassBright, 0.0f, 1.0f );
+			const Vector vecSideA = vecSide * ( seg.flWidthA * flCoreWidth * flWidthScale );
+			const Vector vecSideB = vecSide * ( seg.flWidthB * flCoreWidth * flWidthScale );
+
+			const unsigned char rA = (unsigned char)( vecColor.x * flA * 255.0f ), gA = (unsigned char)( vecColor.y * flA * 255.0f ), bA = (unsigned char)( vecColor.z * flA * 255.0f );
+			const unsigned char rB = (unsigned char)( vecColor.x * flB * 255.0f ), gB = (unsigned char)( vecColor.y * flB * 255.0f ), bB = (unsigned char)( vecColor.z * flB * 255.0f );
+
+			mb.Position3fv( ( a - vecSideA ).Base() );
+			mb.Color4ub( rA, gA, bA, 255 );
+			mb.TexCoord2f( 0, 0.0f, 0.0f );
+			mb.AdvanceVertex();
+
+			mb.Position3fv( ( a + vecSideA ).Base() );
+			mb.Color4ub( rA, gA, bA, 255 );
+			mb.TexCoord2f( 0, 1.0f, 0.0f );
+			mb.AdvanceVertex();
+
+			mb.Position3fv( ( b + vecSideB ).Base() );
+			mb.Color4ub( rB, gB, bB, 255 );
+			mb.TexCoord2f( 0, 1.0f, 1.0f );
+			mb.AdvanceVertex();
+
+			mb.Position3fv( ( b - vecSideB ).Base() );
+			mb.Color4ub( rB, gB, bB, 255 );
+			mb.TexCoord2f( 0, 0.0f, 1.0f );
+			mb.AdvanceVertex();
+		}
+	}
+
+	mb.End();
+	pMesh->Draw();
+
+	pRenderContext->MatrixMode( MATERIAL_MODEL );
+	pRenderContext->PopMatrix();
+}
+
+// ---------------------------------------------------------------------------
 // Sun shafts: raymarch the sun shadow map through the (height) fog
 // ---------------------------------------------------------------------------
 void WeatherRender_SunShafts( const CViewSetup &view, ITexture *pTarget )
@@ -497,6 +805,14 @@ void WeatherRender_SunShafts( const CViewSetup &view, ITexture *pTarget )
 		0, 0, w, h,
 		0, 0, w - 1, h - 1,
 		w, h );
+	// crepuscular rays through the cloud gaps, added on top (only with the sun / moon in view)
+	if ( s_bGodRaysVisible && r_weather_godrays.GetBool() && g_pMatGodRays && !g_pMatGodRays->IsErrorMaterial() )
+	{
+		pRenderContext->DrawScreenSpaceRectangle( g_pMatGodRays,
+			0, 0, w, h,
+			0, 0, w - 1, h - 1,
+			w, h );
+	}
 	pRenderContext->PopRenderTargetAndViewport();
 }
 
@@ -555,6 +871,9 @@ public:
 		if ( g_pMatPost ) { g_pMatPost->DecrementReferenceCount(); g_pMatPost = NULL; }
 		if ( g_pMatRain ) { g_pMatRain->DecrementReferenceCount(); g_pMatRain = NULL; }
 		if ( g_pMatSunShafts ) { g_pMatSunShafts->DecrementReferenceCount(); g_pMatSunShafts = NULL; }
+		if ( g_pMatGodRays ) { g_pMatGodRays->DecrementReferenceCount(); g_pMatGodRays = NULL; }
+		if ( g_pMatLightning ) { g_pMatLightning->DecrementReferenceCount(); g_pMatLightning = NULL; }
+		ShutdownSSAO();
 		ShutdownWeatherTextures();
 	}
 };

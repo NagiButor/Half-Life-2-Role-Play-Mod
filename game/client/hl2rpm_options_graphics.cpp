@@ -46,6 +46,7 @@ enum GfxSetting_e
 	GFX_SHAFTS,				// r_weather_sunshafts 0..3
 	GFX_RAIN,				// r_weather_rain_density (0.5 / 1 / 1.5)
 	GFX_WETNESS,			// r_weather_wetness 0/1
+	GFX_SSAO,				// r_deferred_ssao 0/1
 
 	GFX_SETTING_COUNT
 };
@@ -58,6 +59,7 @@ static const char *s_pszGfxConVars[GFX_SETTING_COUNT] =
 	"r_weather_sunshafts",
 	"r_weather_rain_density",
 	"r_weather_wetness",
+	"r_deferred_ssao",
 };
 
 static const char *s_pszGfxLabels[GFX_SETTING_COUNT] =
@@ -68,6 +70,7 @@ static const char *s_pszGfxLabels[GFX_SETTING_COUNT] =
 	"#HL2RPM_Gfx_SunShafts",
 	"#HL2RPM_Gfx_Rain",
 	"#HL2RPM_Gfx_Wetness",
+	"#HL2RPM_Gfx_SSAO",
 };
 
 struct GfxChoice_t
@@ -108,6 +111,7 @@ static const GfxChoiceList_t s_GfxChoices[GFX_SETTING_COUNT] =
 	{ s_EffectChoices, ARRAYSIZE( s_EffectChoices ) },
 	{ s_RainChoices, ARRAYSIZE( s_RainChoices ) },
 	{ s_OnOffChoices, ARRAYSIZE( s_OnOffChoices ) },
+	{ s_OnOffChoices, ARRAYSIZE( s_OnOffChoices ) },
 };
 
 // Overall presets. The costs that matter most on the GPU are the sun shadow
@@ -126,12 +130,12 @@ static const char *s_pszPresetLabels[] =
 
 static const float s_flPresets[GFX_PRESET_COUNT][GFX_SETTING_COUNT] =
 {
-	//	sun	lamp clouds shafts rain wet
-	{	0,	1,	1,	0,	0.5f,	0	},	// very low
-	{	1,	2,	1,	1,	0.5f,	1	},	// low
-	{	2,	3,	2,	1,	1.0f,	1	},	// medium
-	{	3,	4,	2,	2,	1.0f,	1	},	// high
-	{	5,	5,	3,	3,	1.5f,	1	},	// ultra
+	//	sun	lamp clouds shafts rain wet	ssao
+	{	0,	1,	1,	0,	0.5f,	0,	0	},	// very low
+	{	1,	2,	1,	1,	0.5f,	1,	0	},	// low
+	{	2,	3,	2,	1,	1.0f,	1,	1	},	// medium
+	{	3,	4,	2,	2,	1.0f,	1,	1	},	// high
+	{	5,	5,	3,	3,	1.5f,	1,	1	},	// ultra
 };
 
 static int FindChoice( int iSetting, float flValue )

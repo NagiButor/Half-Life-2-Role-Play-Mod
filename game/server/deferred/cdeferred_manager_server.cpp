@@ -130,6 +130,226 @@ ConVar r_deferred_autoenvlight_ambient_intensity_high("r_deferred_autoenvlight_a
 ConVar r_deferred_autoenvlight_diffuse_intensity("r_deferred_autoenvlight_diffuse_intensity", "1");
 ConVar r_deferred_verbose( "r_deferred_verbose", "0", FCVAR_CHEAT, "0=off, 1=entity lifecycle, 2=net updates, 3=spam" );
 
+// ---------------------------------------------------------------------------
+// HL2RPM: reach of a classic light entity. vrad normalizes the attenuation so that the
+// brightness is the light at 100 units: I(d) = I0 * S / ( c + l d + q d^2 ),
+// S = c + 100 l + 10000 q. The old code solved the raw formula and got 0 for most
+// Hammer lights (constant/linear attenuations of 10000 and more).
+// ---------------------------------------------------------------------------
+static float ComputeEntityLightRadius( KeyValues *entity, const int color[4] )
+{
+	const float flZero = entity->GetFloat( "_zero_percent_distance" );
+	if ( flZero > 0.0f )
+		return clamp( flZero, 64.0f, 4096.0f );
+	const float flFifty = entity->GetFloat( "_fifty_percent_distance" );
+	if ( flFifty > 0.0f )
+		return clamp( flFifty * 2.5f, 64.0f, 4096.0f );
+	const float flDistance = entity->GetFloat( "_distance" );
+	if ( flDistance > 0.0f )
+		return clamp( flDistance, 64.0f, 4096.0f );
+
+	float c = entity->GetFloat( "_constant_attn" );
+	float l = entity->GetFloat( "_linear_attn" );
+	float q = entity->GetFloat( "_quadratic_attn" );
+	if ( c <= 0.0f && l <= 0.0f && q <= 0.0f )
+		q = 1.0f;
+	const float S = c + 100.0f * l + 10000.0f * q;
+	const float I0 = ( Max( color[0], Max( color[1], color[2] ) ) / 255.0f ) * ( color[3] / 255.0f );
+	const float K = I0 * S / 0.02f;	// attenuation where the light is down to 2 %
+
+	float d;
+	if ( q > 0.0f )
+	{
+		const float disc = l * l - 4.0f * q * ( c - K );
+		d = ( disc < 0.0f ) ? 2000.0f : ( -l + sqrtf( disc ) ) / ( 2.0f * q );
+	}
+	else if ( l > 0.0f )
+	{
+		d = ( K - c ) / l;
+	}
+	else
+	{
+		d = 2000.0f;
+	}
+	return clamp( d, 64.0f, 4096.0f );
+}
+
+// ---------------------------------------------------------------------------
+// HL2RPM: compiled lights (dworldlight_t) -> light_deferred
+// ---------------------------------------------------------------------------
+ConVar r_deferred_convert_worldlights( "r_deferred_convert_worldlights", "1", 0, "Turn the map's compiled lights (incl. texture lights) into deferred lights" );
+ConVar r_deferred_convert_surfacelights( "r_deferred_convert_surfacelights", "1", 0, "Also convert texture lights (lights.rad)" );
+ConVar r_deferred_convert_max( "r_deferred_convert_max", "384", 0, "Most compiled lights converted per map" );
+
+struct WorldLightCandidate_t
+{
+	const dworldlight_t *pLight;
+	float flStrength;	// linear intensity at 100 units
+};
+
+static int WorldLightSort( const WorldLightCandidate_t *a, const WorldLightCandidate_t *b )
+{
+	return ( a->flStrength > b->flStrength ) ? -1 : ( ( a->flStrength < b->flStrength ) ? 1 : 0 );
+}
+
+static void ConvertWorldLights( const dworldlight_t *lights, int lightCount, const CUtlVector<Vector> &skipPositions )
+{
+	if ( !r_deferred_convert_worldlights.GetBool() || !lights || lightCount <= 0 )
+		return;
+
+	CUtlVector<WorldLightCandidate_t> candidates;
+	for ( int i = 0; i < lightCount; i++ )
+	{
+		const dworldlight_t &light = lights[i];
+		const bool bSurface = light.type == emit_surface;
+		if ( light.type != emit_point && light.type != emit_spotlight && !( bSurface && r_deferred_convert_surfacelights.GetBool() ) )
+			continue;
+
+		// named lights still exist as entities and were converted with their I/O
+		bool bSkip = false;
+		for ( int j = 0; j < skipPositions.Count(); j++ )
+		{
+			if ( skipPositions[j].DistToSqr( light.origin ) < 8.0f * 8.0f )
+			{
+				bSkip = true;
+				break;
+			}
+		}
+		if ( bSkip )
+			continue;
+
+		// strength at 100 units (texture lights fall off with 1 / d^2)
+		const float flMax = Max( light.intensity.x, Max( light.intensity.y, light.intensity.z ) );
+		float flRatio = bSurface ? 100.0f * 100.0f : ( light.constant_attn + 100.0f * light.linear_attn + 100.0f * 100.0f * light.quadratic_attn );
+		if ( flRatio <= 0.0f )
+			flRatio = 1.0f;
+		const float flStrength = flMax / flRatio;
+		if ( flStrength < ( bSurface ? 0.04f : 0.02f ) )
+			continue;
+
+		WorldLightCandidate_t &c = candidates[ candidates.AddToTail() ];
+		c.pLight = &light;
+		c.flStrength = flStrength;
+	}
+
+	candidates.Sort( WorldLightSort );
+	const int nMax = Min( candidates.Count(), Max( 0, r_deferred_convert_max.GetInt() ) );
+
+	int nPoint = 0, nSpot = 0, nSurface = 0;
+	for ( int i = 0; i < nMax; i++ )
+	{
+		const dworldlight_t &light = *candidates[i].pLight;
+		const bool bSurface = light.type == emit_surface;
+		const bool bSpot = light.type == emit_spotlight || bSurface;
+
+		// radius from the compiled attenuation, texture lights from their 1 / d^2 falloff
+		float flRadius;
+		if ( bSurface )
+		{
+			const float flMax = Max( light.intensity.x, Max( light.intensity.y, light.intensity.z ) );
+			flRadius = sqrtf( flMax / 0.06f );
+		}
+		else
+		{
+			flRadius = ComputeLightRadius( light );
+		}
+		flRadius = clamp( flRadius, 96.0f, 1600.0f );
+
+		// deferred falloff is ( 1 - d / r )^2: match the compiled light at 100 units
+		const float flRef = Min( 100.0f, flRadius * 0.5f );
+		const float flFalloffAtRef = ( 1.0f - flRef / flRadius ) * ( 1.0f - flRef / flRadius );
+		float flRatio = bSurface ? flRef * flRef : ( light.constant_attn + flRef * light.linear_attn + flRef * flRef * light.quadratic_attn );
+		if ( flRatio <= 0.0f )
+			flRatio = 1.0f;
+		Vector col = light.intensity * ( 1.0f / ( flRatio * Max( flFalloffAtRef, 0.05f ) ) );
+		const float flColMax = Max( col.x, Max( col.y, col.z ) );
+		if ( flColMax > 4.0f )
+			col *= 4.0f / flColMax;
+
+		// texture lights emit from their surface: a wide spot a little in front of it
+		Vector pos = light.origin;
+		if ( bSurface )
+			pos += light.normal * 6.0f;
+		QAngle ang( 0, 0, 0 );
+		if ( bSpot )
+			VectorAngles( light.normal, ang );
+
+		CDeferredLight *lightEntity = static_cast<CDeferredLight*>( CBaseEntity::CreateNoSpawn( "light_deferred", pos, ang ) );
+		if ( !lightEntity )
+			break;
+
+		lightEntity->KeyValue( GetLightParamName( LPARAM_DIFFUSE ), UTIL_VarArgs( "%f %f %f 255", col.x * 255.0f, col.y * 255.0f, col.z * 255.0f ) );
+		lightEntity->KeyValue( GetLightParamName( LPARAM_POWER ), 2.0f );
+		lightEntity->KeyValue( GetLightParamName( LPARAM_RADIUS ), flRadius );
+		lightEntity->KeyValue( GetLightParamName( LPARAM_VIS_DIST ), flRadius * 3.0f + 512.0f );
+		lightEntity->KeyValue( GetLightParamName( LPARAM_VIS_RANGE ), flRadius * 1.5f + 256.0f );
+		lightEntity->KeyValue( GetLightParamName( LPARAM_SHADOW_DIST ), flRadius * 1.5f );
+		lightEntity->KeyValue( GetLightParamName( LPARAM_SHADOW_RANGE ), flRadius * 0.75f );
+
+		if ( bSpot )
+		{
+			lightEntity->KeyValue( GetLightParamName( LPARAM_LIGHTTYPE ), "1" );
+			float flOuter, flInner;
+			if ( bSurface )
+			{
+				flOuter = 165.0f;
+				flInner = 90.0f;
+			}
+			else
+			{
+				flOuter = clamp( 2.0f * RAD2DEG( acosf( clamp( light.stopdot2, -1.0f, 1.0f ) ) ), 2.0f, 175.0f );
+				flInner = clamp( 2.0f * RAD2DEG( acosf( clamp( light.stopdot, -1.0f, 1.0f ) ) ), 1.0f, flOuter );
+			}
+			lightEntity->KeyValue( GetLightParamName( LPARAM_SPOTCONE_OUTER ), flOuter );
+			lightEntity->KeyValue( GetLightParamName( LPARAM_SPOTCONE_INNER ), flInner );
+		}
+		else
+		{
+			lightEntity->KeyValue( GetLightParamName( LPARAM_LIGHTTYPE ), "0" );
+		}
+
+		// shadows for the lights that matter: bright, with some reach; texture lights are many
+		const float flColMaxFinal = Max( col.x, Max( col.y, col.z ) );
+		int iFlags = DEFLIGHT_ENABLED;
+		if ( !bSurface && ( bSpot ? ( flColMaxFinal > 0.35f && flRadius > 200.0f ) : ( flColMaxFinal > 1.0f && flRadius > 400.0f ) ) )
+			iFlags |= DEFLIGHT_SHADOW_ENABLED;
+
+		// switchable lights (style >= 32) belong to named entities; low styles are patterns
+		const int iStyle = light.style;
+		if ( iStyle > 0 && iStyle < 32 )
+		{
+			float flAmt = 0.4f, flSpeed = 5.0f, flSmooth = 0.3f, flRandom = 1.0f;
+			if ( iStyle == 10 || iStyle == 13 )
+			{
+				flAmt = 0.8f; flSpeed = 12.0f; flSmooth = 0.0f;
+			}
+			else if ( iStyle == 2 || iStyle == 5 || iStyle == 7 || iStyle == 8 )
+			{
+				flAmt = 0.4f; flSpeed = 1.0f; flSmooth = 1.0f; flRandom = 0.0f;
+			}
+			iFlags |= DEFLIGHT_LIGHTSTYLE_ENABLED;
+			lightEntity->KeyValue( GetLightParamName( LPARAM_STYLE_AMT ), flAmt );
+			lightEntity->KeyValue( GetLightParamName( LPARAM_STYLE_SPEED ), flSpeed );
+			lightEntity->KeyValue( GetLightParamName( LPARAM_STYLE_SMOOTH ), flSmooth );
+			lightEntity->KeyValue( GetLightParamName( LPARAM_STYLE_RANDOM ), flRandom );
+			lightEntity->KeyValue( GetLightParamName( LPARAM_STYLE_SEED ), RandomInt( 0, DEFLIGHT_SEED_MAX ) );
+		}
+		lightEntity->KeyValue( "spawnflags", UTIL_VarArgs( "%d", iFlags ) );
+
+		DispatchSpawn( lightEntity );
+
+		if ( bSurface )
+			nSurface++;
+		else if ( bSpot )
+			nSpot++;
+		else
+			nPoint++;
+	}
+
+	DevMsg( "CDeferredManagerServer: converted %d compiled lights (%d point, %d spot, %d texture) of %d candidates\n",
+		nPoint + nSpot + nSurface, nPoint, nSpot, nSurface, candidates.Count() );
+}
+
 void CDeferredManagerServer::LevelInitPreEntity()
 {
 	if ( gpGlobals->eLoadType == MapLoad_LoadGame )
@@ -143,21 +363,39 @@ void CDeferredManagerServer::LevelInitPreEntity()
 
 	const char* entStr = engine->GetMapEntitiesString();
 
-	if ( V_stristr( entStr, "light_deferred_global" ) )
+	// HL2RPM: a map lit for the deferred renderer by hand (light_deferred) keeps its lights.
+	// Otherwise the classic lamps are converted even if the map has its own global light
+	// (such maps used to stay dark wherever the lamps were: only the sun was deferred).
+	if ( V_stristr( entStr, "\"light_deferred\"" ) )
 	{
 		if ( DeferredVerboseLevel() >= 1 )
-			DevMsg( "CDeferredManagerServer: light_deferred_global exists in entity lump, skipping auto-create.\n" );
+			DevMsg( "CDeferredManagerServer: map has light_deferred entities, skipping auto-conversion.\n" );
 		return;
 	}
+	const bool bMapHasGlobalLight = V_stristr( entStr, "\"light_deferred_global\"" ) != NULL;
 
-	const FileHandle_t hFile = g_pFullFileSystem->Open(MapName(), "rb");
+	// HL2RPM: MapName() is the bare map name ("d1_trainstation_01"), the open always failed
+	// and nothing was ever converted
+	char szBSPPath[MAX_PATH];
+	const char *pszMapName = MapName();
+	if ( V_stristr( pszMapName, ".bsp" ) )
+		V_strncpy( szBSPPath, pszMapName, sizeof( szBSPPath ) );
+	else
+		V_snprintf( szBSPPath, sizeof( szBSPPath ), "maps/%s.bsp", pszMapName );
+
+	const FileHandle_t hFile = g_pFullFileSystem->Open( szBSPPath, "rb", "GAME" );
 	if ( !hFile )
+	{
+		Warning( "CDeferredManagerServer: can't open %s, classic lights are not converted\n", szBSPPath );
 		return;
+	}
 
 	dheader_t header;
 	g_pFullFileSystem->Read( &header, sizeof(dheader_t), hFile );
 
-	const lump_t &lightLump = header.lumps[LUMP_WORLDLIGHTS];
+	// HL2RPM: maps compiled with HDR only have their lights in the HDR lump
+	const bool bUseHDRLights = header.lumps[LUMP_WORLDLIGHTS].filelen == 0 && header.lumps[LUMP_WORLDLIGHTS_HDR].filelen > 0;
+	const lump_t &lightLump = header.lumps[ bUseHDRLights ? LUMP_WORLDLIGHTS_HDR : LUMP_WORLDLIGHTS ];
 	dworldlight_t* lights;
 	size_t lightCount;
 
@@ -351,7 +589,8 @@ void CDeferredManagerServer::LevelInitPreEntity()
 	const char* szParamShadowRange = GetLightParamName( LPARAM_SHADOW_RANGE );
 	const char* szParamVolumeSamples = GetLightParamName( LPARAM_VOLUME_SAMPLES );
 
-	bool bCreatedGlobalLight = false;
+	bool bCreatedGlobalLight = bMapHasGlobalLight;
+	CUtlVector<Vector> convertedPositions;
 	//CUtlVector<const dworldlight_t*> unspawnedLights;
 	FOR_EACH_TRUE_SUBKEY( vmfFile, entity )
 	{
@@ -405,41 +644,29 @@ void CDeferredManagerServer::LevelInitPreEntity()
 			continue;
 		}
 
+		// HL2RPM: the compiled light at the same place (it used to take the first point
+		// light of the map for every entity) gives the exact radius and cone
 		for ( uint i = 0; i < lightCount; ++i )
 		{
 			const dworldlight_t& light = lights[i];
 			if ( light.type != emit_spotlight && light.type != emit_point )
 				continue;
+			if ( light.origin.DistToSqr( pos ) > 4.0f * 4.0f )
+				continue;
 
-			// if ( CloseEnough( light.origin, pos, 1.f ) )
-			// {
-				if ( light.type == emit_point )
-				{
-					entity->SetFloat( "_distance", ComputeLightRadius( light ) );
-					break;
-				}
+			if ( light.type == emit_point )
+			{
+				entity->SetFloat( "_distance", ComputeLightRadius( light ) );
+				break;
+			}
 
-				QAngle ang;
-				VectorAngles( light.normal, ang );
-				if ( CloseEnough( -rot.x, ang.x, 2.f ) && CloseEnough( rot.y, ang.y, 2.f ) )
-				{
-					rot = ang;
-					entity->SetFloat( "_inner_cone", acos( light.stopdot ) * 180.f / M_PI_F );
-					entity->SetFloat( "_cone", acos( light.stopdot2 ) * 180.f / M_PI_F );
-					entity->SetFloat( "_distance", ComputeLightRadius( light ) );
-					break;
-				}
-			// }
-			// else
-			// {
-			// 	const int numUnspawnedLights = unspawnedLights.Count();
-			// 	for ( int i = 0; i < numUnspawnedLights; ++i )
-			// 	{
-			// 		if (unspawnedLights[i] == &light)
-			// 			goto out;
-			// 	}
-			// 	unspawnedLights.AddToTail( &light );
-			// }
+			QAngle ang;
+			VectorAngles( light.normal, ang );
+			rot = ang;
+			entity->SetFloat( "_inner_cone", acos( light.stopdot ) * 180.f / M_PI_F );
+			entity->SetFloat( "_cone", acos( light.stopdot2 ) * 180.f / M_PI_F );
+			entity->SetFloat( "_distance", ComputeLightRadius( light ) );
+			break;
 		}
 
 		//out:
@@ -456,12 +683,52 @@ void CDeferredManagerServer::LevelInitPreEntity()
 			V_sprintf_safe( string, "%d %d %d %d", color[0], color[1], color[2], color[3] );
 		lightEntity->KeyValue( szParamDiffuse, string );
 
-		lightEntity->KeyValue( "spawnflags", type == 2 || type == 5 ? "11" : "3" );
+		// classic "Initially dark" (light, light_spot) / "Start on" (point_spotlight)
+		const int iClassicFlags = entity->GetInt( "spawnflags" );
+		const bool bStartOn = ( type == 2 || type == 5 ) ? ( iClassicFlags & 1 ) != 0 : ( iClassicFlags & 1 ) == 0;
+		int iDefFlags = bStartOn ? DEFLIGHT_ENABLED : 0;
+		if ( type == 2 || type == 5 )
+			iDefFlags |= DEFLIGHT_VOLUMETRICS_ENABLED;
+		// Shadows: spots render one view, a point light six (cube map). Dim fill lights, which
+		// are most of the point lights of a map, don't get any.
+		{
+			const float flI0 = ( Max( color[0], Max( color[1], color[2] ) ) / 255.0f ) * ( color[3] / 255.0f );
+			const bool bSpotType = ( type == 1 || type == 2 || type == 5 );
+			if ( bSpotType ? flI0 > 0.25f : flI0 > 0.8f )
+				iDefFlags |= DEFLIGHT_SHADOW_ENABLED;
+		}
+
+		// classic light styles: flickering fluorescent tubes, pulsing lamps, candles...
+		const int iStyle = entity->GetInt( "style" );
+		float flStyleAmt = 0.0f, flStyleSpeed = 0.0f, flStyleSmooth = 0.0f, flStyleRandom = 0.0f;
+		switch ( iStyle )
+		{
+		case 1: case 6: case 11: case 12:	// flicker
+			flStyleAmt = 0.45f; flStyleSpeed = 6.0f; flStyleSmooth = 0.2f; flStyleRandom = 1.0f; break;
+		case 10: case 13:					// fluorescent flicker, fast strobe
+			flStyleAmt = 0.8f; flStyleSpeed = 12.0f; flStyleSmooth = 0.0f; flStyleRandom = 1.0f; break;
+		case 2: case 5: case 7: case 8:		// slow / gentle pulse
+			flStyleAmt = 0.4f; flStyleSpeed = ( iStyle == 2 ) ? 0.6f : 1.2f; flStyleSmooth = 1.0f; flStyleRandom = 0.0f; break;
+		case 3: case 4: case 9:				// candles, slow strobe
+			flStyleAmt = 0.3f; flStyleSpeed = 3.0f; flStyleSmooth = 0.6f; flStyleRandom = 0.8f; break;
+		}
+		if ( flStyleAmt > 0.0f )
+		{
+			iDefFlags |= DEFLIGHT_LIGHTSTYLE_ENABLED;
+			lightEntity->KeyValue( GetLightParamName( LPARAM_STYLE_AMT ), flStyleAmt );
+			lightEntity->KeyValue( GetLightParamName( LPARAM_STYLE_SPEED ), flStyleSpeed );
+			lightEntity->KeyValue( GetLightParamName( LPARAM_STYLE_SMOOTH ), flStyleSmooth );
+			lightEntity->KeyValue( GetLightParamName( LPARAM_STYLE_RANDOM ), flStyleRandom );
+			lightEntity->KeyValue( GetLightParamName( LPARAM_STYLE_SEED ), RandomInt( 0, DEFLIGHT_SEED_MAX ) );
+		}
+
+		lightEntity->KeyValue( "spawnflags", UTIL_VarArgs( "%d", iDefFlags ) );
 		if ( type == 1 || type == 5 )
 		{
 			lightEntity->KeyValue( szParamLightType, "1" );
-				lightEntity->KeyValue( szParamSpotConeInner, entity->GetFloat( "_inner_cone" ) );
-				lightEntity->KeyValue( szParamSpotConeOuter, entity->GetFloat( "_cone" ) );
+			// classic cones are half angles, deferred lights take the full cone angle
+			lightEntity->KeyValue( szParamSpotConeInner, entity->GetFloat( "_inner_cone" ) * 2.0f );
+			lightEntity->KeyValue( szParamSpotConeOuter, entity->GetFloat( "_cone" ) * 2.0f );
 			lightEntity->KeyValue( szParamPower, entity->GetFloat( "_exponent", 1.f ) );
 			if ( type == 5 )
 				lightEntity->KeyValue( szParamVolumeSamples, 50 );
@@ -481,8 +748,7 @@ void CDeferredManagerServer::LevelInitPreEntity()
 			lightEntity->KeyValue( szParamPower, "1" );
 		}
 
-		const float radius = type == 2 ? entity->GetFloat( "spotlightlength" ) :
-		ComputeLightRadius( entity->GetFloat( "_distance" ), color[3], entity->GetFloat( "_constant_attn" ), entity->GetFloat( "_linear_attn" ), entity->GetFloat( "_quadratic_attn" ) );
+		const float radius = type == 2 ? entity->GetFloat( "spotlightlength" ) : ComputeEntityLightRadius( entity, color );
 		lightEntity->KeyValue( szParamRadius, radius );
 		lightEntity->KeyValue( szParamVisDist, radius * 2 );
 		lightEntity->KeyValue( szParamVisRange, radius * 1.25f );
@@ -506,7 +772,15 @@ void CDeferredManagerServer::LevelInitPreEntity()
 		}
 
 		DispatchSpawn( lightEntity );
+		convertedPositions.AddToTail( pos );
 	}
+
+	DevMsg( "CDeferredManagerServer: converted %d light entities (%d compiled lights in the map)\n", convertedPositions.Count(), (int)lightCount );
+
+	// HL2RPM: the compiler removes unnamed light / light_spot entities and texture lights
+	// (lights.rad: fluorescent panels, lamps' bulbs...) never had one: they only exist in
+	// the world lights lump. Convert those too, or the deferred interiors stay dark.
+	ConvertWorldLights( lights, (int)lightCount, convertedPositions );
 
 	/*
 	const int numUnspawnedLights = unspawnedLights.Count();

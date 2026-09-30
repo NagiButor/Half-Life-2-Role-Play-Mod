@@ -138,6 +138,12 @@ struct weatherData_t
 		matRainMap.Identity();
 		vecRainMapParams.Init();
 		vecSkyLight.Init( 1, 1, 1, 0 );
+		vecDebug.Init();
+		vecCloudParams3.Init();
+		vecSkyLightDir.Init( 0, 0, 1, 0 );
+		vecSkyLightDiff.Init();
+		vecGodRays0.Init();
+		vecGodRays1.Init();
 	}
 
 	bool bEnabled;
@@ -164,6 +170,33 @@ struct weatherData_t
 	VMatrix matRainMap;			// world -> rain occlusion map texture space
 	Vector4D vecRainMapParams;	// x depth bias, y map size (units), z texel size, w unused
 	Vector4D vecSkyLight;		// rgb illuminance of the light the sky LUT is built for (untinted sun, or the moon)
+	Vector4D vecDebug;			// x: r_weather_debug_view (1 = rain exposure map)
+	Vector4D vecCloudParams3;	// x altocumulus amount, y altocumulus altitude (m), zw unused
+	Vector4D vecSkyLightDir;	// xyz the sun or the moon lighting sky and clouds (the global light without a lightning flash)
+	Vector4D vecSkyLightDiff;	// rgb its diffuse color (global light without the flash)
+	Vector4D vecGodRays0;		// xy sun position (screen uv), z strength (0 = off), w aspect
+	Vector4D vecGodRays1;		// rgb light color, w decay per step
+};
+
+// HL2RPM: screen-space ambient occlusion + sky visibility of the ambient light
+struct ssaoData_t
+{
+	ssaoData_t()
+	{
+		bEnabled = false;
+		vecParams0.Init();
+		vecParams1.Init();
+		vecBlurH.Init();
+		vecBlurV.Init();
+		vecApply.Init( 0, 0.35f, 256.0f, 0.5f );
+	}
+
+	bool bEnabled;
+	Vector4D vecParams0;	// x radius (units), y intensity, z cos bias, w projection scale (px per unit at depth 1)
+	Vector4D vecParams1;	// x 1/viewport w, y 1/viewport h, z max radius (px), w frame
+	Vector4D vecBlurH;		// xy step (screen uv), z depth tolerance, w AO uv scale
+	Vector4D vecBlurV;
+	Vector4D vecApply;		// x sky visibility on, y indoor ambient, z sky visibility radius (units), w AO uv scale (0 = no AO)
 };
 
 #include "tier0/memdbgon.h"
@@ -207,6 +240,7 @@ public:
 	virtual void CommitZScale( const float &zScale ) = 0;
 
 	virtual void CommitShadowData_Ortho( const int &index, const shadowData_ortho_t &data ) = 0;
+	virtual void CommitShadowData_Rain( const shadowData_ortho_t &data ) = 0;
 	virtual void CommitShadowData_Proj( const int &index, const shadowData_proj_t &data ) = 0;
 	virtual void CommitShadowData_General( const shadowData_general_t &data ) = 0;
 
@@ -237,11 +271,15 @@ public:
 	// HL2RPM weather
 	virtual void CommitWeatherData( const weatherData_t &data ) = 0;
 	virtual void CommitWeatherCloudTextureValid( const bool &bValid ) = 0;
-	virtual void CommitTexture_Weather( ITexture *pCloudTexture, ITexture *pCloudHistory,
+	virtual void CommitTexture_Weather( ITexture *pCloudTexture, ITexture *pCloudHistory, ITexture *pCloudRaw,
 		ITexture *pCloudNoise, ITexture *pWeatherMap, ITexture *pRainMap ) = 0;
+
+	// HL2RPM ambient occlusion
+	virtual void CommitSSAOData( const ssaoData_t &data ) = 0;
+	virtual void CommitTexture_SSAO( ITexture *pAO, ITexture *pBlur ) = 0;
 };
 
-#define DEFERRED_EXTENSION_VERSION "DeferredExtensionVersion003"
+#define DEFERRED_EXTENSION_VERSION "DeferredExtensionVersion005"
 
 #ifdef STDSHADER_DX9_DLL_EXPORT
 
@@ -267,6 +305,7 @@ public:
 	virtual void CommitZScale( const float &zScale );
 
 	virtual void CommitShadowData_Ortho( const int &index, const shadowData_ortho_t &data );
+	virtual void CommitShadowData_Rain( const shadowData_ortho_t &data );
 	virtual void CommitShadowData_Proj( const int &index, const shadowData_proj_t &data );
 	virtual void CommitShadowData_General( const shadowData_general_t &data );
 
@@ -295,12 +334,19 @@ public:
 
 	virtual void CommitWeatherData( const weatherData_t &data );
 	virtual void CommitWeatherCloudTextureValid( const bool &bValid );
-	virtual void CommitTexture_Weather( ITexture *pCloudTexture, ITexture *pCloudHistory,
+	virtual void CommitTexture_Weather( ITexture *pCloudTexture, ITexture *pCloudHistory, ITexture *pCloudRaw,
 		ITexture *pCloudNoise, ITexture *pWeatherMap, ITexture *pRainMap );
+
+	virtual void CommitSSAOData( const ssaoData_t &data );
+	virtual void CommitTexture_SSAO( ITexture *pAO, ITexture *pBlur );
+	inline const ssaoData_t &GetSSAOData() { return m_dataSSAO; }
+	inline ITexture *GetTexture_SSAO() { return m_pTexSSAO; }
+	inline ITexture *GetTexture_SSAOBlur() { return m_pTexSSAOBlur; }
 
 	inline const weatherData_t &GetWeatherData() { return m_dataWeather; }
 	inline ITexture *GetTexture_Clouds() { return m_pTexClouds; }
 	inline ITexture *GetTexture_CloudHistory() { return m_pTexCloudHistory; }
+	inline ITexture *GetTexture_CloudRaw() { return m_pTexCloudRaw; }
 	inline ITexture *GetTexture_CloudNoise() { return m_pTexCloudNoise; }
 	inline ITexture *GetTexture_WeatherMap() { return m_pTexWeatherMap; }
 	inline ITexture *GetTexture_RainMap() { return m_pTexRainMap; }
@@ -323,6 +369,7 @@ public:
 	inline int GetActiveLights_NumRows();
 
 	inline const shadowData_ortho_t &GetShadowData_Ortho( const int &index );
+	inline const shadowData_ortho_t &GetShadowData_Rain() { return m_dataRainShadow; }
 	inline const shadowData_proj_t &GetShadowData_Proj( const int &index );
 	inline const shadowData_general_t &GetShadowData_General();
 
@@ -362,6 +409,7 @@ private:
 #endif
 
 	shadowData_ortho_t m_dataOrtho[ SHADOW_NUM_CASCADES ];
+	shadowData_ortho_t m_dataRainShadow;
 	shadowData_proj_t m_dataProj[ MAX_SHADOW_PROJ ];
 	shadowData_general_t m_dataGeneral;
 
@@ -397,9 +445,14 @@ private:
 	weatherData_t m_dataWeather;
 	ITexture *m_pTexClouds;
 	ITexture *m_pTexCloudHistory;
+	ITexture *m_pTexCloudRaw;
 	ITexture *m_pTexCloudNoise;
 	ITexture *m_pTexWeatherMap;
 	ITexture *m_pTexRainMap;
+
+	ssaoData_t m_dataSSAO;
+	ITexture *m_pTexSSAO;
+	ITexture *m_pTexSSAOBlur;
 };
 
 float *CDeferredExtension::GetOriginBase()

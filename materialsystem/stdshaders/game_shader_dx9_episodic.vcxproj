@@ -278,6 +278,9 @@
     <ClCompile Include="sky_atmo_skyview_lutgen.cpp" />
     <ClCompile Include="sun_godrays.cpp" />
     <ClCompile Include="weather_clouds.cpp" />
+    <ClCompile Include="weather_cloudresolve.cpp" />
+    <ClCompile Include="deferred_ssao.cpp" />
+    <ClCompile Include="weather_godrays.cpp" />
     <ClCompile Include="weather_post.cpp" />
     <ClCompile Include="weather_rain.cpp" />
     <ClCompile Include="volumpass_sun.cpp" />

@@ -70,6 +70,12 @@ public:
 
 #ifdef GAME_DLL
 	void SetRadius( float r );
+
+	// HL2RPM: switched like the classic light entities (converted lamps keep their I/O)
+	void InputTurnOn( inputdata_t &inputdata );
+	void InputTurnOff( inputdata_t &inputdata );
+	void InputToggle( inputdata_t &inputdata );
+	void SetSwitchedOn( bool bOn );
 #endif
 
 private:
@@ -88,6 +94,7 @@ private:
 	bool m_bTimeGated;
 	bool m_bLastTimeEnabled;
 	int m_iDefFlagsBase;
+	bool m_bSwitchedOn;
 
 	void UpdateSize();
 	void TimegateThink();

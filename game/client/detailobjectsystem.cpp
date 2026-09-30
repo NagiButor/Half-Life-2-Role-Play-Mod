@@ -38,7 +38,17 @@
 #include "materialsystem/imaterialsystemhardwareconfig.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
+#include "weather/c_weather_system.h"
+
 #include "tier0/memdbgon.h"
+
+// HL2RPM: detail props carry the lighting baked for the map's daylight; outdoors
+// they follow the current time of day and weather like the particles do
+static float DetailLightScale()
+{
+	C_WeatherSystem *pSys = GetWeatherSystem();
+	return pSys->IsActive() ? pSys->GetParticleLightScale() : 1.0f;
+}
 
 #define DETAIL_SPRITE_MATERIAL		"detail/detailsprites"
 
@@ -924,6 +934,11 @@ void CDetailModel::GetColorModulation( float *color )
 			}
 		}
 	}
+
+	const float flScale = DetailLightScale();
+	color[0] *= flScale;
+	color[1] *= flScale;
+	color[2] *= flScale;
 
 	// Gamma correct....
 	engine->LinearToGamma( color, color );
@@ -2265,6 +2280,8 @@ int CDetailObjectSystem::BuildOutSortedSprites( CFastDetailLeafSpriteList *pData
 
 void CDetailObjectSystem::RenderFastSprites( const Vector &viewOrigin, const Vector &viewForward, const Vector &viewRight, const Vector &viewUp, int nLeafCount, LeafIndex_t const * pLeafList )
 {
+	const float flLightScale = DetailLightScale();
+
 	// Here, we must draw all detail objects back-to-front
 	// FIXME: Cache off a sorted list so we don't have to re-sort every frame
 
@@ -2357,9 +2374,9 @@ void CDetailObjectSystem::RenderFastSprites( const Vector &viewOrigin, const Vec
 					uint8 const *pColorsCasted = reinterpret_cast<uint8 const *> ( pquad->m_Alpha );
 
 					uint8 color[4];
-					color[0] = pquad->m_RGBColor[0][0];
-					color[1] = pquad->m_RGBColor[0][1];
-					color[2] = pquad->m_RGBColor[0][2];
+					color[0] = (uint8)Min( 255.0f, pquad->m_RGBColor[0][0] * flLightScale );
+					color[1] = (uint8)Min( 255.0f, pquad->m_RGBColor[0][1] * flLightScale );
+					color[2] = (uint8)Min( 255.0f, pquad->m_RGBColor[0][2] * flLightScale );
 					color[3] = pColorsCasted[MANTISSA_LSB_OFFSET];
 
 					DetailPropSpriteDict_t *pDict = pquad->m_pSpriteDefs[0];
@@ -2498,6 +2515,8 @@ void CDetailObjectSystem::RenderTranslucentDetailObjects( const Vector &viewOrig
 
 void CDetailObjectSystem::RenderFastTranslucentDetailObjectsInLeaf( const Vector &viewOrigin, const Vector &viewForward, const Vector &viewRight, const Vector &viewUp, int nLeaf, const Vector *pVecClosestPoint )
 {
+	const float flLightScale = DetailLightScale();
+
 	CFastDetailLeafSpriteList *pData = reinterpret_cast< CFastDetailLeafSpriteList *> (
 		ClientLeafSystem()->GetSubSystemDataInLeaf( nLeaf, CLSUBSYSTEM_DETAILOBJECTS ) );
 	if ( ! pData )
@@ -2589,9 +2608,9 @@ void CDetailObjectSystem::RenderFastTranslucentDetailObjectsInLeaf( const Vector
 			uint8 const *pColorsCasted = reinterpret_cast<uint8 const *> ( pquad->m_Alpha );
 
 			uint8 color[4];
-			color[0] = pquad->m_RGBColor[0][0];
-			color[1] = pquad->m_RGBColor[0][1];
-			color[2] = pquad->m_RGBColor[0][2];
+			color[0] = (uint8)Min( 255.0f, pquad->m_RGBColor[0][0] * flLightScale );
+			color[1] = (uint8)Min( 255.0f, pquad->m_RGBColor[0][1] * flLightScale );
+			color[2] = (uint8)Min( 255.0f, pquad->m_RGBColor[0][2] * flLightScale );
 			color[3] = pColorsCasted[MANTISSA_LSB_OFFSET];
 
 			DetailPropSpriteDict_t *pDict = pquad->m_pSpriteDefs[0];

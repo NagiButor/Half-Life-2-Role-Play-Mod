@@ -42,11 +42,14 @@ bool WeatherRender_WantsRainMap();
 float WeatherRender_GetSkyLightIlluminance();
 
 // per frame
+// the global light before a lightning flash takes it over (sky and clouds keep the sun / moon)
+void WeatherRender_SetSkyLight( const lightData_Global_t &light );
 void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t &light );
 void WeatherRender_Clouds( const CViewSetup &view );
 void WeatherRender_SetCloudTextureValid( bool bValid );
 void WeatherRender_PostOpaque( const CViewSetup &view );
 void WeatherRender_Rain( const CViewSetup &view );
+void WeatherRender_Lightning( const CViewSetup &view );	// visible channel of a strike
 void WeatherRender_SunShafts( const CViewSetup &view, ITexture *pTarget );
 
 // rain occlusion map (top-down depth), rendered by CDeferredViewRender
@@ -54,5 +57,9 @@ bool WeatherRender_ShouldUpdateRainMap( const CViewSetup &view, Vector &vecCente
 void WeatherRender_OnRainMapRendered( const VMatrix &matWorldToTexture, const Vector &vecCenter, float flSize, float flZFar );
 
 void WeatherRender_LevelInit();
+
+// the map's 3D skybox fog color is for its static daylight: replaced by the weather
+// fog (gamma space) when the dynamic weather runs; false otherwise
+bool WeatherRender_GetSkyboxFogColor( float *pColor );
 
 #endif // WEATHER_RENDER_H

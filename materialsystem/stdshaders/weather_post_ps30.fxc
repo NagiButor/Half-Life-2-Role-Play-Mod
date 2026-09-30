@@ -28,7 +28,7 @@ const float4 g_vecLightDir		: register( c6 );
 const float4 g_vecLightColor	: register( c7 );
 const float4 g_matRainMap[3]	: register( c8 );	// rows of world -> rain map texture
 const float4 g_vecRainMap		: register( c11 );	// depth bias, size, texel size, valid
-const float4 g_vecFlags			: register( c12 );	// x fog on, y wet on, z night
+const float4 g_vecFlags			: register( c12 );	// x fog on, y wet on, z night, w debug view
 
 struct PS_INPUT
 {
@@ -78,6 +78,25 @@ float3 RippleNormal( float2 p, float time, float strength )
 
 float4 main( const PS_INPUT In ) : COLOR
 {
+	if ( g_vecFlags.w > 1.5 )
+	{
+		// debug: the rain occlusion map seen from above (brighter = lower occluder)
+		float2 uvMap = In.vTexCoord;
+		float lo = 0.0, hi = 1.0;
+		[loop]
+		for ( int i = 0; i < 14; i++ )
+		{
+			float mid = ( lo + hi ) * 0.5;
+			float s = tex2Dlod( sRainMap, float4( uvMap, mid, 0 ) ).x;
+			if ( s > 0.5 )
+				lo = mid;
+			else
+				hi = mid;
+		}
+		float h = saturate( ( lo - 0.40 ) * 12.0 );
+		return float4( h, h, h, 0.0 );
+	}
+
 	float depth = tex2D( sDepth, In.vTexCoord ).x;
 	if ( depth < 0.1 )
 		return float4( 0, 0, 0, 1 );	// sky: handled by the sky shader
@@ -90,6 +109,14 @@ float4 main( const PS_INPUT In ) : COLOR
 	float3 N = normalize( tex2D( sNormals, In.vTexCoord ).xyz * 2.0 - 1.0 );
 
 	float4 result = float4( 0, 0, 0, 1 );
+
+	if ( g_vecFlags.w > 0.5 )
+	{
+		// debug: rain exposure (red = open sky, blue = covered), green = outside the map
+		float e = RainExposure( worldPos, N );
+		float valid = g_vecRainMap.w;
+		return float4( e, 1.0 - valid, 1.0 - e, 0.0 ) * ( 0.35 + 0.65 * saturate( N.z * 0.5 + 0.5 ) );
+	}
 
 	// ---------------- wetness
 	float wetness = g_vecRain.y;

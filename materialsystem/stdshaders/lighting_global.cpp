@@ -41,6 +41,8 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 #endif
 			pShaderShadow->EnableTexture( SHADER_SAMPLER4, true );	// HL2RPM weather map
 			pShaderShadow->EnableTexture( SHADER_SAMPLER5, true );	// HL2RPM cloud noise
+			pShaderShadow->EnableTexture( SHADER_SAMPLER6, true );	// HL2RPM ambient occlusion
+			pShaderShadow->EnableTexture( SHADER_SAMPLER7, true );	// HL2RPM top-down occlusion map
 
 			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION, 1, NULL, 0 );
 
@@ -87,12 +89,12 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 			CommitBaseDeferredConstants_Frustum( pShaderAPI, VERTEX_SHADER_SHADER_SPECIFIC_CONST_0 );
 			CommitBaseDeferredConstants_Origin( pShaderAPI, 0 );
 
-			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA, data.diff.Base() );
-			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 1, data.ambh.Base() );
-			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 2, MakeHalfAmbient( data.ambl, data.ambh ).Base() );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA, data.diff.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 1, data.ambh.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 2, MakeHalfAmbient( data.ambl, data.ambh ).Base(), 1, true );
 
 			float flCSMColorize[4] = { r_csm_color.GetBool() ? 1.0f : 0.0f, 0, 0, 0 };
-			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 3, flCSMColorize );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 3, flCSMColorize, 1, true );
 
 			// HL2RPM: moving cloud shadows
 			const weatherData_t &w = GetDeferredExt()->GetWeatherData();
@@ -109,11 +111,32 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 				pShaderAPI->BindStandardTexture( SHADER_SAMPLER4, TEXTURE_GREY );
 				pShaderAPI->BindStandardTexture( SHADER_SAMPLER5, TEXTURE_GREY );
 			}
-			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 4, w.vecCloudParams0.Base() );
-			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 5, w.vecCloudParams1.Base() );
-			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 6, w.vecWind.Base() );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 4, w.vecCloudParams0.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 5, w.vecCloudParams1.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 6, w.vecWind.Base(), 1, true );
 			float flWeatherFlags[4] = { bCloudShadows ? w.vecCloudParams2.y : 0.0f, 0, 0, 0 };
-			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 7, flWeatherFlags );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 7, flWeatherFlags, 1, true );
+
+			// HL2RPM: ambient occlusion (SSAO) and sky visibility (top-down occlusion map)
+			const ssaoData_t &ao = GetDeferredExt()->GetSSAOData();
+			ITexture *pSSAO = GetDeferredExt()->GetTexture_SSAO();
+			ITexture *pRainMap = GetDeferredExt()->GetTexture_RainMap();
+			const bool bAO = ao.bEnabled && pSSAO != NULL && ao.vecApply.w > 0.0f;
+			const bool bSkyVis = w.bEnabled && w.bRainMapValid && pRainMap != NULL && ao.vecApply.x > 0.5f;
+			if ( bAO )
+				BindTexture( SHADER_SAMPLER6, pSSAO );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER6, TEXTURE_WHITE );
+			if ( bSkyVis )
+				BindTexture( SHADER_SAMPLER7, pRainMap );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER7, TEXTURE_WHITE );
+
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 8, w.matRainMap.Base(), 3, true );
+			float flRainMap[4] = { w.vecRainMapParams.x, w.vecRainMapParams.y, w.vecRainMapParams.z, bSkyVis ? 1.0f : 0.0f };
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 11, flRainMap, 1, true );
+			float flAmbientCtrl[4] = { bSkyVis ? 1.0f : 0.0f, ao.vecApply.y, ao.vecApply.z, bAO ? ao.vecApply.w : 0.0f };
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 12, flAmbientCtrl, 1, true );
 		}
 
 		Draw();

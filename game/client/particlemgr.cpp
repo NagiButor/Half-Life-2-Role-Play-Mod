@@ -31,6 +31,8 @@
 #endif
 #include "tier0/icommandline.h"
 // memdbgon must be the last include file in a .cpp file!!!
+#include "weather/weather_precip.h"
+
 #include "tier0/memdbgon.h"
 
 extern IParticleSystemQuery *g_pParticleSystemQuery;
@@ -1081,6 +1083,8 @@ bool CParticleMgr::Init(unsigned long count, IMaterialSystem *pMaterials)
 	// tell particle mgr to add the default simulation + rendering ops
 	g_pParticleSystemMgr->AddBuiltinSimulationOperators();
 	g_pParticleSystemMgr->AddBuiltinRenderingOperators();
+	// HL2RPM: operators missing from the Source 2013 particle library (precipitation culling)
+	WeatherPrecip_AddParticleOperators();
 
 	// Send true to load the sheets
 	ParseParticleEffects( true, false );

@@ -1,0 +1,83 @@
+//========= HL2RPM ============================================================//
+//
+// Screen-space ambient occlusion from the G-buffer (linear depth + normals),
+// rendered at half resolution; blurred by deferred_ssaoblur_ps30 and applied
+// to the sky light in lightingpass_global_ps30.
+//
+// Horizon-style estimator: for samples on a spiral around the pixel, how far
+// the surrounding geometry rises above the tangent plane (cosine of the angle),
+// weighted down with distance. No matrices needed: the world ray of any pixel
+// is linear in screen space, its gradient comes from ddx/ddy of the
+// interpolated frustum ray.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+sampler sDepth			: register( s0 );	// G-buffer linear depth (0 = sky)
+sampler sNormals		: register( s1 );	// G-buffer normals
+
+const float4 g_vecAO	: register( c0 );	// x radius (units), y intensity, z cos bias, w projection scale (px per unit at depth 1)
+const float4 g_vecAO2	: register( c1 );	// x 1/viewport w, y 1/viewport h, z max radius (px), w frame
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+	float2 vScreenPos			: VPOS;
+};
+
+static const int NUM_SAMPLES = 12;
+static const float NUM_TURNS = 7.0;
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	float2 uv = In.vTexCoord;
+	float depth = tex2D( sDepth, uv ).x;
+	if ( depth < 0.1 )
+		return float4( 1, 1, 1, 1 );
+
+	float3 ray = In.vecWorldRay;
+	float3 P = ray * depth;
+	float3 N = normalize( tex2D( sNormals, uv ).xyz * 2.0 - 1.0 );
+
+	// world ray change per uv unit (the ray is linear in screen space)
+	float3 dRdu = ddx( ray ) / max( ddx( uv.x ), 1e-6 );
+	float3 dRdv = ddy( ray ) / max( abs( ddy( uv.y ) ), 1e-6 ) * sign( ddy( uv.y ) );
+
+	float radius = g_vecAO.x;
+	float radiusPx = radius * g_vecAO.w / depth;
+	if ( radiusPx < 1.5 )
+		return float4( 1, 1, 1, 1 );
+	radiusPx = min( radiusPx, g_vecAO2.z );
+
+	// interleaved gradient noise: rotation of the spiral per pixel
+	float noise = frac( 52.9829189 * frac( dot( In.vScreenPos + g_vecAO2.w * 5.588238, float2( 0.06711056, 0.00583715 ) ) ) );
+	float angle0 = noise * 6.28318531;
+
+	float invR2 = 1.0 / ( radius * radius );
+	float occlusion = 0.0;
+
+	[unroll]
+	for ( int i = 0; i < NUM_SAMPLES; i++ )
+	{
+		float alpha = ( i + 0.5 ) / NUM_SAMPLES;
+		float theta = alpha * ( NUM_TURNS * 6.28318531 ) + angle0;
+		float2 offPx = ( radiusPx * alpha ) * float2( cos( theta ), sin( theta ) );
+		float2 uvS = uv + offPx * g_vecAO2.xy;
+
+		float dS = tex2Dlod( sDepth, float4( uvS, 0, 0 ) ).x;
+		if ( dS < 0.1 )
+			continue;	// sky: no occluder
+
+		float3 rayS = ray + dRdu * ( uvS.x - uv.x ) + dRdv * ( uvS.y - uv.y );
+		float3 v = rayS * dS - P;
+		float vv = dot( v, v );
+		float cosH = dot( v, N ) * rsqrt( vv + 1e-4 );
+		float falloff = saturate( 1.0 - vv * invR2 );
+		occlusion += max( cosH - g_vecAO.z, 0.0 ) * falloff;
+	}
+
+	float ao = saturate( 1.0 - occlusion * ( g_vecAO.y / NUM_SAMPLES ) * 1.6 );
+	return float4( ao, ao, ao, 1 );
+}

@@ -395,8 +395,9 @@ float4 main( const PS_INPUT In ) : COLOR
 		float flash = g_wLightning.w;
 		if ( flash > 0.001 )
 		{
-			float aim = pow( saturate( dot( rayDir, normalize( g_wLightning.xyz ) ) ), 3.0 );
-			lum += float3( 0.55, 0.60, 0.72 ) * flash * ( 0.012 + 0.05 * aim );
+			float flashCos = saturate( dot( rayDir, normalize( g_wLightning.xyz ) ) );
+			float aim = pow( flashCos, 10.0 );
+			lum += float3( 0.55, 0.60, 0.72 ) * flash * ( 0.005 + 0.004 * flashCos + 0.06 * aim );
 		}
 	}
 
@@ -410,7 +411,13 @@ float4 main( const PS_INPUT In ) : COLOR
 		float pathToHorizon = 12000.0 / max( abs( rayDir.z ) + 0.03, 0.03 );
 		float fogSky = 1.0 - exp( -fogDensity * pathToHorizon * 0.35 );
 		fogSky *= saturate( 1.0 - rayDir.z * 1.5 );
-		lum = lerp( lum, g_wFogColor.rgb, saturate( fogSky ) * g_wFogColor.a );
+		// half-way to the hue of the sky behind it: the fog color comes from the scene
+		// light and would otherwise show as a tinted band where it meets the clouds
+		float3 fogCol = g_wFogColor.rgb;
+		float fogLum = dot( fogCol, float3( 0.2126, 0.7152, 0.0722 ) );
+		float behindLum = dot( lum, float3( 0.2126, 0.7152, 0.0722 ) );
+		fogCol = lerp( fogCol, lum * ( fogLum / max( behindLum, 1e-4 ) ), 0.5 * saturate( behindLum * 20.0 ) );
+		lum = lerp( lum, fogCol, saturate( fogSky ) * g_wFogColor.a );
 	}
 
 	float alphaOut = 1.0;

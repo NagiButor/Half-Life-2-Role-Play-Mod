@@ -15,6 +15,8 @@
 #include "weather/weather_render.h"
 #include "weather/c_weather_system.h"
 
+#include "deferred/deferred_dlight_bridge.h"
+
 #include "tier0/memdbgon.h"
 
 ConVar r_deferred_light_visleaf_cull( "r_deferred_light_visleaf_cull", "1", 0, "Culling based on map visleaves - buggy, improves performance" );
@@ -96,6 +98,9 @@ void CLightingManager::LevelInitPostEntity() {}
 
 void CLightingManager::LevelShutdownPostEntity()
 {
+	// HL2RPM: mirrored engine dynamic lights belong to the level
+	DeferredDLights_Clear();
+
 	m_hRenderLights.Purge();
 
 	for ( int i = 0; i < LSORT_COUNT; i++ )
@@ -141,6 +146,9 @@ void CLightingManager::SetRenderConstants( const VMatrix&    ScreenToWorld,
 
 void CLightingManager::LightSetup( const CViewSetup& setup )
 {
+	// HL2RPM: muzzle flashes, explosions, fires, flares... (engine dlights / elights)
+	DeferredDLights_Update( setup.origin );
+
 	// Remove lights that have run out of time
 	UpdateTemplights( gpGlobals->frametime );
 

@@ -51,6 +51,10 @@
 		0 : "No"
 		1 : "Yes"
 	]
+	//Pravka: switched like the classic light entities (converted lamps keep their I/O)
+	input TurnOn(void) : "Turn the light on."
+	input TurnOff(void) : "Turn the light off."
+	input Toggle(void) : "Toggle the light."
 ]
 
 @PointClass base(Targetname, Parentname, Angles) iconsprite("editor/light.vmt") lightprop("models/editor/spot.mdl") lightcone() sphere(radius) = light_deferred_spot
@@ -104,6 +108,10 @@
 		0 : "No"
 		1 : "Yes"
 	]
+	//Pravka: switched like the classic light entities (converted lamps keep their I/O)
+	input TurnOn(void) : "Turn the light on."
+	input TurnOff(void) : "Turn the light off."
+	input Toggle(void) : "Toggle the light."
 ]
 
 @PointClass base(Targetname, Angles) iconsprite("editor/light_env.vmt") = light_deferred_global
@@ -150,6 +158,8 @@
 		6 : "Rain"
 		7 : "Thunderstorm"
 		8 : "Misty"
+		9 : "Snowfall"		//Pravka
+		10 : "Falling ash"	//Pravka
 	]
 	auto_weather(choices) : "Automatic weather changes" : 1 : "The weather changes by itself over time (plausible sequences, fog in the morning, storms in the afternoon)." =
 	[
@@ -158,7 +168,7 @@
 	]
 	duration_scale(float) : "Weather duration scale" : "1.0" : "Multiplier for how long each automatic weather lasts."
 
-	input SetWeather(string) : "Blend to a weather: clear, fair, partlycloudy, overcast, fog, drizzle, rain, thunderstorm, misty. Optional transition time in seconds after the name, e.g. 'rain 30'."
+	input SetWeather(string) : "Blend to a weather: clear, fair, partlycloudy, overcast, fog, drizzle, rain, thunderstorm, misty, snow, ash. Optional transition time in seconds after the name, e.g. 'rain 30'. Snow and ash are never chosen by the automatic weather."
 	input SetWeatherInstant(string) : "Switch to a weather immediately (same names as SetWeather)."
 	input EnableAuto(void) : "Enable automatic weather changes."
 	input DisableAuto(void) : "Disable automatic weather changes."

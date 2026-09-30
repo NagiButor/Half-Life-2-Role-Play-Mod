@@ -79,20 +79,20 @@ BEGIN_VS_SHADER( WEATHER_RAIN, "" )
 			// vecRainMapParams.w = fraction of the drops to draw (rain intensity x density setting)
 			float vRain[4] = { clamp( w.vecRainMapParams.w, 0.0f, 1.0f ), flBox, flBox * 0.75f, 360.0f };
 			float vWind[4] = { w.vecWind.z, w.vecWind.w, 0.032f, 0.55f };
-			pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_0, vCamera );
-			pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_1, vRain );
-			pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_2, vWind );
+			pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_0, vCamera, 1, true );
+			pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_1, vRain, 1, true );
+			pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_2, vWind, 1, true );
 
 			// pixel constants
-			pShaderAPI->SetPixelShaderConstant( 0, w.matRainMap.Base(), 3 );
+			pShaderAPI->SetPixelShaderConstant( 0, w.matRainMap.Base(), 3, true );
 			float flRainMap[4] = { w.vecRainMapParams.x, w.vecRainMapParams.y, w.vecRainMapParams.z, w.bRainMapValid ? 1.0f : 0.0f };
-			pShaderAPI->SetPixelShaderConstant( 3, flRainMap );
-			pShaderAPI->SetPixelShaderConstant( 4, w.vecSkyHorizon.Base() );
-			pShaderAPI->SetPixelShaderConstant( 5, w.vecSkyZenith.Base() );
+			pShaderAPI->SetPixelShaderConstant( 3, flRainMap, 1, true );
+			pShaderAPI->SetPixelShaderConstant( 4, w.vecSkyHorizon.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 5, w.vecSkyZenith.Base(), 1, true );
 			float flLight[4] = { light.diff.x, light.diff.y, light.diff.z, w.vecLightning.w };
-			pShaderAPI->SetPixelShaderConstant( 6, flLight );
+			pShaderAPI->SetPixelShaderConstant( 6, flLight, 1, true );
 			float flAlpha[4] = { r_weather_rain_alpha.GetFloat(), 0, 0, 0 };
-			pShaderAPI->SetPixelShaderConstant( 7, flAlpha );
+			pShaderAPI->SetPixelShaderConstant( 7, flAlpha, 1, true );
 		}
 
 		Draw();

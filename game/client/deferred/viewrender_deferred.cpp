@@ -34,6 +34,7 @@
 #include "deferred/cdeferred_manager_client.h"
 #include "weather/weather_render.h"
 #include "weather/c_weather_system.h"
+#include "deferred/deferred_ssao.h"
 
 #include "vgui_int.h"
 #include "vgui/IPanel.h"
@@ -640,8 +641,18 @@ void CRainOcclusionView::CommitData()
 	MatrixMultiply( screenToTexture, c, matWorldToTexture );
 	WeatherRender_OnRainMapRendered( matWorldToTexture, m_vecCenter, m_flSize, RAINMAP_ZFAR );
 
+	// depth written by the shadow pass = distance straight down from this camera / zFar
+	shadowData_ortho_t shadowData;
+	shadowData.iRes_x = width;
+	shadowData.iRes_y = height;
+	shadowData.matWorldToTexture = matWorldToTexture;
+	shadowData.vecUVTransform.Init( 0, 0, 1, 1 );
+	shadowData.vecSlopeSettings.Init( 0, 0, 0, 1.0f / RAINMAP_ZFAR );
+	shadowData.vecOrigin.Init( origin, 1.0f );
+	QUEUE_FIRE( CommitShadowData_Rain, shadowData );
+
 	CMatRenderContextPtr pRenderContext( materials );
-	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_SHADOW_INDEX, 0 );
+	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_SHADOW_INDEX, DEFERRED_SHADOW_INDEX_RAIN );
 }
 
 class COrthoShadowView : public CBaseShadowView
@@ -1412,6 +1423,9 @@ void CSkyboxViewDeferred::Enable3dSkyboxFog( void )
 	{
 		float fogColor[3];
 		GetSkyboxFogColor( fogColor );
+		// HL2RPM: the distant skybox city fades into the current weather / time of day,
+		// not into the map's fixed daylight fog color (glowing silhouettes at night)
+		WeatherRender_GetSkyboxFogColor( fogColor );
 		float scale = 1.0f;
 		if ( local->m_skybox3d.scale > 0.0f )
 		{
@@ -2288,7 +2302,8 @@ void CDeferredViewRender::ViewDrawSceneDeferred( const CViewSetup &view, int nCl
 	// Draw rain..
 	DrawPrecipitation();
 
-	// HL2RPM: dynamic weather rain
+	// HL2RPM: lightning channel in the sky, then the dynamic weather rain in front of it
+	WeatherRender_Lightning( view );
 	WeatherRender_Rain( view );
 
 	// Make sure sound doesn't stutter
@@ -2619,6 +2634,12 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 			lightDataState = s_smoothed;
 		}
 
+		// HL2RPM: the lightning flash lasts a few frames, it must not go through the smoothing;
+		// the sky and the clouds keep the sun / moon
+		WeatherRender_SetSkyLight( lightDataState );
+		if ( GetGlobalLight() && !GetLightingEditor()->IsEditorLightingActive() )
+			GetWeatherSystem()->ApplyLightningFlash( lightDataState, GetGlobalLight()->HasShadow() );
+
 		QUEUE_FIRE( CommitLightData_Global, lightDataState );
 
 		// HL2RPM: weather constants for this frame (clouds, sky, fog, rain...)
@@ -2654,6 +2675,9 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 
 	if ( building_cubemaps.GetBool() )
 		engine->GetScreenSize( lightingView.width, lightingView.height );
+
+	// HL2RPM: ambient occlusion of the sky light (SSAO + sky visibility), read by the global light pass
+	DeferredSSAO_Render( lightingView );
 
 	CMatRenderContextPtr pRenderContext( materials );
 	pRenderContext->PushRenderTargetAndViewport( GetDefRT_Lightaccum() );
@@ -3113,7 +3137,13 @@ void CDeferredViewRender::RenderRainOcclusion( const CViewSetup &view )
 	if ( pLocal )
 		pRainView->m_iShadowExcludeEntIndex = pLocal->entindex();
 
+	// Everything inside the map's box must block rain, not only what the PVS of the
+	// camera (far above the map) or of the player contains: brush entities and props
+	// over the player were missing, so the ground under them got wet.
+	const bool bOldForceNoVis = m_bForceNoVis;
+	m_bForceNoVis = true;
 	AddViewToScene( pRainView );
+	m_bForceNoVis = bOldForceNoVis;
 }
 
 void CDeferredViewRender::DrawLightShadowView( const CViewSetup &view, int iDesiredShadowmap, def_light_t *l )

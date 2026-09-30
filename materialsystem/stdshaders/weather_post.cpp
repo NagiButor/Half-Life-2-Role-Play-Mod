@@ -82,20 +82,20 @@ BEGIN_VS_SHADER( WEATHER_POST, "" )
 			CommitBaseDeferredConstants_Frustum( pShaderAPI, VERTEX_SHADER_SHADER_SPECIFIC_CONST_0 );
 			CommitBaseDeferredConstants_Origin( pShaderAPI, 0 );
 
-			pShaderAPI->SetPixelShaderConstant( 1, w.vecRainParams.Base() );
-			pShaderAPI->SetPixelShaderConstant( 2, w.vecFogParams.Base() );
-			pShaderAPI->SetPixelShaderConstant( 3, w.vecFogColor.Base() );
-			pShaderAPI->SetPixelShaderConstant( 4, w.vecSkyZenith.Base() );
-			pShaderAPI->SetPixelShaderConstant( 5, w.vecSkyHorizon.Base() );
-			pShaderAPI->SetPixelShaderConstant( 6, light.vecLight.Base() );
-			pShaderAPI->SetPixelShaderConstant( 7, light.diff.Base() );
-			pShaderAPI->SetPixelShaderConstant( 8, w.matRainMap.Base(), 3 );
+			pShaderAPI->SetPixelShaderConstant( 1, w.vecRainParams.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 2, w.vecFogParams.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 3, w.vecFogColor.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 4, w.vecSkyZenith.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 5, w.vecSkyHorizon.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 6, light.vecLight.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 7, light.diff.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 8, w.matRainMap.Base(), 3, true );
 
 			float flRainMap[4] = { w.vecRainMapParams.x, w.vecRainMapParams.y, w.vecRainMapParams.z, w.bRainMapValid ? 1.0f : 0.0f };
-			pShaderAPI->SetPixelShaderConstant( 11, flRainMap );
+			pShaderAPI->SetPixelShaderConstant( 11, flRainMap, 1, true );
 
-			float flFlags[4] = { w.vecFogParams.x > 0.0f ? 1.0f : 0.0f, w.vecRainParams.y > 0.0f ? 1.0f : 0.0f, w.vecSunColor.w, 0.0f };
-			pShaderAPI->SetPixelShaderConstant( 12, flFlags );
+			float flFlags[4] = { w.vecFogParams.x > 0.0f ? 1.0f : 0.0f, w.vecRainParams.y > 0.0f ? 1.0f : 0.0f, w.vecSunColor.w, w.vecDebug.x };
+			pShaderAPI->SetPixelShaderConstant( 12, flFlags, 1, true );
 		}
 
 		Draw();

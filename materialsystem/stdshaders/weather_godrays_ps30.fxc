@@ -1,0 +1,79 @@
+//========= HL2RPM ============================================================//
+//
+// Crepuscular rays: screen-space radial light from the sun through the gaps
+// in the clouds and between buildings. Marches from each pixel toward the
+// sun's screen position over "open sky x cloud transmittance", added to the
+// volumetrics buffer after the shadow-map sun shafts (volumpass_sun_ps30):
+// those make the near shafts (windows, trees), these the big rays in the sky.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+sampler sDepth			: register( s0 );	// G-buffer linear depth (0 = sky)
+sampler sClouds			: register( s1 );	// resolved clouds: rgb scatter, a transmittance (< 0 = not computed)
+
+const float4 g_vecSun		: register( c0 );	// xy sun position (screen uv), z strength (0 = off), w aspect (w / h)
+const float4 g_vecColor		: register( c1 );	// rgb light color, w decay per step
+const float4 g_vecCloudUV	: register( c2 );	// x cloud RT uv scale, y clouds valid, z frame
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+	float2 vScreenPos			: VPOS;
+};
+
+static const int NUM_SAMPLES = 40;
+
+float OpenSky( float2 uv )
+{
+	if ( any( uv < 0.0 ) || any( uv > 1.0 ) )
+		return 0.0;
+	float d = tex2Dlod( sDepth, float4( uv, 0, 0 ) ).x;
+	if ( d > 0.1 )
+		return 0.0;
+	float T = 1.0;
+	if ( g_vecCloudUV.y > 0.5 )
+	{
+		float a = tex2Dlod( sClouds, float4( uv * g_vecCloudUV.x, 0, 0 ) ).a;
+		if ( a >= 0.0 )
+			T = saturate( a );
+	}
+	return T * T;
+}
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	if ( g_vecSun.z <= 0.0 )
+		return float4( 0, 0, 0, 1 );
+
+	float2 uv = In.vTexCoord;
+	float2 toSun = g_vecSun.xy - uv;
+
+	// brightest around the sun, fading with the (aspect corrected) distance to it
+	float r = length( toSun * float2( g_vecSun.w, 1.0 ) );
+	float radial = exp( -r * 2.4 );
+	if ( radial < 0.01 )
+		return float4( 0, 0, 0, 1 );
+
+	float2 stepUV = toSun * ( 0.85 / NUM_SAMPLES );
+	float jitter = frac( 52.9829189 * frac( dot( In.vScreenPos + g_vecCloudUV.z * 5.588238, float2( 0.06711056, 0.00583715 ) ) ) );
+	float2 p = uv + stepUV * jitter;
+
+	float illum = 0.0;
+	float w = 1.0;
+	float wsum = 0.0;
+	[loop]
+	for ( int i = 0; i < NUM_SAMPLES; i++ )
+	{
+		illum += OpenSky( p ) * w;
+		wsum += w;
+		w *= g_vecColor.w;
+		p += stepUV;
+	}
+	illum /= max( wsum, 1e-3 );
+
+	float3 light = g_vecColor.rgb * illum * radial * g_vecSun.z;
+	return float4( light, 1.0 );
+}

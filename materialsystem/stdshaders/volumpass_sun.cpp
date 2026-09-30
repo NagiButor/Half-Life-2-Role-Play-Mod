@@ -79,18 +79,18 @@ BEGIN_VS_SHADER( VOLUME_SUN, "" )
 			CommitGlobalLightForward( pShaderAPI, 1 );
 			CommitShadowProjectionConstants_Ortho_Composite( pShaderAPI, SHADOW_NUM_CASCADES, 2 );
 
-			pShaderAPI->SetPixelShaderConstant( 58, light.diff.Base() );
-			pShaderAPI->SetPixelShaderConstant( 59, w.vecFogParams.Base() );
-			pShaderAPI->SetPixelShaderConstant( 60, w.vecCloudParams0.Base() );
-			pShaderAPI->SetPixelShaderConstant( 61, w.vecCloudParams1.Base() );
-			pShaderAPI->SetPixelShaderConstant( 62, w.vecWind.Base() );
+			pShaderAPI->SetPixelShaderConstant( 58, light.diff.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 59, w.vecFogParams.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 60, w.vecCloudParams0.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 61, w.vecCloudParams1.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 62, w.vecWind.Base(), 1, true );
 
 			static const float s_flSteps[4] = { 0.0f, 16.0f, 24.0f, 36.0f };
 			static ConVarRef r_weather_sunshafts( "r_weather_sunshafts" );
 			const int iQuality = r_weather_sunshafts.IsValid() ? clamp( r_weather_sunshafts.GetInt(), 0, 3 ) : 2;
 			float flParams[4] = { s_flSteps[iQuality], clamp( r_weather_sunshafts_distance.GetFloat(), 500.0f, 12000.0f ),
 				w.vecScreenParams.w, w.vecSunColor.w };
-			pShaderAPI->SetPixelShaderConstant( 63, flParams );
+			pShaderAPI->SetPixelShaderConstant( 63, flParams, 1, true );
 		}
 
 		Draw();

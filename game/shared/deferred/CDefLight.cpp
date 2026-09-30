@@ -51,6 +51,11 @@ BEGIN_DATADESC( CDeferredLight )
 	DEFINE_KEYFIELD( m_iVolumeSamples, FIELD_INTEGER, GetLightParamName( LPARAM_VOLUME_SAMPLES ) ),
 #endif
 
+	DEFINE_FIELD( m_bSwitchedOn, FIELD_BOOLEAN ),
+	DEFINE_INPUTFUNC( FIELD_VOID, "TurnOn", InputTurnOn ),
+	DEFINE_INPUTFUNC( FIELD_VOID, "TurnOff", InputTurnOff ),
+	DEFINE_INPUTFUNC( FIELD_VOID, "Toggle", InputToggle ),
+
 END_DATADESC()
 #endif
 
@@ -156,6 +161,7 @@ CDeferredLight::CDeferredLight()
 	m_bTimeGated = false;
 	m_bLastTimeEnabled = false;
 	m_iDefFlagsBase = 0;
+	m_bSwitchedOn = true;
 #else
 	m_pLight = NULL;
 #endif
@@ -176,6 +182,7 @@ void CDeferredLight::Spawn()
 
 	m_iDefFlags = GetSpawnFlags();
 	m_iDefFlagsBase = m_iDefFlags;
+	m_bSwitchedOn = ( m_iDefFlags & DEFLIGHT_ENABLED ) != 0;
 	m_bTimeGated = ( m_flEnableFromHour >= 0.0f || m_flEnableToHour >= 0.0f );
 
 	if ( m_bTimeGated )
@@ -214,6 +221,11 @@ void CDeferredLight::Activate()
 	AddEffects( EF_NODRAW );
 
 	m_iDefFlags = GetSpawnFlags();
+	// switched on / off by map I/O (also after loading a save game)
+	if ( m_bSwitchedOn )
+		m_iDefFlags |= DEFLIGHT_ENABLED;
+	else
+		m_iDefFlags &= ~DEFLIGHT_ENABLED;
 	m_iDefFlagsBase = m_iDefFlags;
 
 	m_bTimeGated = ( m_flEnableFromHour >= 0.0f || m_flEnableToHour >= 0.0f );
@@ -374,7 +386,7 @@ void CDeferredLight::UpdateEnabledFromTime()
 	}
 
 	const float hour = tc->GetTimeOfDayHours();
-	const bool shouldEnable = IsInTimeWindow( hour );
+	const bool shouldEnable = IsInTimeWindow( hour ) && m_bSwitchedOn;
 	const bool currentlyEnabled = ( m_iDefFlags & ( DEFLIGHT_ENABLED | DEFLIGHT_VOLUMETRICS_ENABLED | DEFLIGHT_SHADOW_ENABLED ) ) != 0;
 
 	if ( shouldEnable == m_bLastTimeEnabled && ( shouldEnable == currentlyEnabled ) )
@@ -405,6 +417,43 @@ void CDeferredLight::TimegateThink()
 {
 	UpdateEnabledFromTime();
 	SetNextThink( gpGlobals->curtime + 0.25f );
+}
+
+void CDeferredLight::SetSwitchedOn( bool bOn )
+{
+	m_bSwitchedOn = bOn;
+	if ( bOn )
+		m_iDefFlagsBase |= DEFLIGHT_ENABLED;
+	else
+		m_iDefFlagsBase &= ~DEFLIGHT_ENABLED;
+
+	if ( m_bTimeGated )
+	{
+		// re-evaluate the time window with the new switch state
+		m_bLastTimeEnabled = !m_bLastTimeEnabled;
+		UpdateEnabledFromTime();
+		return;
+	}
+
+	if ( bOn )
+		m_iDefFlags |= DEFLIGHT_ENABLED;
+	else
+		m_iDefFlags &= ~DEFLIGHT_ENABLED;
+}
+
+void CDeferredLight::InputTurnOn( inputdata_t &inputdata )
+{
+	SetSwitchedOn( true );
+}
+
+void CDeferredLight::InputTurnOff( inputdata_t &inputdata )
+{
+	SetSwitchedOn( false );
+}
+
+void CDeferredLight::InputToggle( inputdata_t &inputdata )
+{
+	SetSwitchedOn( !m_bSwitchedOn );
 }
 
 #else

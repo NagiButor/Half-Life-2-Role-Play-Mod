@@ -71,7 +71,7 @@ BEGIN_VS_SHADER( SKY_ATMO_LUTGEN, "" )
 			const lightData_Global_t& data = GetDeferredExt()->GetLightData_Global();
  
 			CommitGlobalLightForward( pShaderAPI, 1 );
-			pShaderAPI->SetPixelShaderConstant( 16, data.diff.Base() );
+			pShaderAPI->SetPixelShaderConstant( 16, data.diff.Base(), 1, true );
 		}
  
 		Draw();
