@@ -93,6 +93,7 @@ float4 main( PS_INPUT i ) : COLOR
 	params.pixelFogParams = g_PixelFogParams;
 	params.fWaterFogStart = g_WaterFogStart;
 	params.fWaterFogEndMinusStart = g_WaterFogEndMinusStart;
+	params.fRefractDepthEncoded = 0.0f;	// HL2RPM (see water_ps2x_helper.h)
 
 	float4 result;
 	float fogFactor;

@@ -31,6 +31,24 @@ extern ConVar mat_specular_disable_on_missing;
 #endif
 
 //-----------------------------------------------------------------------------
+// HL2RPM: the shader API keeps only 32 pixel shader constants and writes the
+// ones above c31 past the end of its arrays (heap corruption). Every draw of a
+// shader of this DLL first makes sure the arrays have room for all 224 ps_3_0
+// registers (hl2rpm_psconstants.cpp).
+//-----------------------------------------------------------------------------
+void HL2RPM_EnsurePixelShaderConstants( IShaderDynamicAPI *pShaderAPI );
+
+#undef SHADER_DRAW
+#define SHADER_DRAW \
+	void OnDrawElements( IMaterialVar **params, IShaderShadow* pShaderShadow, IShaderDynamicAPI* pShaderAPI, VertexCompressionType_t vertexCompression, CBasePerMaterialContextData **pContextDataPtr ) \
+	{ \
+		if ( pShaderAPI ) \
+			HL2RPM_EnsurePixelShaderConstants( pShaderAPI ); \
+		OnDrawElements_HL2RPM( params, pShaderShadow, pShaderAPI, vertexCompression, pContextDataPtr ); \
+	} \
+	void OnDrawElements_HL2RPM( IMaterialVar **params, IShaderShadow* pShaderShadow, IShaderDynamicAPI* pShaderAPI, VertexCompressionType_t vertexCompression, CBasePerMaterialContextData **pContextDataPtr )
+
+//-----------------------------------------------------------------------------
 // Helper macro for vertex shaders
 //-----------------------------------------------------------------------------
 #define BEGIN_VS_SHADER_FLAGS(_name, _help, _flags)	__BEGIN_SHADER_INTERNAL( CBaseVSShader, _name, _help, _flags )

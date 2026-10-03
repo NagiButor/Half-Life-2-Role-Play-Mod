@@ -6,6 +6,7 @@
 //=============================================================================//
 
 #include "BaseVSShader.h"
+#include "IDeferredExt.h"
 #include "mathlib/vmatrix.h"
 #include "common_hlsl_cpp_consts.h" // hack hack hack!
 #include "convar.h"
@@ -377,6 +378,9 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 				// water overbright factor
 				c7[2] = 4.0;
 			}
+			// HL2RPM: the deferred refraction view writes the depth under the surface to its
+			// alpha, not the fog of one water (composite_ps30, water_ps2x_helper.h)
+			c7[3] = GetDeferredExt()->IsDeferredLightingEnabled() ? 1.0f : 0.0f;
 			pShaderAPI->SetPixelShaderConstant( 7, c7, 1 );
 
 			pShaderAPI->SetPixelShaderFogParams( 8 );

@@ -45,6 +45,10 @@ const float2 g_flPhong_exp				: register( c2 );
 
 const float2 g_flHalflambert_Litface	: register( c1 );
 
+// HL2RPM: x 1 while the 3D skybox is drawn, y 1 while the local player's first person body
+// is drawn (defpass_gbuffer)
+const float2 g_vecPassMarks				: register( c3 );
+
 #if BUMPMAP2
 sampler sBumpmap2							: register( s3 );
 #endif
@@ -193,8 +197,17 @@ PS_OUTPUT main( const PS_INPUT In )
 #endif
 
 #if DEFCFG_LIGHTCTRL_PACKING
-	Out.vColor_0 = float4( worldNormal, PackLightingControls( phong_exp,
-		g_flHalflambert_Litface.x, g_flHalflambert_Litface.y ) );
+	// HL2RPM: lighting controls with phong 63 are reserved: 255 (+ half lambert + lit face) for
+	// the pixels of the 3D skybox - the sun pass must not look them up in its shadow maps (they
+	// hold the map's casters, not the skybox's) - and 254 (+ half lambert) for the local
+	// player's first person body - the sun pass ignores the body's own casters there. Materials
+	// get phong 62 instead of 63.
+	float flLightCtrl = PackLightingControls( phong_exp,
+		g_flHalflambert_Litface.x, g_flHalflambert_Litface.y );
+	flLightCtrl = ( flLightCtrl > 251.5f / 255.0f ) ? flLightCtrl - 4.0f / 255.0f : flLightCtrl;
+	flLightCtrl = ( g_vecPassMarks.y > 0.5f ) ? 254.0f / 255.0f : flLightCtrl;
+	flLightCtrl = ( g_vecPassMarks.x > 0.5f ) ? 1.0f : flLightCtrl;
+	Out.vColor_0 = float4( worldNormal, flLightCtrl );
 #else
 	Out.vColor_0 = float4( worldNormal, 1 );
 	Out.vColor_2 = float4( phong_exp / 63.0f, g_flHalflambert_Litface.xy, 0 );

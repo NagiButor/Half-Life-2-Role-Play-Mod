@@ -132,6 +132,16 @@ static void RemoveBridged( int i )
 	s_Bridged.Remove( i );
 }
 
+bool DeferredDLights_IsMirrored( const def_light_t *l )
+{
+	for ( int i = 0; i < s_Bridged.Count(); i++ )
+	{
+		if ( s_Bridged[i].pLight == l )
+			return true;
+	}
+	return false;
+}
+
 void DeferredDLights_Clear()
 {
 	for ( int i = s_Bridged.Count() - 1; i >= 0; i-- )

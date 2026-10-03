@@ -39,6 +39,7 @@ BEGIN_DATADESC( CDeferredLight )
 	DEFINE_KEYFIELD( m_flEnableToHour, FIELD_FLOAT, "enable_to_hour" ),
 	DEFINE_KEYFIELD( m_bTimeToggleShadows, FIELD_BOOLEAN, "time_toggle_shadows" ),
 	DEFINE_KEYFIELD( m_bTimeToggleVolumetrics, FIELD_BOOLEAN, "time_toggle_volumetrics" ),
+	DEFINE_KEYFIELD( m_bAutoShadow, FIELD_BOOLEAN, "autoshadow" ),
 
 #if DEFCFG_ADAPTIVE_VOLUMETRIC_LOD
 	DEFINE_KEYFIELD( m_flVolumeLOD0Dist, FIELD_FLOAT, GetLightParamName( LPARAM_VOLUME_LOD0_DIST ) ),
@@ -162,8 +163,10 @@ CDeferredLight::CDeferredLight()
 	m_bLastTimeEnabled = false;
 	m_iDefFlagsBase = 0;
 	m_bSwitchedOn = true;
+	m_bAutoShadow = true;
 #else
 	m_pLight = NULL;
+	m_bLightRegistered = false;
 #endif
 }
 
@@ -176,11 +179,27 @@ CDeferredLight::~CDeferredLight()
 
 #ifdef GAME_DLL
 
+// HL2RPM: a light without shadows lights everything inside its radius, through walls too -
+// rarely what a mapper wants. Lights placed in the map cast shadows unless their
+// "autoshadow" key is 0; the lamps converted from the classic light entities choose for
+// themselves (cdeferred_manager_server.cpp). Shadows render only within the light's shadow
+// distance (shadow_dist + shadow_range).
+static ConVar sv_deferred_light_autoshadow( "sv_deferred_light_autoshadow", "1", 0,
+	"light_deferred placed in the map cast shadows even without the shadow flag (lights without shadows shine through walls); applied on map load" );
+
+int CDeferredLight::GetInitialDefFlags()
+{
+	int iFlags = GetSpawnFlags();
+	if ( m_bAutoShadow && sv_deferred_light_autoshadow.GetBool() )
+		iFlags |= DEFLIGHT_SHADOW_ENABLED;
+	return iFlags;
+}
+
 void CDeferredLight::Spawn()
 {
 	BaseClass::Spawn();
 
-	m_iDefFlags = GetSpawnFlags();
+	m_iDefFlags = GetInitialDefFlags();
 	m_iDefFlagsBase = m_iDefFlags;
 	m_bSwitchedOn = ( m_iDefFlags & DEFLIGHT_ENABLED ) != 0;
 	m_bTimeGated = ( m_flEnableFromHour >= 0.0f || m_flEnableToHour >= 0.0f );
@@ -220,7 +239,7 @@ void CDeferredLight::Activate()
 	SetSolid( SOLID_NONE );
 	AddEffects( EF_NODRAW );
 
-	m_iDefFlags = GetSpawnFlags();
+	m_iDefFlags = GetInitialDefFlags();
 	// switched on / off by map I/O (also after loading a save game)
 	if ( m_bSwitchedOn )
 		m_iDefFlags |= DEFLIGHT_ENABLED;
@@ -521,6 +540,27 @@ void CDeferredLight::ApplyDataToLight()
 	}
 }
 
+// HL2RPM: a light switched off by the map (TurnOff / Toggle, outside its enable_from/to_hour
+// window) leaves the lighting manager - the client never looked at DEFLIGHT_ENABLED and kept
+// drawing it
+void CDeferredLight::UpdateLightRegistration()
+{
+	const bool bOn = ( GetLight_Flags() & DEFLIGHT_ENABLED ) != 0;
+	if ( bOn == m_bLightRegistered )
+		return;
+
+	if ( bOn )
+	{
+		m_pLight->MakeDirtyAll();
+		GetLightingManager()->AddLight( m_pLight );
+	}
+	else
+	{
+		GetLightingManager()->RemoveLight( m_pLight );
+	}
+	m_bLightRegistered = bOn;
+}
+
 void CDeferredLight::PostDataUpdate( DataUpdateType_t t )
 {
 	BaseClass::PostDataUpdate( t );
@@ -534,7 +574,7 @@ void CDeferredLight::PostDataUpdate( DataUpdateType_t t )
 		ApplyDataToLight();
 		m_pLight->MakeDirtyAll();
 
-		GetLightingManager()->AddLight( m_pLight );
+		UpdateLightRegistration();
 
 		SetNextClientThink( CLIENT_THINK_ALWAYS );
 
@@ -555,6 +595,8 @@ void CDeferredLight::PostDataUpdate( DataUpdateType_t t )
 		ApplyDataToLight();
 
 		m_pLight->MakeDirtyAll();
+
+		UpdateLightRegistration();
 
 		if ( DeferredVerboseLevel() >= 2 )
 		{
@@ -579,7 +621,9 @@ void CDeferredLight::UpdateOnRemove()
 		if ( DeferredVerboseLevel() >= 1 )
 			DevMsg( "light_deferred[%d] UpdateOnRemove\n", entindex() );
 
-		GetLightingManager()->RemoveLight( m_pLight );
+		if ( m_bLightRegistered )
+			GetLightingManager()->RemoveLight( m_pLight );
+		m_bLightRegistered = false;
 		delete m_pLight;
 		m_pLight = NULL;
 	}

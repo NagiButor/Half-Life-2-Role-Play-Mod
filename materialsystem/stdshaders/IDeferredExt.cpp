@@ -12,6 +12,8 @@ CDeferredExtension::CDeferredExtension()
 	m_vecForward.Init();
 	m_flZDists[0] = m_flZDists[1] = m_flZDists[2] = 0;
 	m_matTFrustumD.Identity();
+	m_matMainViewToScreenTex.Identity();
+	m_bReflectionView = false;
 	Q_memset( m_dataOrtho, 0, sizeof( m_dataOrtho ) );
 	Q_memset( m_dataProj, 0, sizeof( m_dataProj ) );
 	Q_memset( &m_dataGeneral, 0, sizeof( m_dataGeneral ) );
@@ -30,6 +32,7 @@ CDeferredExtension::CDeferredExtension()
 #endif
 
 	Q_memset( m_pTexShadowDepth_Ortho, 0, sizeof( ITexture* ) * MAX_SHADOW_ORTHO );
+	Q_memset( m_pTexShadowDepthRaw_Ortho, 0, sizeof( ITexture* ) * MAX_SHADOW_ORTHO );
 	Q_memset( m_pTexShadowDepth_DP, 0, sizeof( ITexture* ) * MAX_SHADOW_DP );
 	Q_memset( m_pTexShadowDepth_Proj, 0, sizeof( ITexture* ) * MAX_SHADOW_PROJ );
 	Q_memset( m_pTexCookie, 0, sizeof( ITexture* ) * NUM_COOKIE_SLOTS );
@@ -183,6 +186,12 @@ void CDeferredExtension::CommitTexture_General( ITexture *pTexNormals, ITexture 
 	m_pTexSpecular = pTexSpecular;
 #endif
 }
+void CDeferredExtension::CommitTexture_CascadedDepthRaw( const int &index, ITexture *pTexDepthRaw )
+{
+	Assert( index >= 0 && index < MAX_SHADOW_ORTHO );
+	m_pTexShadowDepthRaw_Ortho[ index ] = pTexDepthRaw;
+}
+
 void CDeferredExtension::CommitTexture_CascadedDepth( const int &index, ITexture *pTexShadowDepth )
 {
 	Assert( index >= 0 && index < MAX_SHADOW_ORTHO );
@@ -255,6 +264,16 @@ void CDeferredExtension::CommitTexture_Weather( ITexture *pCloudTexture, ITextur
 void CDeferredExtension::CommitSSAOData( const ssaoData_t &data )
 {
 	m_dataSSAO = data;
+}
+
+void CDeferredExtension::CommitMainViewToScreenTex( const VMatrix &matWorldToScreenTex )
+{
+	m_matMainViewToScreenTex = matWorldToScreenTex;
+}
+
+void CDeferredExtension::CommitReflectionView( const bool &bReflection )
+{
+	m_bReflectionView = bReflection;
 }
 
 void CDeferredExtension::CommitTexture_SSAO( ITexture *pAO, ITexture *pBlur )

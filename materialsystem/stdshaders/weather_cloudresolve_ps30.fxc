@@ -34,9 +34,14 @@ float4 main( const PS_INPUT In ) : COLOR
 	if ( cur.a < 0.0 )
 		return cur;
 
-	// neighbourhood of the current frame (ignoring texels covered by geometry)
+	// neighbourhood of the current frame (ignoring texels covered by geometry). The frame
+	// itself is used filtered (3x3 tent): the jittered raymarch is noisy where a ray only
+	// grazes a cloud, and blending in 10 % of the raw sample every frame made the thin edges
+	// of the clouds sparkle like sand.
 	float4 mn = cur;
 	float4 mx = cur;
+	float4 sum = cur * 4.0;
+	float wsum = 4.0;
 	[unroll]
 	for ( int y = -1; y <= 1; y++ )
 	{
@@ -50,9 +55,13 @@ float4 main( const PS_INPUT In ) : COLOR
 			{
 				mn = min( mn, s );
 				mx = max( mx, s );
+				const float w = ( x == 0 || y == 0 ) ? 2.0 : 1.0;
+				sum += s * w;
+				wsum += w;
 			}
 		}
 	}
+	cur = sum / wsum;
 
 	if ( g_vecResolve.w <= 0.0 )
 		return cur;

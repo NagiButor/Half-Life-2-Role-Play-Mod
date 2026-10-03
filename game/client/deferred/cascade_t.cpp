@@ -29,15 +29,28 @@ struct csm_quality_preset_t
 	int iUpdateInterval[4];
 };
 
+// HL2RPM: a cascade fitted to the bounding sphere of its slice gets texels proportional to
+// the slice's far end - about 1.3 texels per pixel there whatever the split, but much
+// coarser right in front of the camera. With lambda ~0.78 the first cascade reached 420+
+// units: 0.63 unit texels (8 pixels per texel on the floor at the player's feet, table legs
+// cast no visible shadow), and the longer-distance presets were even coarser up close.
+// Splits closer to logarithmic keep the first cascade at ~180-220 units (0.27 - 0.5 unit
+// texels) and halve the texels of the middle ones; the last cascade doesn't change.
+// (2026-10-02: High / Very High / Ultra closer still - 0.95 / 0.96 / 0.97: up close the
+// texels showed as stairs. Ultra: the first cascade ~134 units with 0.22 unit texels, the
+// second ~460 units with 0.7 - both finer than before, only 134 - 220 units got coarser.)
 static const csm_quality_preset_t g_CSMPresets[] =
 {
 	//  cascades  res   distance  lambda   update interval per cascade (frames)
-	{ 2,        1024,  3000.0f,  0.80f, { 1, 4, 8, 8 } },	// Very Low
-	{ 3,        1024,  4500.0f,  0.80f, { 1, 2, 6, 8 } },	// Low
-	{ 3,        1536,  6000.0f,  0.78f, { 1, 2, 4, 8 } },	// Medium
-	{ 4,        2048,  7000.0f,  0.78f, { 1, 1, 3, 6 } },	// High
-	{ 4,        2048,  9000.0f,  0.76f, { 1, 1, 2, 4 } },	// Very High
-	{ 4,        2048, 12000.0f,  0.75f, { 1, 1, 1, 2 } },	// Ultra
+	{ 2,        1024,  3000.0f,  0.92f, { 1, 4, 8, 8 } },	// Very Low
+	{ 3,        1024,  4500.0f,  0.92f, { 1, 2, 6, 8 } },	// Low
+	{ 3,        1536,  6000.0f,  0.92f, { 1, 2, 4, 8 } },	// Medium
+	// (every cascade re-render is a full scene pass - ~2 ms on an open map on a GTX 960M;
+	// a still camera doesn't need the second one every frame: moving, turning and the
+	// sun moving force an update anyway, see ShouldUpdateCascade)
+	{ 4,        2048,  7000.0f,  0.95f, { 1, 2, 3, 6 } },	// High
+	{ 4,        2048,  9000.0f,  0.96f, { 1, 2, 2, 4 } },	// Very High
+	{ 4,        2048, 12000.0f,  0.97f, { 1, 1, 1, 2 } },	// Ultra
 };
 
 COMPILE_TIME_ASSERT( SHADOW_NUM_CASCADES >= 4 );
@@ -91,6 +104,9 @@ ConVar r_csm_quality( "r_csm_quality", "3", FCVAR_ARCHIVE,
 static ConVar r_csm_distance_scale( "r_csm_distance_scale", "1.0", FCVAR_ARCHIVE,
 	"Multiplier for the sun shadow distance of the current r_csm_quality", true, 0.25f, true, 4.0f );
 
+static ConVar r_csm_split_lambda( "r_csm_split_lambda", "-1", 0,
+	"Dev: cascade split distribution (0 = uniform, 1 = logarithmic), -1 = the r_csm_quality preset", true, -1.0f, true, 1.0f );
+
 static void OnCSMQualityChanged( IConVar *var, const char *pOldValue, float flOldValue )
 {
 	ConVar *pConVar = static_cast<ConVar *>( var );
@@ -136,7 +152,7 @@ void UpdateCascadeSplits( float flZNear, float flFov, float flAspect )
 	const int iCount = g_iActiveCascades;
 	const float flNear = Max( flZNear, 4.0f );
 	const float flFar = Max( GetCascadeShadowDistance(), flNear + 64.0f );
-	const float flLambda = preset.flSplitLambda;
+	const float flLambda = ( r_csm_split_lambda.GetFloat() >= 0.0f ) ? r_csm_split_lambda.GetFloat() : preset.flSplitLambda;
 
 	float flSplits[5];
 	flSplits[0] = flNear;

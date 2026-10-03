@@ -27,6 +27,9 @@ enum WeatherPreset_e
 	WEATHER_MISTY,			// hazy morning, soft light, strong light shafts
 	WEATHER_SNOW,			// snowfall under a bright grey sky (never chosen automatically)
 	WEATHER_ASH,			// falling ash in a smoky, hazy air (never chosen automatically)
+	WEATHER_CUMULUS,		// big fair-weather cumulus, towers building in the afternoon
+	WEATHER_STRATOCUMULUS,	// low lumpy grey sheet with gaps (broken clouds)
+	WEATHER_HIGHCLOUDS,		// cirrus and altocumulus veils high above, sun through them
 
 	WEATHER_PRESET_COUNT
 };

@@ -47,10 +47,12 @@ float4 main( PS_INPUT i ) : COLOR
 
 	bool bWriteDepthToAlpha = ( WRITE_DEPTH_TO_DESTALPHA != 0 );
 
-	float fogFactor = CalcPixelFogFactor( PIXELFOGTYPE, g_FogParams, g_EyePos_SpecExponent.z, i.worldPos_projPosZ.z, i.worldPos_projPosZ.w );
+	float fogFactor = CalcPixelFogFactor( PIXELFOGTYPE, g_FogParams, g_EyePos_SpecExponent.xyz, i.worldPos_projPosZ.xyz, i.worldPos_projPosZ.w );
 
 #if PIXELFOGTYPE == 0
-	result.rgb = lerp( result.rgb, g_LinearFogColor.rgb, fogFactor );
+	// HL2RPM: squared like BlendPixelFog of the stock shaders (and full positions above:
+	// the eye / world z alone went in as the positions)
+	result.rgb = lerp( result.rgb, g_LinearFogColor.rgb, saturate( fogFactor ) * saturate( fogFactor ) );
 	return FinalOutput( result, 0, PIXELFOGTYPE, TONEMAP_SCALE_NONE, bWriteDepthToAlpha, i.worldPos_projPosZ.w );
 #else
 	return FinalOutput( result, fogFactor, PIXELFOGTYPE, TONEMAP_SCALE_NONE, bWriteDepthToAlpha, i.worldPos_projPosZ.w );

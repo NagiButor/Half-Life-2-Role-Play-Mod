@@ -38,6 +38,7 @@ enum TourView_e
 	TOURVIEW_DEFAULT = 0,	// cl_weather_tour_angles
 	TOURVIEW_SUN,			// look toward the sun (sun in the upper left of the frame)
 	TOURVIEW_SPIN,			// keep turning the camera (checks the cloud reprojection)
+	TOURVIEW_MOON,			// the moon in the middle of the frame
 };
 
 struct TourStep_t
@@ -106,7 +107,8 @@ static void LoadTourSteps()
 				*pszBar = 0;
 				TourStep_t step;
 				step.bScreenshot = V_stristr( szLine, "shot" ) != NULL;
-				step.iView = V_stristr( szLine, "spin" ) ? TOURVIEW_SPIN : ( V_stristr( szLine, "sun" ) ? TOURVIEW_SUN : TOURVIEW_DEFAULT );
+				step.iView = V_stristr( szLine, "spin" ) ? TOURVIEW_SPIN : ( V_stristr( szLine, "sun" ) ? TOURVIEW_SUN :
+					( V_stristr( szLine, "moon" ) ? TOURVIEW_MOON : TOURVIEW_DEFAULT ) );
 				// "flash" / "flash1" / "flash2": lightning (close / mid / far) just before the shot
 				const char *pszFlash = V_stristr( szLine, "flash" );
 				step.iFlash = pszFlash ? ( ( pszFlash[5] >= '0' && pszFlash[5] <= '2' ) ? pszFlash[5] - '0' : 0 ) : -1;
@@ -149,13 +151,10 @@ public:
 		m_bShotTaken = true;	// no screenshot of the state before the first step
 		m_flNextTime = gpGlobals->realtime + 6.0f;	// let the level settle (clouds accumulate, shaders load)
 		engine->ClientCmd_Unrestricted( "sv_cheats 1; cl_drawhud 0; sv_weather_auto 0; sv_timecycle_set_speed 0; jpeg_quality 92" );
-		// no motion blur in the shots (restored when the tour ends)
-		static ConVarRef mat_motion_blur_enabled( "mat_motion_blur_enabled" );
-		if ( mat_motion_blur_enabled.IsValid() )
-		{
-			m_iSavedMotionBlur = mat_motion_blur_enabled.GetInt();
-			mat_motion_blur_enabled.SetValue( 0 );
-		}
+		// (motion blur used to be switched off here: a material system setting, and every map
+		// change of a tour then applied a changed config - the shots are taken seconds after
+		// the camera snaps anyway)
+		m_iSavedMotionBlur = -1;
 		engine->ClientCmd_Unrestricted( VarArgs( "setang %s", cl_weather_tour_angles.GetString() ) );
 	}
 
@@ -294,7 +293,14 @@ public:
 		if ( m_iStep < 0 || m_iStep >= s_TourSteps.Count() )
 			return;
 
-		if ( s_TourSteps[m_iStep].iView == TOURVIEW_SUN )
+		if ( s_TourSteps[m_iStep].iView == TOURVIEW_MOON )
+		{
+			const Vector &moon = GetWeatherSystem()->GetMoonDir();
+			const float flYaw = RAD2DEG( atan2f( moon.y, moon.x ) );
+			const float flAlt = RAD2DEG( asinf( clamp( moon.z, -1.0f, 1.0f ) ) );
+			engine->ClientCmd_Unrestricted( VarArgs( "setang %.1f %.1f 0", -flAlt, flYaw ) );
+		}
+		else if ( s_TourSteps[m_iStep].iView == TOURVIEW_SUN )
 		{
 			const Vector &sun = GetWeatherSystem()->GetSunDir();
 			const float flYaw = RAD2DEG( atan2f( sun.y, sun.x ) ) - 15.0f;

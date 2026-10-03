@@ -271,6 +271,8 @@
     <ClCompile Include="eyes_dx9.cpp" />
     <ClCompile Include="flesh_interior_blended_pass_helper.cpp" />
     <ClCompile Include="IDeferredExt.cpp" />
+    <ClCompile Include="hl2rpm_psconstants.cpp" />
+    <ClCompile Include="hl2rpm_memprobe.cpp" />
     <ClCompile Include="skyatmo_proc.cpp" />
     <ClCompile Include="sky_atmo_lutgen.cpp" />
     <ClCompile Include="sky_atmo_transmittance_lutgen.cpp" />
@@ -281,6 +283,7 @@
     <ClCompile Include="weather_cloudresolve.cpp" />
     <ClCompile Include="deferred_ssao.cpp" />
     <ClCompile Include="weather_godrays.cpp" />
+    <ClCompile Include="hl2rpm_fxaa.cpp" />
     <ClCompile Include="weather_post.cpp" />
     <ClCompile Include="weather_rain.cpp" />
     <ClCompile Include="volumpass_sun.cpp" />

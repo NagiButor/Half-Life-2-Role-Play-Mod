@@ -26,6 +26,7 @@ const float4 g_vecCloud0			: register( c60 );	// coverage, density, type, darkne
 const float4 g_vecCloud1			: register( c61 );	// base (m), thickness, cirrus, time
 const float4 g_vecWind				: register( c62 );	// xy cloud offset (m)
 const float4 g_vecParams			: register( c63 );	// steps, max distance, frame, night
+const float4 g_vecCloudSpace		: register( c64 );	// x cloud space meters per unit
 
 struct PS_INPUT
 {
@@ -53,7 +54,7 @@ float SunShadow( float3 p )
 float CloudShadow( float3 p )
 {
 	// project to the cloud base along the light and look at the large scale coverage
-	float3 pm = p * 0.0254;
+	float3 pm = float3( p.xy * ( ( g_vecCloudSpace.x > 0.0 ) ? g_vecCloudSpace.x : 0.0254 ), p.z * 0.0254 );
 	float tBase = ( g_vecCloud1.x - pm.z ) / max( g_vecLightDir.z, 0.08 );
 	float2 cxy = pm.xy + g_vecLightDir.xy * tBase + g_vecWind.xy;
 	float wm = tex2Dlod( sWeatherMap, float4( cxy / 40000.0, 0, 0 ) ).r;

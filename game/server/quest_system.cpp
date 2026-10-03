@@ -1,5 +1,7 @@
 #include "cbase.h"
+#include "dialog_definitions.h"
 #include "quest_system.h"
+#include "isaverestore.h"
 
 #include "inventory_system.h"
 #include "recipientfilter.h"
@@ -121,6 +123,17 @@ CQuestSystem::CQuestSystem()
 {
 }
 
+void CQuestSystem::LevelInitPreEntity()
+{
+	// HL2RPM: a new game starts without quests; a changelevel keeps them, a loaded
+	// game gets them from the save (see the save/restore block below)
+	if ( gpGlobals->eLoadType == MapLoad_NewGame || gpGlobals->eLoadType == MapLoad_Background )
+	{
+		ClearPlayerData();
+		DialogDefinitions::ClearDialogProgress();
+	}
+}
+
 void CQuestSystem::LevelInitPostEntity()
 {
 	ListenForGameEvent( "entity_killed" );
@@ -128,7 +141,97 @@ void CQuestSystem::LevelInitPostEntity()
 
 void CQuestSystem::LevelShutdownPostEntity()
 {
+	// HL2RPM: the player data used to be dropped here, i.e. on every changelevel
+}
+
+void CQuestSystem::ClearPlayerData()
+{
 	m_PlayerData.RemoveAll();
+}
+
+void CQuestSystem::PrintState() const
+{
+	for ( int i = 0; i < m_PlayerData.Count(); ++i )
+	{
+		const PlayerData &data = m_PlayerData[i];
+		Msg( "[quests] player %d reputation %d, %d quest(s)\n", data.entIndex, data.reputation, data.quests.Count() );
+		for ( int q = 0; q < data.quests.Count(); ++q )
+			Msg( "[quests]   %s  state %d  stage %d  progress %d\n", data.quests[q].id.Get(), (int)data.quests[q].state, data.quests[q].stage, data.quests[q].progress );
+	}
+}
+
+CON_COMMAND_F( quest_dump, "Print the quests and reputation of the player", FCVAR_GAMEDLL )
+{
+	QuestSystem().PrintState();
+}
+
+CON_COMMAND_F( quest_grant, "Test: give the player a quest: quest_grant <id>", FCVAR_GAMEDLL | FCVAR_CHEAT )
+{
+	CBasePlayer *pPlayer = UTIL_GetCommandClient() ? UTIL_GetCommandClient() : UTIL_PlayerByIndex( 1 );
+	if ( pPlayer && args.ArgC() > 1 )
+		Msg( "quest_grant %s: %s\n", args[1], QuestSystem().GrantQuest( pPlayer, args[1] ) ? "ok" : "failed" );
+}
+
+CON_COMMAND_F( quest_rep, "Test: change the player's reputation: quest_rep <delta>", FCVAR_GAMEDLL | FCVAR_CHEAT )
+{
+	CBasePlayer *pPlayer = UTIL_GetCommandClient() ? UTIL_GetCommandClient() : UTIL_PlayerByIndex( 1 );
+	if ( pPlayer && args.ArgC() > 1 )
+		QuestSystem().AddReputation( pPlayer, atoi( args[1] ) );
+}
+
+static const int QUEST_SAVE_VERSION = 1;
+
+void CQuestSystem::SaveState( ISave *pSave )
+{
+	int nVersion = QUEST_SAVE_VERSION;
+	pSave->WriteInt( &nVersion );
+	int nPlayers = m_PlayerData.Count();
+	pSave->WriteInt( &nPlayers );
+	for ( int i = 0; i < nPlayers; ++i )
+	{
+		PlayerData &data = m_PlayerData[i];
+		pSave->WriteInt( &data.entIndex );
+		pSave->WriteInt( &data.reputation );
+		int nQuests = data.quests.Count();
+		pSave->WriteInt( &nQuests );
+		for ( int q = 0; q < nQuests; ++q )
+		{
+			PlayerQuestState &st = data.quests[q];
+			pSave->WriteString( st.id.Get() ? st.id.Get() : "" );
+			int iState = (int)st.state;
+			pSave->WriteInt( &iState );
+			pSave->WriteInt( &st.stage );
+			pSave->WriteInt( &st.progress );
+		}
+	}
+}
+
+void CQuestSystem::RestoreState( IRestore *pRestore )
+{
+	m_PlayerData.RemoveAll();
+	const int nVersion = pRestore->ReadInt();
+	if ( nVersion != QUEST_SAVE_VERSION )
+		return;
+	const int nPlayers = pRestore->ReadInt();
+	for ( int i = 0; i < nPlayers; ++i )
+	{
+		m_PlayerData.AddToTail();
+		PlayerData &data = m_PlayerData.Tail();
+		data.entIndex = pRestore->ReadInt();
+		data.reputation = pRestore->ReadInt();
+		const int nQuests = pRestore->ReadInt();
+		for ( int q = 0; q < nQuests; ++q )
+		{
+			char szId[256];
+			pRestore->ReadString( szId, sizeof( szId ), 0 );
+			data.quests.AddToTail();
+			PlayerQuestState &st = data.quests.Tail();
+			st.id = szId;
+			st.state = (QuestState)pRestore->ReadInt();
+			st.stage = pRestore->ReadInt();
+			st.progress = pRestore->ReadInt();
+		}
+	}
 }
 
 void CQuestSystem::FireGameEvent( IGameEvent *event )
@@ -626,3 +729,65 @@ static void CC_Quest_Request( const CCommand &args )
 }
 
 static ConCommand quest_request( "quest_request", CC_Quest_Request, "Request quest list." );
+
+// ---------------------------------------------------------------------------
+// HL2RPM: save/restore block for quests and reputation
+// ---------------------------------------------------------------------------
+#include "isaverestore.h"
+
+class CQuestSaveRestoreBlockHandler : public CDefSaveRestoreBlockHandler
+{
+public:
+	const char *GetBlockName() { return "HL2RPMQuests"; }
+
+	void Save( ISave *pSave )
+	{
+		pSave->StartBlock( "Quests" );
+		QuestSystem().SaveState( pSave );
+		pSave->EndBlock();
+	}
+
+	void PreRestore()
+	{
+		m_bDoLoad = false;
+		// a save without this block (older build) must not keep the quests of the
+		// session that was running before the load
+		if ( gpGlobals->eLoadType == MapLoad_LoadGame )
+			QuestSystem().ClearPlayerData();
+	}
+
+	void WriteSaveHeaders( ISave *pSave )
+	{
+		short nVersion = 1;
+		pSave->WriteShort( &nVersion );
+	}
+
+	void ReadRestoreHeaders( IRestore *pRestore )
+	{
+		short nVersion;
+		pRestore->ReadShort( &nVersion );
+		// a changelevel restores the level's old data: the quests in memory are newer
+		m_bDoLoad = ( nVersion == 1 ) && ( gpGlobals->eLoadType == MapLoad_LoadGame );
+	}
+
+	void Restore( IRestore *pRestore, bool fCreatePlayers )
+	{
+		if ( !m_bDoLoad )
+			return;
+		pRestore->StartBlock();
+		QuestSystem().RestoreState( pRestore );
+		pRestore->EndBlock();
+	}
+
+	// (the client asks for the quest log itself when the inventory window opens)
+
+private:
+	bool m_bDoLoad;
+};
+
+static CQuestSaveRestoreBlockHandler g_QuestSaveRestoreBlockHandler;
+
+ISaveRestoreBlockHandler *GetQuestSaveRestoreBlockHandler()
+{
+	return &g_QuestSaveRestoreBlockHandler;
+}

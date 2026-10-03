@@ -255,6 +255,9 @@ protected:
 
 	// Renders all translucent world + detail objects in a particular set of leaves
 	void			DrawTranslucentWorldAndDetailPropsInLeaves( int iCurLeaf, int iFinalLeaf, int nEngineDrawFlags, int &nDetailLeafCount, LeafIndex_t* pDetailLeafList, bool bShadowDepth );
+	// HL2RPM: the detail props of every leaf of this view's world list at once, unsorted
+	// (the deferred G-buffer pass draws the grass sprites with it)
+	void			DrawDetailPropsInAllLeaves();
 
 	// Purpose: Computes the actual world list info based on the render flags
 	void			PruneWorldListInfo();

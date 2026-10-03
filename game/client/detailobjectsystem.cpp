@@ -414,6 +414,9 @@ public:
 	// Call this before rendering translucent detail objects
 	void BeginTranslucentDetailRendering( );
 
+	// HL2RPM
+	IMaterial *GetDetailSpriteMaterial() { return m_DetailSpriteMaterial; }
+
 	// Method of ISpatialLeafEnumerator
 	bool EnumerateLeaf( int leaf, int context );
 
@@ -1081,18 +1084,21 @@ void CDetailModel::DrawTypeSprite( CMeshBuilder &meshBuilder )
 
 	meshBuilder.Color4ubv( color );
 	meshBuilder.TexCoord2fv( 0, texul.Base() );
+	meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 	meshBuilder.AdvanceVertex();
 
 	vecOrigin += dy;
 	meshBuilder.Position3fv( vecOrigin.Base() );
 	meshBuilder.Color4ubv( color );
 	meshBuilder.TexCoord2f( 0, texul.x, texlr.y );
+	meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 	meshBuilder.AdvanceVertex();
 
 	vecOrigin += dx;
 	meshBuilder.Position3fv( vecOrigin.Base() );
 	meshBuilder.Color4ubv( color );
 	meshBuilder.TexCoord2fv( 0, texlr.Base() );
+	meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 	meshBuilder.AdvanceVertex();
 
 	vecOrigin -= dy;
@@ -1103,6 +1109,7 @@ void CDetailModel::DrawTypeSprite( CMeshBuilder &meshBuilder )
 #endif
 	meshBuilder.Color4ubv( color );
 	meshBuilder.TexCoord2f( 0, texlr.x, texul.y );
+	meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 	meshBuilder.AdvanceVertex();
 }
 
@@ -1386,24 +1393,28 @@ void CDetailModel::DrawSwayingQuad( CMeshBuilder &meshBuilder, Vector vecOrigin,
 	meshBuilder.Position3fv( (vecOrigin + vecSway).Base() );
 	meshBuilder.TexCoord2fv( 0, texul.Base() );
 	meshBuilder.Color4ubv( color );
+	meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 	meshBuilder.AdvanceVertex();
 
 	vecOrigin += height;
 	meshBuilder.Position3fv( vecOrigin.Base() );
 	meshBuilder.TexCoord2f( 0, texul.x, texlr.y );
 	meshBuilder.Color4ubv( color );
+	meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 	meshBuilder.AdvanceVertex();
 
 	vecOrigin += width;
 	meshBuilder.Position3fv( vecOrigin.Base() );
 	meshBuilder.TexCoord2fv( 0, texlr.Base() );
 	meshBuilder.Color4ubv( color );
+	meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 	meshBuilder.AdvanceVertex();
 
 	vecOrigin -= height;
 	meshBuilder.Position3fv( (vecOrigin + vecSway).Base() );
 	meshBuilder.TexCoord2f( 0, texlr.x, texul.y );
 	meshBuilder.Color4ubv( color );
+	meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 	meshBuilder.AdvanceVertex();
 }
 #endif
@@ -2384,21 +2395,25 @@ void CDetailObjectSystem::RenderFastSprites( const Vector &viewOrigin, const Vec
 					meshBuilder.Position3f( pquad->m_flX0[0], pquad->m_flY0[0], pquad->m_flZ0[0] );
 					meshBuilder.Color4ubv( color );
 					meshBuilder.TexCoord2f( 0, pDict->m_TexLR.x, pDict->m_TexLR.y );
+					meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 					meshBuilder.AdvanceVertex();
 
 					meshBuilder.Position3f( pquad->m_flX1[0], pquad->m_flY1[0], pquad->m_flZ1[0] );
 					meshBuilder.Color4ubv( color );
 					meshBuilder.TexCoord2f( 0, pDict->m_TexLR.x, pDict->m_TexUL.y );
+					meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 					meshBuilder.AdvanceVertex();
 
 					meshBuilder.Position3f( pquad->m_flX2[0], pquad->m_flY2[0], pquad->m_flZ2[0] );
 					meshBuilder.Color4ubv( color );
 					meshBuilder.TexCoord2f( 0, pDict->m_TexUL.x, pDict->m_TexUL.y );
+					meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 					meshBuilder.AdvanceVertex();
 
 					meshBuilder.Position3f( pquad->m_flX3[0], pquad->m_flY3[0], pquad->m_flZ3[0] );
 					meshBuilder.Color4ubv( color );
 					meshBuilder.TexCoord2f( 0, pDict->m_TexUL.x, pDict->m_TexLR.y );
+					meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 					meshBuilder.AdvanceVertex();
 					pDraw++;
 				}
@@ -2618,21 +2633,25 @@ void CDetailObjectSystem::RenderFastTranslucentDetailObjectsInLeaf( const Vector
 			meshBuilder.Position3f( pquad->m_flX0[0], pquad->m_flY0[0], pquad->m_flZ0[0] );
 			meshBuilder.Color4ubv( color );
 			meshBuilder.TexCoord2f( 0, pDict->m_TexLR.x, pDict->m_TexLR.y );
+			meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 			meshBuilder.AdvanceVertex();
 
 			meshBuilder.Position3f( pquad->m_flX1[0], pquad->m_flY1[0], pquad->m_flZ1[0] );
 			meshBuilder.Color4ubv( color );
 			meshBuilder.TexCoord2f( 0, pDict->m_TexLR.x, pDict->m_TexUL.y );
+			meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 			meshBuilder.AdvanceVertex();
 
 			meshBuilder.Position3f( pquad->m_flX2[0], pquad->m_flY2[0], pquad->m_flZ2[0] );
 			meshBuilder.Color4ubv( color );
 			meshBuilder.TexCoord2f( 0, pDict->m_TexUL.x, pDict->m_TexUL.y );
+			meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 			meshBuilder.AdvanceVertex();
 
 			meshBuilder.Position3f( pquad->m_flX3[0], pquad->m_flY3[0], pquad->m_flZ3[0] );
 			meshBuilder.Color4ubv( color );
 			meshBuilder.TexCoord2f( 0, pDict->m_TexUL.x, pDict->m_TexLR.y );
+			meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 			meshBuilder.AdvanceVertex();
 			pDraw++;
 		}

@@ -28,6 +28,12 @@ static ConVar cl_weather_volume( "cl_weather_volume", "1.0", FCVAR_ARCHIVE, "Rai
 static ConVar cl_weather_debug( "cl_weather_debug", "0", 0, "Show weather state on screen" );
 static ConVar cl_weather_moonlight( "cl_weather_moonlight", "0.045", FCVAR_ARCHIVE, "Moonlight strength relative to the map's sunlight" );
 static ConVar cl_weather_night_ambient( "cl_weather_night_ambient", "0.06", FCVAR_ARCHIVE, "Night sky light relative to the map's day ambient" );
+// HL2RPM: a map is a few hundred meters wide and real clouds are 1-2 km up: walking
+// across it they would not move at all. The clouds live in a scaled space instead
+// (walking moves you 'parallax' times further under them) and drift faster.
+static ConVar r_weather_cloud_parallax( "r_weather_cloud_parallax", "10", FCVAR_ARCHIVE, "How much faster the clouds pass over a walking player than real clouds would (cloud space scale)", true, 1.0f, true, 60.0f );
+static ConVar r_weather_cloud_wind_scale( "r_weather_cloud_wind_scale", "2.5", FCVAR_ARCHIVE, "Cloud drift speed multiplier", true, 0.0f, true, 10.0f );
+static ConVar r_weather_cloud_debug( "r_weather_cloud_debug", "0", FCVAR_CHEAT, "Cloud lighting debug: 1 = sun light only, 2 = sky light only, 3 = opacity" );
 
 #define WEATHER_SOUND_RAIN_OUT	"hl2rpm/weather/rain_loop.wav"
 #define WEATHER_SOUND_RAIN_IN	"hl2rpm/weather/rain_roof_loop.wav"
@@ -133,6 +139,7 @@ C_WeatherSystem::C_WeatherSystem() : CAutoGameSystemPerFrame( "C_WeatherSystem" 
 	m_flSkyExposure = 1.0f;
 	m_flOuterExposure = 1.0f;
 	m_flParticleLightScale = 1.0f;
+	m_flEnvLightScale = 1.0f;
 	m_flNextExposureTrace = 0.0f;
 	m_flRainVolumeOut = m_flRainVolumeIn = m_flWindVolume = 0.0f;
 	m_bRainOutPlaying = m_bRainInPlaying = m_bWindPlaying = false;
@@ -197,6 +204,7 @@ void C_WeatherSystem::Update( float frametime )
 	if ( !m_bActive )
 	{
 		m_flParticleLightScale = 1.0f;
+		m_flEnvLightScale = 1.0f;
 		if ( bWasActive )
 		{
 			StopAudio();
@@ -397,6 +405,8 @@ void C_WeatherSystem::ModifyGlobalLight( lightData_Global_t &data, const Vector 
 	const float flBase = Luminance( vecBaseAmbHigh ) + flBaseLum * 0.8f;
 	// softened: splashes and drops also catch the sky, and should stay readable in a storm
 	m_flParticleLightScale = powf( Clamp( flNow / Max( flBase, 0.001f ), 0.005f, 1.8f ), 0.6f );
+	// cubemap reflections: linear, a reflection at night is really dark (but never quite black)
+	m_flEnvLightScale = Clamp( flNow / Max( flBase, 0.001f ), 0.03f, 1.2f );
 }
 
 float WeatherPrecip_GetParticleLightScale( const Vector &vecPos )
@@ -430,7 +440,7 @@ void C_WeatherSystem::UpdateWind( float dt )
 	const float t = gpGlobals->curtime;
 	m_flGust = 0.5f + 0.5f * sinf( t * 0.37f ) * sinf( t * 0.11f + 1.3f );
 
-	const float flCloudSpeed = m_Current.flCloudSpeed * ( 0.85f + 0.3f * m_flGust );
+	const float flCloudSpeed = m_Current.flCloudSpeed * ( 0.85f + 0.3f * m_flGust ) * r_weather_cloud_wind_scale.GetFloat();
 	m_vecCloudOffset += m_vecWindDir * ( flCloudSpeed * dt );
 	// keep the offset bounded; all cloud noise tiles with this period
 	const float flPeriod = 160000.0f;
@@ -506,7 +516,9 @@ void C_WeatherSystem::TriggerLightning( int iForceClass )
 	const float flGlowElev = atanf( m_flStrikeCloudBase / flDist ) * 0.7f + DEG2RAD( 3.0f );
 	m_vecFlashDir.Init( cosf( flYaw ) * cosf( flGlowElev ), sinf( flYaw ) * cosf( flGlowElev ), sinf( flGlowElev ) );
 	// the scene is lit from the middle of the channel
-	const float flLightElev = clamp( atanf( 0.5f * m_flStrikeCloudBase / flDist ), DEG2RAD( 10.0f ), DEG2RAD( 55.0f ) );
+	// (not lower than 30 degrees: at grazing angles the bolt's split-second shadows were
+	// endless streaks and self-shadowing acne - read as a lighting glitch)
+	const float flLightElev = clamp( atanf( 0.5f * m_flStrikeCloudBase / flDist ), DEG2RAD( 30.0f ), DEG2RAD( 60.0f ) );
 	m_vecBoltLightDir.Init( cosf( flYaw ) * cosf( flLightElev ), sinf( flYaw ) * cosf( flLightElev ), sinf( flLightElev ) );
 
 	// a strike is a few return strokes 40-120 ms apart along the same channel
@@ -829,7 +841,9 @@ void C_WeatherSystem::FillRenderData( weatherData_t &data, const CViewSetup &vie
 	data.vecCloudParams0.Init( p.flCloudCoverage, p.flCloudDensity, p.flCloudType, p.flCloudDarkness );
 	data.vecCloudParams1.Init( p.flCloudBase, p.flCloudThickness, p.flCirrus, m_flCloudTime );
 	// altocumulus sit well above the cumulus tops
-	data.vecCloudParams3.Init( p.flAltocumulus, Max( 4800.0f, p.flCloudBase + p.flCloudThickness + 1200.0f ), 0.0f, 0.0f );
+	// z: meters of cloud space per world unit (1 unit = 1 inch, times the parallax scale)
+	data.vecCloudParams3.Init( p.flAltocumulus, Max( 4800.0f, p.flCloudBase + p.flCloudThickness + 1200.0f ),
+		0.0254f * r_weather_cloud_parallax.GetFloat(), (float)r_weather_cloud_debug.GetInt() );
 
 	const Vector2D vecSlant = GetRainSlant();
 	data.vecWind.Init( m_vecCloudOffset.x, m_vecCloudOffset.y, vecSlant.x, vecSlant.y );

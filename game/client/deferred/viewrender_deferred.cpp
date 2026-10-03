@@ -35,6 +35,8 @@
 #include "weather/weather_render.h"
 #include "weather/c_weather_system.h"
 #include "deferred/deferred_ssao.h"
+#include "detailobjectsystem.h"
+#include "c_func_reflective_glass.h"
 
 #include "vgui_int.h"
 #include "vgui/IPanel.h"
@@ -47,7 +49,7 @@
 
 extern ConVar r_drawopaquerenderables;
 extern ConVar r_entityclips;
-extern ConVar r_ForceWaterLeaf;
+// r_ForceWaterLeaf is static in viewrender.cpp
 extern ConVar mat_viewportupscale;
 extern ConVar mat_viewportscale;
 extern ConVar mat_motion_blur_enabled;
@@ -94,6 +96,17 @@ static void DrawSkyLUTPass( IMaterial *pMat, ITexture *pLut )
 // Now each LUT is only rebuilt when something it depends on changed:
 //   transmittance / multi-scattering -> air turbidity (weather haze)
 //   sky-view                         -> sun direction, light color, haze
+static bool s_bForceSkyAtmoLUT = false;
+CON_COMMAND( r_deferred_skyatmo_lut_rebuild, "Rebuild all atmosphere LUTs" )
+{
+	s_bForceSkyAtmoLUT = true;
+}
+
+// the global light as committed to the shaders this frame (after the temporal smoothing,
+// before a lightning flash): what the LUT shaders will actually see
+static lightData_Global_t s_skyLightState;
+static bool s_bSkyLightStateValid = false;
+
 static void UpdateSkyAtmoLUT()
 {
 	if ( !r_deferred_skyatmo_lut.GetBool() )
@@ -101,7 +114,10 @@ static void UpdateSkyAtmoLUT()
 	if ( !GetGlobalLight() )
 		return;
 
-	const lightData_Global_t &state = GetActiveGlobalLightState();
+	// NOT the raw state: the shaders get the smoothed light (r_deferred_light_global_smooth_tau),
+	// so after a time of day jump the raw direction was already at noon while the LUT was
+	// built for a sun that had barely started to move - and never rebuilt again
+	const lightData_Global_t &state = s_bSkyLightStateValid ? s_skyLightState : GetActiveGlobalLightState();
 	const Vector curSunDir( state.vecLight.x, state.vecLight.y, state.vecLight.z );
 	C_WeatherSystem *pWeather = GetWeatherSystem();
 	// the LUT is built for WeatherRender_GetSkyLightIlluminance() when the weather is active
@@ -115,27 +131,56 @@ static void UpdateSkyAtmoLUT()
 	static Vector s_prevDiff( 0, 0, 0 );
 	static float s_flPrevHaze = -1.0f;
 	static float s_flLastSkyView = -1000.0f;
+	// The LUT shaders read the light/weather data committed to the shader DLL, which lags
+	// this client-side state by a frame. A single rebuild right when the state changed
+	// would bake the old sky - and with the time of day stopped (a jump with the F1 slider
+	// or sv_timecycle_set_time) nothing would trigger another one: the sky stayed at dusk
+	// under the noon sun. So every change is followed by a few more rebuilds.
+	static int s_iFollowUp = 0;
+	static int s_iFollowUpTransmittance = 0;
+
+	if ( s_bForceSkyAtmoLUT )
+	{
+		s_bForceSkyAtmoLUT = false;
+		s_bInitialized = false;
+	}
 
 	const bool bHazeChanged = fabsf( flHaze - s_flPrevHaze ) > 0.01f;
-	const bool bTransmittance = !s_bInitialized || bHazeChanged;
+	const bool bTransmittance = !s_bInitialized || bHazeChanged || s_iFollowUpTransmittance > 0;
 
 	const float flDiffDelta = ( curDiff - s_prevDiff ).Length();
-	const bool bSkyView = bTransmittance
+	const bool bChanged = bTransmittance
 		|| DotProduct( curSunDir, s_prevSunDir ) < 0.9999996f	// ~0.05 degrees
 		|| flDiffDelta > 0.004f * Max( 0.05f, s_prevDiff.Length() );
 
-	if ( !bSkyView )
+	if ( !bChanged && s_iFollowUp <= 0 )
 		return;
 
 	const float flInterval = r_deferred_skyatmo_skyview_lut_update_interval.GetFloat();
-	if ( !bTransmittance && flInterval > 0.0f && gpGlobals->realtime - s_flLastSkyView < flInterval )
+	if ( bChanged && !bTransmittance && flInterval > 0.0f && gpGlobals->realtime - s_flLastSkyView < flInterval )
 		return;
+
+	if ( bChanged )
+	{
+		s_iFollowUp = 3;
+		if ( !s_bInitialized || bHazeChanged )
+			s_iFollowUpTransmittance = 3;
+	}
+	s_iFollowUp--;
+	if ( s_iFollowUpTransmittance > 0 )
+		s_iFollowUpTransmittance--;
 
 	s_bInitialized = true;
 	s_prevSunDir = curSunDir;
 	s_prevDiff = curDiff;
 	s_flPrevHaze = flHaze;
 	s_flLastSkyView = gpGlobals->realtime;
+
+	static ConVarRef cl_weather_debug( "cl_weather_debug" );
+	if ( cl_weather_debug.IsValid() && cl_weather_debug.GetBool() )
+		Msg( "[skylut] frame %d: sky-view%s (sun %.3f %.3f %.3f, light %.3f, haze %.2f, follow-up %d)\n",
+			gpGlobals->framecount, bTransmittance ? " + transmittance" : "", curSunDir.x, curSunDir.y, curSunDir.z,
+			curDiff.x, flHaze, s_iFollowUp );
 
 	if ( bTransmittance )
 	{
@@ -415,7 +460,7 @@ class CBaseWorldViewDeferred : public CRendering3dView
 {
 	DECLARE_CLASS( CBaseWorldViewDeferred, CRendering3dView );
 protected:
-	CBaseWorldViewDeferred(CViewRender *pMainView) : CRendering3dView( pMainView ) {}
+	CBaseWorldViewDeferred(CViewRender *pMainView) : CRendering3dView( pMainView ), m_bRenderablesListBuilt( false ) {}
 
 	virtual bool	AdjustView( float waterHeight );
 
@@ -434,10 +479,24 @@ protected:
 	// HL2RPM: called after the opaque scene, before translucents
 	virtual void	OnPostOpaque() {}
 
+	// HL2RPM: the main G-buffer view also draws the opaque parts of translucent models and
+	// the detail sprites (grass) into the G-buffer
+	virtual bool	IsMainGBufferView() const { return false; }
+	void			DrawTranslucentModelsOpaquePartsToGBuffer();
+	void			DrawDetailSpritesToGBuffer();
+
+	// HL2RPM: shadow views skip casters whose angular size from the camera is below this
+	// (their shadow would be a couple of pixels) - 0 = keep everything
+	virtual float	GetShadowCasterCullRatio() { return 0.0f; }
+	void			CullSmallShadowCasters();
+
 protected:
 
 	static void PushComposite();
 	static void PopComposite();
+
+	// HL2RPM: DrawSetup built this view's renderables list (it does only with entities)
+	bool m_bRenderablesListBuilt;
 };
 
 //-----------------------------------------------------------------------------
@@ -461,6 +520,33 @@ private:
 	VisibleFogVolumeInfo_t m_fogInfo;
 };
 
+//-----------------------------------------------------------------------------
+// HL2RPM: func_reflective_glass (mirrors, windows) - the reflection / refraction views were
+// never ported to the deferred renderer ("#if 0 // TODO"): the glass showed its render
+// targets as they were (black). Drawn like the water views: composite only, a reflection
+// looks its lighting up in the main view's light buffer (REFLECTVIEW, approximate light
+// where the main view doesn't see the point).
+//-----------------------------------------------------------------------------
+class CGlassViewDeferred : public CBaseWorldViewDeferred
+{
+	DECLARE_CLASS( CGlassViewDeferred, CBaseWorldViewDeferred );
+public:
+	CGlassViewDeferred( CViewRender *pMainView, bool bReflection ) :
+		CBaseWorldViewDeferred( pMainView ), m_pRenderTarget( NULL ), m_bReflection( bReflection ) {}
+
+	void			Setup( const CViewSetup &view, bool bDrawSkybox, const cplane_t &plane, ITexture *pRenderTarget );
+	void			Draw();
+
+	virtual bool	AdjustView( float waterHeight );
+	virtual void	PushView( float waterHeight );
+	virtual void	PopView();
+
+private:
+	cplane_t		m_Plane;
+	ITexture		*m_pRenderTarget;
+	bool			m_bReflection;
+};
+
 class CGBufferView : public CBaseWorldViewDeferred
 {
 	DECLARE_CLASS( CGBufferView, CBaseWorldViewDeferred );
@@ -477,6 +563,8 @@ public:
 
 	static void PushGBuffer( bool bInitial, float zScale = 1.0f, bool bClearDepth = true );
 	static void PopGBuffer();
+
+	virtual bool	IsMainGBufferView() const { return true; }
 
 private:
 	VisibleFogVolumeInfo_t m_fogInfo;
@@ -653,6 +741,9 @@ void CRainOcclusionView::CommitData()
 
 	CMatRenderContextPtr pRenderContext( materials );
 	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_SHADOW_INDEX, DEFERRED_SHADOW_INDEX_RAIN );
+	// ortho maps take their slope bias from the rasterizer (see COrthoShadowView::CommitData)
+	const float flTexelDepth = ( m_flSize / (float)Max( width, 1 ) ) / RAINMAP_ZFAR;
+	pRenderContext->SetShadowDepthBiasFactors( 2.0f, flTexelDepth * 0.5f );
 }
 
 class COrthoShadowView : public CBaseShadowView
@@ -672,9 +763,54 @@ public:
 		return DEFERRED_SHADOW_MODE_ORTHO;
 	};
 
+	// the first cascade keeps everything (contact shadows up close)
+	virtual float	GetShadowCasterCullRatio();
+
 private:
 	int iCascadeIndex;
 };
+
+// HL2RPM: small - the receivers get theirs (moved along the geometric normal, see
+// lightingpass_global_ps30). The old 3x pushed the casters' steep faces back so far that the
+// floor at the foot of a wall was in front of the wall: a lit gap along the base of walls.
+static ConVar r_csm_slope_bias( "r_csm_slope_bias", "0.5", 0, "Slope-scaled depth bias of the sun shadow cascades (rasterizer)" );
+// HL2RPM dev: moves the cascade fits by a random offset every frame (units) with the camera
+// still - with texel snapping the shadows must not change at all; anything that does flickers
+// when the player walks
+static ConVar r_csm_debug_log( "r_csm_debug_log", "0", 0, "Dev: print every sun cascade fit (frame, cascade, fov, radius, texel, snapped origin, light)" );
+// (0 by default: with the camera at the center the culling of the casters ignored the negative near
+// plane - whatever stood toward the sun from the cascade's center was dropped, and parts of the
+// shadows of things over the player (the floating boxes of test_deferred) came and went with a
+// step or a turn of the camera)
+static ConVar r_csm_center_origin( "r_csm_center_origin", "0", 0, "Sun cascades: the light camera at the cascade's center with a negative near plane (0 = 12000 units toward the sun)" );
+static ConVar r_csm_debug_jitter( "r_csm_debug_jitter", "0", FCVAR_CHEAT, "Dev: random offset of the sun cascade fits every frame (units), to test their stability" );
+static ConVar r_csm_const_bias( "r_csm_const_bias", "0.5", 0, "Constant depth bias of the sun shadow cascades (rasterizer), in shadow map texels" );
+// HL2RPM: the spot / point light maps don't write the depth from the shader any more either
+// (shadowpass_ps30): the old "d + ( fwidth( d ) + 1e-6 ) * 3" bias is the rasterizer's now
+static ConVar r_deferred_shadow_proj_slope_bias( "r_deferred_shadow_proj_slope_bias", "4.0", 0, "Slope-scaled depth bias of the spot / point light shadow maps (rasterizer)" );
+static ConVar r_deferred_shadow_proj_depth_bias( "r_deferred_shadow_proj_depth_bias", "0.000003", 0, "Constant depth bias of the spot / point light shadow maps (rasterizer)" );
+
+static void SetProjectedShadowDepthBias()
+{
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->SetShadowDepthBiasFactors( r_deferred_shadow_proj_slope_bias.GetFloat(),
+		r_deferred_shadow_proj_depth_bias.GetFloat() );
+}
+// HL2RPM: the old order (the weather constants carry the matrix of the previous rain map
+// render): for A/B of the one-frame flash it gave while walking
+static ConVar r_deferred_rainmap_debug_late( "r_deferred_rainmap_debug_late", "0", FCVAR_CHEAT,
+	"Debug: render the rain occlusion map after the weather constants of the frame (old, wrong order)" );
+static ConVar r_csm_novis( "r_csm_novis", "1", 0, "Sun shadow cascades draw casters from every leaf (0 = only the PVS of the camera: shadows of what's outside it pop in and out)" );
+
+// HL2RPM: open maps with thousands of props rendered them into every sun cascade;
+// a prop far away that covers a few pixels casts a shadow of a few pixels
+static ConVar r_csm_caster_cull( "r_csm_caster_cull", "0.006", FCVAR_ARCHIVE,
+	"Distant sun shadow cascades skip props smaller than this fraction of their distance to the camera (0 = off)", true, 0.0f, true, 0.05f );
+
+float COrthoShadowView::GetShadowCasterCullRatio()
+{
+	return ( iCascadeIndex > 0 ) ? r_csm_caster_cull.GetFloat() : 0.0f;
+}
 
 class CDualParaboloidShadowView : public CBaseShadowView
 {
@@ -815,6 +951,12 @@ public:
 	void Setup(  const CViewSetup &view, bool bDrawSkybox, const VisibleFogVolumeInfo_t &fogInfo, const WaterRenderInfo_t& waterInfo );
 	void			Draw();
 
+	// HL2RPM: wet surfaces + weather fog on the lit opaque scene, as CSimpleWorldViewDeferred.
+	// With water in sight the main view is drawn by this class, which had none: the wet
+	// look and the height fog vanished whenever water came into view. (Only this view's own
+	// pass - the reflection/refraction views below keep the empty one.)
+	virtual void	OnPostOpaque() { WeatherRender_PostOpaque( *this ); }
+
 	class CReflectionView : public CBaseWorldViewDeferred
 	{
 		DECLARE_CLASS( CReflectionView, CBaseWorldViewDeferred );
@@ -933,6 +1075,13 @@ bool CBaseWorldViewDeferred::AdjustView( float waterHeight )
 	return false;
 }
 
+// HL2RPM: shadow views build their world lists as shadow depth lists. A normal list drops
+// the faces turned away from the view (the side of each BSP node plane the view is on),
+// so a wall whose sunlit side is nodraw - vbsp keeps no face there - cast only the thin
+// shadow of its edges. Together with the shadow pass drawing both sides (defpass_shadow)
+// every face casts.
+static ConVar r_deferred_shadow_worldlists( "r_deferred_shadow_worldlists", "1", 0, "Shadow views keep world faces turned away from the light (single-sided walls with nodraw backs cast shadows)" );
+
 void CBaseWorldViewDeferred::DrawSetup( float waterHeight, int nSetupFlags, float waterZAdjust, int iForceViewLeaf,
 	bool bShadowDepth )
 {
@@ -950,14 +1099,18 @@ void CBaseWorldViewDeferred::DrawSetup( float waterHeight, int nSetupFlags, floa
 
 	const bool bDrawEntities = ( nSetupFlags & DF_DRAW_ENTITITES ) != 0;
 	const bool bDrawReflection = ( nSetupFlags & DF_RENDER_REFLECTION ) != 0;
-	BuildWorldRenderLists( bDrawEntities, iForceViewLeaf, ShouldCacheLists(), false, bDrawReflection ? &waterHeight : NULL );
+	BuildWorldRenderLists( bDrawEntities, iForceViewLeaf, ShouldCacheLists(), bShadowDepth && r_deferred_shadow_worldlists.GetBool(), bDrawReflection ? &waterHeight : NULL );
 
 	PruneWorldListInfo();
 
+	m_bRenderablesListBuilt = bDrawEntities;
 	if ( bDrawEntities )
 	{
 		const bool bOptimized = bShadowDepth;
 		BuildRenderableRenderLists( bOptimized ? VIEW_SHADOW_DEPTH_TEXTURE : savedViewID );
+
+		if ( bShadowDepth )
+			CullSmallShadowCasters();
 	}
 
 	if ( bViewChanged )
@@ -966,6 +1119,36 @@ void CBaseWorldViewDeferred::DrawSetup( float waterHeight, int nSetupFlags, floa
 	}
 
 	SetupCurrentView( savedOrigin, savedAngles, savedViewID );
+}
+
+void CBaseWorldViewDeferred::CullSmallShadowCasters()
+{
+	const float flRatio = GetShadowCasterCullRatio();
+	if ( flRatio <= 0.0f || !m_pRenderablesList )
+		return;
+
+	const Vector &vecCamera = MainViewOrigin();
+	for ( int g = RENDER_GROUP_OPAQUE_STATIC_HUGE; g <= RENDER_GROUP_OPAQUE_ENTITY; g++ )
+	{
+		CClientRenderablesList::CEntry *pEntries = m_pRenderablesList->m_RenderGroups[g];
+		const int nCount = m_pRenderablesList->m_RenderGroupCounts[g];
+		int nKept = 0;
+		for ( int i = 0; i < nCount; i++ )
+		{
+			IClientRenderable *pRenderable = pEntries[i].m_pRenderable;
+			if ( pRenderable )
+			{
+				Vector vecMins, vecMaxs;
+				pRenderable->GetRenderBounds( vecMins, vecMaxs );
+				const float flRadius = ( vecMaxs - vecMins ).Length() * 0.5f;
+				const Vector vecCenter = pRenderable->GetRenderOrigin() + ( vecMins + vecMaxs ) * 0.5f;
+				if ( flRadius < vecCenter.DistTo( vecCamera ) * flRatio )
+					continue;
+			}
+			pEntries[nKept++] = pEntries[i];
+		}
+		m_pRenderablesList->m_RenderGroupCounts[g] = nKept;
+	}
 }
 
 void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, float waterZAdjust, bool bShadowDepth )
@@ -1015,8 +1198,17 @@ void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, f
 	if ( bShadowDepth && iOldDrawDecals >= 0 )
 		r_drawdecals.SetValue( iOldDrawDecals );
 
-	//if ( m_DrawFlags & DF_DRAW_ENTITITES )
-	DrawOpaqueRenderablesDeferred( false );
+	// HL2RPM: only with a renderables list of this view's own. A view drawn without entities
+	// (the reflection of a water without $reflectentities) builds none and read whatever the
+	// pointer held - freed memory: a crash in DrawOpaqueRenderables_DrawBrushModels
+	if ( m_bRenderablesListBuilt && m_pRenderablesList )
+		DrawOpaqueRenderablesDeferred( false );
+
+	if ( IsMainGBufferView() )
+	{
+		DrawTranslucentModelsOpaquePartsToGBuffer();
+		DrawDetailSpritesToGBuffer();
+	}
 
 	if ( !bShadowDepth )
 		OnPostOpaque();
@@ -1157,8 +1349,99 @@ void CBaseWorldViewDeferred::DrawWorldDeferred( float waterZAdjust )
 	DrawWorld( waterZAdjust );
 }
 
+// HL2RPM dev: what the renderables lists of the views hold (two-pass models by name)
+static ConVar r_deferred_debug_lists( "r_deferred_debug_lists", "0", 0, "Dev: print the renderables lists of the deferred views once a second" );
+static void DebugPrintRenderablesList( CClientRenderablesList *pList, const char *pszView )
+{
+	static float s_flNext = 0.0f;
+	static int s_nPrinted = 0;
+	if ( gpGlobals->realtime >= s_flNext )
+	{
+		s_flNext = gpGlobals->realtime + 1.0f;
+		s_nPrinted = 0;
+	}
+	if ( s_nPrinted++ > 8 )
+		return;
+	Msg( "[lists] %s:", pszView );
+	for ( int g = 0; g < RENDER_GROUP_COUNT; g++ )
+		Msg( " %d", pList->m_RenderGroupCounts[g] );
+	Msg( "\n" );
+	for ( int g = 0; g < RENDER_GROUP_COUNT; g++ )
+	{
+		for ( int i = 0; i < pList->m_RenderGroupCounts[g]; i++ )
+		{
+			const CClientRenderablesList::CEntry &e = pList->m_RenderGroups[g][i];
+			if ( !e.m_pRenderable || !e.m_pRenderable->GetModel() )
+				continue;
+			const char *pszModel = modelinfo->GetModelName( e.m_pRenderable->GetModel() );
+			if ( e.m_TwoPass || ( pszModel && V_stristr( pszModel, "fullscale" ) ) )
+				Msg( "[lists]   group %d twopass %d %s\n", g, e.m_TwoPass ? 1 : 0, pszModel ? pszModel : "?" );
+		}
+	}
+}
+
+// HL2RPM: a model with one translucent material among opaque ones is a translucent renderable;
+// only when the engine flags it two-pass (not always: the full scale row houses of demo_map
+// with their translucent antenna aren't) is it drawn in the opaque pass as well. Otherwise it was
+// drawn only with the translucents, after the lighting: its opaque facade never got into the
+// G-buffer and its composite read the light of whatever was behind it - the 3D skybox city: the
+// shapes of the skybox buildings showed "through" the houses of the map. Their opaque parts are
+// drawn into the G-buffer here (STUDIO_TWOPASS without STUDIO_TRANSPARENCY = opaque meshes only);
+// the translucent pass draws them as before and now reads their own light.
+static ConVar r_deferred_gbuffer_translucent_models( "r_deferred_gbuffer_translucent_models", "1", 0,
+	"Draw the opaque parts of translucent (not two-pass) models into the G-buffer" );
+void CBaseWorldViewDeferred::DrawTranslucentModelsOpaquePartsToGBuffer()
+{
+	if ( !m_pRenderablesList || !( m_DrawFlags & DF_DRAW_ENTITITES ) || !r_deferred_gbuffer_translucent_models.GetBool() )
+		return;
+
+	CClientRenderablesList::CEntry *pEntities = m_pRenderablesList->m_RenderGroups[ RENDER_GROUP_TRANSLUCENT_ENTITY ];
+	const int nEntities = m_pRenderablesList->m_RenderGroupCounts[ RENDER_GROUP_TRANSLUCENT_ENTITY ];
+	for ( int i = 0; i < nEntities; i++ )
+	{
+		IClientRenderable *pRenderable = pEntities[i].m_pRenderable;
+		// (two-pass ones are in the opaque list already)
+		if ( !pRenderable || pEntities[i].m_TwoPass )
+			continue;
+		const model_t *pModel = pRenderable->GetModel();
+		if ( !pModel || modelinfo->GetModelType( pModel ) != mod_studio )
+			continue;
+		// (see-through as a whole: fading, render alpha)
+		if ( pRenderable->GetFxBlend() < 255 )
+			continue;
+
+		float color[3];
+		pRenderable->GetColorModulation( color );
+		render->SetColorModulation( color );
+		render->SetBlend( 1.0f );
+		pRenderable->DrawModel( STUDIO_RENDER | STUDIO_TWOPASS );
+	}
+}
+
+// HL2RPM: the detail sprites (grass tufts) are drawn with the translucents, after the
+// G-buffer: lit by the light buffer of whatever was behind them, or with their stock
+// material by a color baked per sprite - grass in the shade of a wall was as bright as in the
+// sun. With a deferred material (materialsystem_passthru.cpp: alpha-tested DEFERRED_BRUSH)
+// they are drawn into the G-buffer here as well (up normal), and the composite of the
+// translucent pass lights them with their own depth and normal.
+void CBaseWorldViewDeferred::DrawDetailSpritesToGBuffer()
+{
+	static ConVarRef r_DrawDetailProps( "r_DrawDetailProps" );
+	if ( !m_pWorldListInfo || !( m_DrawFlags & DF_DRAW_ENTITITES ) || ( r_DrawDetailProps.IsValid() && !r_DrawDetailProps.GetBool() ) )
+		return;
+
+	IMaterial *pMat = DetailObjectSystem()->GetDetailSpriteMaterial();
+	const char *pszShader = pMat ? pMat->GetShaderName() : NULL;
+	if ( !pszShader || V_strnicmp( pszShader, "DEFERRED_", 9 ) != 0 )
+		return;
+
+	DrawDetailPropsInAllLeaves();
+}
+
 void CBaseWorldViewDeferred::DrawOpaqueRenderablesDeferred(bool k)
 {
+	if ( r_deferred_debug_lists.GetBool() && m_pRenderablesList && CurrentViewID() != VIEW_DEFERRED_SHADOW )
+		DebugPrintRenderablesList( m_pRenderablesList, ( CurrentViewID() == VIEW_MAIN ) ? "main" : "other" );
 	DrawOpaqueRenderables(k ? DEPTH_MODE_SHADOW : DEPTH_MODE_NORMAL);
 }
 
@@ -1260,6 +1543,131 @@ void CSimpleWorldViewDeferred::Draw()
 
 	pRenderContext.GetFrom( materials );
 	pRenderContext->ClearColor4ub( 0, 0, 0, 255 );
+}
+
+//-----------------------------------------------------------------------------
+// HL2RPM: reflective glass (see the class)
+//-----------------------------------------------------------------------------
+void CGlassViewDeferred::Setup( const CViewSetup &view, bool bDrawSkybox, const cplane_t &plane, ITexture *pRenderTarget )
+{
+	BaseClass::Setup( view );
+
+	m_ClearFlags = VIEW_CLEAR_DEPTH | VIEW_CLEAR_COLOR;
+	m_DrawFlags = DF_DRAW_ENTITITES | DF_RENDER_UNDERWATER | DF_RENDER_ABOVEWATER;
+	if ( bDrawSkybox )
+		m_DrawFlags |= DF_DRAWSKYBOX;
+
+	m_Plane = plane;
+	m_pRenderTarget = pRenderTarget;
+}
+
+bool CGlassViewDeferred::AdjustView( float waterHeight )
+{
+	// the aspect ratio of the main view is kept
+	x = y = 0;
+	width = m_pRenderTarget->GetActualWidth();
+	height = m_pRenderTarget->GetActualHeight();
+
+	if ( m_bReflection )
+	{
+		// the camera mirrored in the glass plane
+		const float flDist = DotProduct( origin, m_Plane.normal ) - m_Plane.dist;
+		VectorMA( origin, -2.0f * flDist, m_Plane.normal, origin );
+
+		Vector vecForward, vecUp;
+		AngleVectors( angles, &vecForward, NULL, &vecUp );
+
+		float flDot = DotProduct( vecForward, m_Plane.normal );
+		VectorMA( vecForward, -2.0f * flDot, m_Plane.normal, vecForward );
+
+		flDot = DotProduct( vecUp, m_Plane.normal );
+		VectorMA( vecUp, -2.0f * flDot, m_Plane.normal, vecUp );
+
+		VectorAngles( vecForward, vecUp, angles );
+	}
+	return true;
+}
+
+void CGlassViewDeferred::PushView( float waterHeight )
+{
+	render->Push3DView( *this, m_ClearFlags, m_pRenderTarget, GetFrustum() );
+
+	// a reflection shows what is in front of the glass, a refraction what is behind it
+	Vector4D plane;
+	if ( m_bReflection )
+	{
+		VectorCopy( m_Plane.normal, plane.AsVector3D() );
+		plane.w = m_Plane.dist + 0.1f;
+	}
+	else
+	{
+		VectorMultiply( m_Plane.normal, -1, plane.AsVector3D() );
+		plane.w = -m_Plane.dist + 0.1f;
+	}
+
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->PushCustomClipPlane( plane.Base() );
+}
+
+void CGlassViewDeferred::PopView()
+{
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->PopCustomClipPlane();
+	render->PopView( GetFrustum() );
+}
+
+void CGlassViewDeferred::Draw()
+{
+	VPROF( "CGlassViewDeferred::Draw" );
+
+	const view_id_t nSaveViewID = CurrentViewID();
+	const Vector vecSaveOrigin = CurrentViewOrigin();
+	const QAngle angSaveAngles = CurrentViewAngles();
+	const view_id_t nViewID = m_bReflection ? VIEW_REFLECTION : VIEW_REFRACTION;
+	SetupCurrentView( origin, angles, nViewID );
+
+	// no occlusion visualization in the reflection
+	static ConVarRef r_visocclusion( "r_visocclusion" );
+	const int iVisOcclusion = r_visocclusion.IsValid() ? r_visocclusion.GetInt() : 0;
+	if ( r_visocclusion.IsValid() )
+		r_visocclusion.SetValue( 0 );
+
+	PushComposite();
+	DrawSetup( 0.0f, m_DrawFlags, 0.0f );
+
+	// as the water reflection: the lighting comes from the main view's light buffer, the
+	// screen-space clouds belong to the main view (a refraction sees what the main view
+	// sees behind the glass - the same pixels)
+	const bool bCloudsValid = m_bReflection && WeatherRender_IsCloudTextureValid();
+	if ( bCloudsValid )
+		WeatherRender_SetCloudTextureValid( false );
+	if ( m_bReflection )
+	{
+		const bool bReflectionOn = true;
+		QUEUE_FIRE( CommitReflectionView, bReflectionOn );
+	}
+
+	EnableWorldFog();
+	DrawExecute( 0.0f, nViewID, 0.0f );
+
+	if ( m_bReflection )
+	{
+		const bool bReflectionOff = false;
+		QUEUE_FIRE( CommitReflectionView, bReflectionOff );
+	}
+	if ( bCloudsValid )
+		WeatherRender_SetCloudTextureValid( true );
+
+	PopComposite();
+
+	if ( r_visocclusion.IsValid() )
+		r_visocclusion.SetValue( iVisOcclusion );
+
+	SetupCurrentView( vecSaveOrigin, angSaveAngles, nSaveViewID );
+
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->ClearColor4ub( 0, 0, 0, 255 );
+	pRenderContext->Flush();
 }
 
 void CGBufferView::Setup( const CViewSetup &view, bool bDrewSkybox )
@@ -1790,7 +2198,15 @@ void CBaseShadowView::PushView( float waterHeight )
 	pRenderContext->ClearColor4ub( 255, 255, 255, 255 );
 	pRenderContext->ClearBuffers( true, true );
 #else
-	pRenderContext->ClearBuffers( false, true );
+	// HL2RPM: the sun atlas keeps the caster depth as color (PCSS blocker search):
+	// clear it to "far" like the depth, or empty areas keep stale casters
+	if ( m_pDummyTexture && m_pDummyTexture->GetImageFormat() == IMAGE_FORMAT_R32F )
+	{
+		pRenderContext->ClearColor4ub( 255, 255, 255, 255 );
+		pRenderContext->ClearBuffers( true, true );
+	}
+	else
+		pRenderContext->ClearBuffers( false, true );
 #endif
 
 	if ( m_bOutputRadiosity )
@@ -1872,6 +2288,12 @@ void COrthoShadowView::CalcShadowView()
 	}
 
 	origin = vecViewOrigin + vecViewFwd * flSphereCenter;
+	if ( r_csm_debug_jitter.GetFloat() > 0.0f )
+	{
+		const float flAmp = r_csm_debug_jitter.GetFloat();
+		const int iFrame = gpGlobals->framecount;
+		origin += Vector( sinf( iFrame * 12.9898f ) , cosf( iFrame * 78.233f ), sinf( iFrame * 37.719f ) * 0.5f ) * flAmp;
+	}
 
 	const lightData_Global_t& state = GetActiveGlobalLightState();
 	QAngle lightAng;
@@ -1905,7 +2327,15 @@ void COrthoShadowView::CalcShadowView()
 
 	const float halfOrthoSize = flSphereRadius;
 
-	origin += -viewFwd * m_data.flOriginOffset;
+	// HL2RPM: the light camera sits at the cascade's center, the casters toward the sun are in
+	// front of a negative near plane. It used to be moved 12000 units toward the sun: every
+	// tiny turn of the sun (the time of day) swung the texel grid around that far pivot by about
+	// half a texel per frame, and float math with 12000 unit components made the snapped grid
+	// jitter by ~0.001 unit whenever the cascade moved - with the player. Edges of small
+	// casters (foliage) flipped texels: sparkles over the shadowed ground while walking.
+	const bool bCenter = r_csm_center_origin.GetBool();
+	if ( !bCenter )
+		origin += -viewFwd * m_data.flOriginOffset;
 
 	angles = lightAng;
 
@@ -1920,17 +2350,42 @@ void COrthoShadowView::CalcShadowView()
 	m_OrthoRight = halfOrthoSize;
 	m_OrthoBottom = halfOrthoSize;
 
-	zNear = zNearViewmodel = 0;
-	zFar = zFarViewmodel = m_data.flOriginOffset + flSphereRadius + 1024.0f;
+	if ( bCenter )
+	{
+		zNear = zNearViewmodel = -m_data.flOriginOffset;
+		zFar = zFarViewmodel = flSphereRadius + 1024.0f;
+	}
+	else
+	{
+		zNear = zNearViewmodel = 0;
+		zFar = zFarViewmodel = m_data.flOriginOffset + flSphereRadius + 1024.0f;
+	}
 	m_flAspectRatio = 1.0f;
 
 	// Snap to the shadow texel grid in light space so the shadow doesn't shimmer
 	// when the camera moves (texels always land on the same world positions).
-	float mapping_world = ( 2.0f * halfOrthoSize ) / m_data.iResolution;
-	origin -= fmod( DotProduct( viewRight, origin ), mapping_world ) * viewRight;
-	origin -= fmod( DotProduct( viewUp, origin ), mapping_world ) * viewUp;
+	// HL2RPM: in double precision - the light space coordinates are exact multiples of the texel
+	// (and of the depth step), the same bits every frame the cascade stays within a texel
+	const float mapping_world = ( 2.0f * halfOrthoSize ) / m_data.iResolution;
+	{
+		const double flTexel = mapping_world;
+		const double flDepthStep = GetDepthMapDepthResolution( zFar - zNear );
+		const double ox = origin.x, oy = origin.y, oz = origin.z;
+		double r = (double)viewRight.x * ox + (double)viewRight.y * oy + (double)viewRight.z * oz;
+		double u = (double)viewUp.x * ox + (double)viewUp.y * oy + (double)viewUp.z * oz;
+		double f = (double)viewFwd.x * ox + (double)viewFwd.y * oy + (double)viewFwd.z * oz;
+		r = floor( r / flTexel ) * flTexel;
+		u = floor( u / flTexel ) * flTexel;
+		if ( flDepthStep > 0.0 )
+			f = floor( f / flDepthStep ) * flDepthStep;
+		origin.x = (float)( r * viewRight.x + u * viewUp.x + f * viewFwd.x );
+		origin.y = (float)( r * viewRight.y + u * viewUp.y + f * viewFwd.y );
+		origin.z = (float)( r * viewRight.z + u * viewUp.z + f * viewFwd.z );
+	}
 
-	origin -= fmod( DotProduct( viewFwd, origin ), GetDepthMapDepthResolution( zFar - zNear ) ) * viewFwd;
+	if ( r_csm_debug_log.GetBool() )
+		Msg( "[csm] f%d c%d fov %.3f R %.3f texel %.5f org %.3f %.3f %.3f light %.4f %.4f %.4f\n", gpGlobals->framecount, iCascadeIndex, fov, halfOrthoSize, mapping_world,
+			DotProduct( viewRight, origin ), DotProduct( viewUp, origin ), DotProduct( viewFwd, origin ), viewFwd.x, viewFwd.y, viewFwd.z );
 
 #if CSM_USE_COMPOSITED_TARGET
 	x = m_data.iViewport_x;
@@ -1967,15 +2422,25 @@ void COrthoShadowView::CommitData()
 	// Compute adaptive per-cascade bias parameters from texel size & depth range.
 	// These replace the old hand-tuned flSlopeScaleMin / flSlopeScaleMax / flNormalScaleMax.
 	const float texelWorldSize = ( m_OrthoRight - m_OrthoLeft ) / (float)Max( width, 1 );	// HL2RPM: real fitted size
-	const float oneTexelDepth  = texelWorldSize / zFar;   // one-texel depth in [0,1] range
+	const float oneTexelDepth  = texelWorldSize / Max( zFar - zNear, 1.0f );   // one-texel depth in [0,1] range (the near plane can be negative)
 
 	shadowData.vecSlopeSettings.Init(
 		oneTexelDepth * 0.5f,        // .x = constant depth bias (half texel depth)
 		oneTexelDepth * 3.0f,        // .y = slope bias factor  (3 texels per tan unit)
 		texelWorldSize * 0.5f,       // .z = normal offset (half texel in world units)
-		1.0f / zFar                  // .w = projection depth (used by VS)
+		1.0f / Max( zFar - zNear, 1.0f )	// .w = projection depth (used by VS)
 		);
 	shadowData.vecOrigin.Init( origin, 1.0f );
+
+	// HL2RPM: the caster bias comes from the rasterizer (the shadow pass writes no depth for
+	// the sun cascades, which keeps early-z): a little slope (r_csm_slope_bias) and a part of
+	// a texel (r_csm_const_bias) - at least a step and a half of the depth map (16 bit ones
+	// are that coarse)
+	{
+		const float flDepthStep = GetDepthMapDepthResolution( zFar - zNear ) / Max( zFar - zNear, 1.0f );
+		CMatRenderContextPtr pRenderContext( materials );
+		pRenderContext->SetShadowDepthBiasFactors( r_csm_slope_bias.GetFloat(), Max( oneTexelDepth * r_csm_const_bias.GetFloat(), flDepthStep * 1.5f ) );
+	}
 
 	Vector4D matrix_scale_offset( 0.5f, -0.5f, 0.5f, 0.5f );
 
@@ -2102,6 +2567,8 @@ void CPointLightCubeFaceShadowView::CommitData()
 
 	QUEUE_FIRE( CommitShadowData_Proj, m_iShadowMapIndex, data );
 
+	SetProjectedShadowDepthBias();
+
 	CMatRenderContextPtr pRenderContext( materials );
 	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_SHADOW_INDEX, m_iShadowMapIndex );
 }
@@ -2147,6 +2614,8 @@ void CSpotLightShadowView::CommitData()
 	data.vecSlopeSettings.Init( ( 2.0f * tanHalfFov / res ) * depthDerivScale, tanHalfFov / res, zNear, zFar );
 
 	QUEUE_FIRE( CommitShadowData_Proj, m_iIndex, data );
+
+	SetProjectedShadowDepthBias();
 
 	CMatRenderContextPtr pRenderContext( materials );
 	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_SHADOW_INDEX, m_iIndex );
@@ -2481,9 +2950,124 @@ void CDeferredViewRender::DrawSkyboxComposite( const CViewSetup &view, const boo
 	Assert( nSkyboxVisible == SKYBOX_3DSKYBOX_VISIBLE );
 }
 
+static ConVar r_deferred_water_views( "r_deferred_water_views", "1", FCVAR_ARCHIVE, "Render water reflection/refraction views (0 = water shows its fog color only)" );
+
+// HL2RPM: the screen effect under water came from the water material's $underwateroverlay -
+// most waters have none (on test_deferred only one of the pools had one) - and only from the
+// expensive water path (not with cheap water or r_deferred_water_views 0)
+static ConVar r_deferred_water_all_targets( "r_deferred_water_all_targets", "1", FCVAR_ARCHIVE,
+	"Draw the water reflection and refraction targets whenever a water is in sight, not only when the closest water's material asks for them" );
+// which water targets the expensive waters loaded with the map use (cached until the number
+// of loaded materials changes)
+static void GetMapWaterTargets( bool &bAnyReflect, bool &bAnyRefract )
+{
+	static int s_nMaterialCount = -1;
+	static bool s_bReflect = false, s_bRefract = false;
+	const int nCount = materials->GetNumMaterials();
+	if ( nCount != s_nMaterialCount )
+	{
+		s_nMaterialCount = nCount;
+		s_bReflect = s_bRefract = false;
+		static ConVarRef r_waterforceexpensive( "r_waterforceexpensive" );
+		const bool bForceExpensive = r_waterforceexpensive.IsValid() && r_waterforceexpensive.GetBool();
+		for ( MaterialHandle_t h = materials->FirstMaterial(); h != materials->InvalidMaterial(); h = materials->NextMaterial( h ) )
+		{
+			IMaterial *pMat = materials->GetMaterial( h );
+			if ( !pMat || pMat->IsErrorMaterial() || !pMat->IsPrecached() )
+				continue;
+			const char *pszShader = pMat->GetShaderName();
+			if ( !pszShader || !V_stristr( pszShader, "Water" ) )
+				continue;
+			bool bFound = false;
+			IMaterialVar *pVar = pMat->FindVar( "$forcecheap", &bFound, false );
+			if ( bFound && pVar && pVar->GetIntValue() != 0 )
+				continue;
+			pVar = pMat->FindVar( "$refracttexture", &bFound, false );
+			if ( bFound && pVar && pVar->IsTexture() )
+				s_bRefract = true;
+			pVar = pMat->FindVar( "$reflecttexture", &bFound, false );
+			if ( bFound && pVar && pVar->IsTexture() )
+			{
+				IMaterialVar *pExpensive = pMat->FindVar( "$forceexpensive", &bFound, false );
+				if ( bForceExpensive || ( bFound && pExpensive && pExpensive->GetIntValue() != 0 ) )
+					s_bReflect = true;
+			}
+		}
+	}
+	bAnyReflect = s_bReflect;
+	bAnyRefract = s_bRefract;
+}
+
+static ConVar r_deferred_water_debug( "r_deferred_water_debug", "0", 0, "Dev: print the visible water (fog volume) and how it's drawn, once a second" );
+static ConVar r_deferred_underwater_overlay( "r_deferred_underwater_overlay", "effects/water_warp01", FCVAR_ARCHIVE,
+	"Screen overlay under water when the water material has no $underwateroverlay (empty = none)" );
+
+static void SetUnderwaterOverlay( CViewRender *pMainView, IMaterial *pWaterMaterial )
+{
+	if ( !pMainView || engine->GetDXSupportLevel() < 90 )	// screen overlays underwater are a dx9 feature
+		return;
+
+	const char *pOverlayName = NULL;
+	if ( pWaterMaterial )
+	{
+		IMaterialVar *pScreenOverlayVar = pWaterMaterial->FindVar( "$underwateroverlay", NULL, false );
+		if ( pScreenOverlayVar && pScreenOverlayVar->IsDefined() )
+			pOverlayName = pScreenOverlayVar->GetStringValue();
+	}
+	if ( !pOverlayName || !pOverlayName[0] || pOverlayName[0] == '0' )
+		pOverlayName = r_deferred_underwater_overlay.GetString();
+	if ( !pOverlayName || !pOverlayName[0] || pOverlayName[0] == '0' )
+		return;
+
+	IMaterial *pOverlayMaterial = materials->FindMaterial( pOverlayName, TEXTURE_GROUP_OTHER, false );
+	if ( pOverlayMaterial && !pOverlayMaterial->IsErrorMaterial() )
+		pMainView->SetWaterOverlayMaterial( pOverlayMaterial );
+}
+static ConVar r_deferred_glass_views( "r_deferred_glass_views", "1", FCVAR_ARCHIVE, "Render the reflection/refraction views of func_reflective_glass (mirrors; 0 = black glass)" );
+
+// HL2RPM: the deferred renderer has no working MSAA - the composite reads one lit surface
+// per pixel, whatever mat_antialias says. Thin geometry (the ribs of corrugated metal, roof
+// trims, railings, wires) became dotted lines that crawled while the player walked (turning
+// hides it: the engine's motion blur). FXAA on the final frame instead.
+static ConVar r_deferred_fxaa( "r_deferred_fxaa", "1", FCVAR_ARCHIVE,
+	"Anti-aliasing of the final frame (FXAA) - the deferred renderer has no working MSAA" );
+
+static void DrawDeferredFXAA( const CViewSetup &view )
+{
+	static IMaterial *s_pMatFXAA = NULL;
+	if ( !s_pMatFXAA )
+	{
+		s_pMatFXAA = materials->CreateMaterial( "__hl2rpm_fxaa", new KeyValues( "HL2RPM_FXAA" ) );
+		if ( !s_pMatFXAA )
+			return;
+		s_pMatFXAA->IncrementReferenceCount();
+		s_pMatFXAA->Refresh();
+	}
+	if ( s_pMatFXAA->IsErrorMaterial() )
+		return;
+
+	ITexture *pFrame = materials->FindTexture( "_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET );
+	if ( !pFrame || pFrame->IsError() )
+		return;
+
+	CMatRenderContextPtr pRenderContext( materials );
+	Rect_t rect;
+	rect.x = view.x;
+	rect.y = view.y;
+	rect.width = view.width;
+	rect.height = view.height;
+	pRenderContext->CopyRenderTargetToTextureEx( pFrame, 0, &rect, &rect );
+	pRenderContext->DrawScreenSpaceRectangle( s_pMatFXAA, view.x, view.y, view.width, view.height,
+		view.x, view.y, view.x + view.width - 1, view.y + view.height - 1,
+		pFrame->GetActualWidth(), pFrame->GetActualHeight() );
+}
+
 void CDeferredViewRender::DrawWorldComposite( const CViewSetup &view, int nClearFlags, bool bDrawSkybox )
 {
-#if 0
+	// HL2RPM: the water views were compiled out (#if 0): the reflection and refraction
+	// textures were never drawn and every expensive water was a flat, unlit fog color
+	if ( r_deferred_water_views.GetBool() )
+	{
 	MDLCACHE_CRITICAL_SECTION();
 
 	VisibleFogVolumeInfo_t fogVolumeInfo;
@@ -2493,21 +3077,73 @@ void CDeferredViewRender::DrawWorldComposite( const CViewSetup &view, int nClear
 	WaterRenderInfo_t info;
 	DetermineWaterRenderInfo( fogVolumeInfo, info );
 
+	// HL2RPM: the engine picks one water - the one closest to the eye - and draws the
+	// reflection / refraction targets that *its* material asks for. Different waters in sight
+	// lost theirs as soon as another one was closer: walking away from a reflective pool toward
+	// a refract-only one (test_deferred), or past the $forcecheap part of the demo_map canal,
+	// the targets stopped updating and the other waters' shader looked switched off. Whenever a
+	// water is in sight, draw both (at the height of the picked one).
+	// (only the targets some water of the map can use: demo_map's waters - a refract-only one
+	// and a $forcecheap one - would pay for a reflection view nobody reads)
+	if ( r_deferred_water_all_targets.GetBool() && fogVolumeInfo.m_nVisibleFogVolume != -1 && fogVolumeInfo.m_pFogVolumeMaterial
+		&& info.m_bDrawWaterSurface && engine->GetDXSupportLevel() >= 90 )
+	{
+		bool bAnyReflect, bAnyRefract;
+		GetMapWaterTargets( bAnyReflect, bAnyRefract );
+		info.m_bReflect = info.m_bReflect || bAnyReflect;
+		info.m_bRefract = info.m_bRefract || bAnyRefract;
+		if ( info.m_bRefract )
+			info.m_bOpaqueWater = false;
+		info.m_bCheapWater = !info.m_bReflect && !info.m_bRefract;
+	}
+
+	if ( r_deferred_water_debug.GetBool() )
+	{
+		static float s_flNextPrint = 0.0f;
+		if ( gpGlobals->realtime >= s_flNextPrint )
+		{
+			s_flNextPrint = gpGlobals->realtime + 1.0f;
+			Msg( "[water] eye %.0f %.0f %.0f: fog volume %d (leaf %d) eye in %d, dist %.0f, height %.1f, cheap %d draw %d refract %d reflect %d, %s\n",
+				view.origin.x, view.origin.y, view.origin.z, fogVolumeInfo.m_nVisibleFogVolume, fogVolumeInfo.m_nVisibleFogVolumeLeaf,
+				fogVolumeInfo.m_bEyeInFogVolume ? 1 : 0, fogVolumeInfo.m_flDistanceToWater, fogVolumeInfo.m_flWaterHeight,
+				info.m_bCheapWater ? 1 : 0, info.m_bDrawWaterSurface ? 1 : 0, info.m_bRefract ? 1 : 0, info.m_bReflect ? 1 : 0,
+				fogVolumeInfo.m_pFogVolumeMaterial ? fogVolumeInfo.m_pFogVolumeMaterial->GetName() : "-" );
+		}
+	}
+
 	if ( info.m_bCheapWater )
 	{
-#if 0 // TODO
-		cplane_t glassReflectionPlane;
-		if ( IsReflectiveGlassInView( view, glassReflectionPlane ) )
+		// HL2RPM: mirrors and reflective windows (func_reflective_glass, its own render
+		// targets with Mapbase) - this was "#if 0 // TODO": the glass stayed black
+		if ( r_deferred_glass_views.GetBool() )
 		{
-			CRefPtr<CReflectiveGlassViewDeferred> pGlassReflectionView = new CReflectiveGlassViewDeferred( this );
-			pGlassReflectionView->Setup( view, VIEW_CLEAR_DEPTH | VIEW_CLEAR_COLOR, bDrawSkybox, fogVolumeInfo, info, glassReflectionPlane );
-			AddViewToScene( pGlassReflectionView );
+			cplane_t glassPlane;
+			Frustum_t frustum;
+			GeneratePerspectiveFrustum( view.origin, view.angles, view.zNear, view.zFar, view.fov, view.m_flAspectRatio, frustum );
 
-			CRefPtr<CRefractiveGlassViewDeferred> pGlassRefractionView = new CRefractiveGlassViewDeferred( this );
-			pGlassRefractionView->Setup( view, VIEW_CLEAR_DEPTH | VIEW_CLEAR_COLOR, bDrawSkybox, fogVolumeInfo, info, glassReflectionPlane );
-			AddViewToScene( pGlassRefractionView );
+			ITexture *pTargets[2] = { NULL, NULL };
+			C_BaseEntity *pGlass = NextReflectiveGlass( NULL, view, glassPlane, frustum, pTargets );
+			while ( pGlass != NULL )
+			{
+				if ( pTargets[0] )
+				{
+					CRefPtr<CGlassViewDeferred> pReflectionView = new CGlassViewDeferred( this, true );
+					pReflectionView->Setup( view, bDrawSkybox, glassPlane, pTargets[0] );
+					AddViewToScene( pReflectionView );
+				}
+				if ( pTargets[1] )
+				{
+					CRefPtr<CGlassViewDeferred> pRefractionView = new CGlassViewDeferred( this, false );
+					pRefractionView->Setup( view, bDrawSkybox, glassPlane, pTargets[1] );
+					AddViewToScene( pRefractionView );
+				}
+				pGlass = NextReflectiveGlass( pGlass, view, glassPlane, frustum, pTargets );
+			}
 		}
-#endif // 0
+
+		// (the eye can be under cheap water as well)
+		if ( fogVolumeInfo.m_bEyeInFogVolume )
+			SetUnderwaterOverlay( this, fogVolumeInfo.m_pFogVolumeMaterial );
 
 		CRefPtr<CSimpleWorldViewDeferred> pNoWaterView = new CSimpleWorldViewDeferred( this );
 		pNoWaterView->Setup( view, nClearFlags, bDrawSkybox, fogVolumeInfo, info );
@@ -2516,7 +3152,8 @@ void CDeferredViewRender::DrawWorldComposite( const CViewSetup &view, int nClear
 	}
 
 	// Blat out the visible fog leaf if we're not going to use it
-	if ( !r_ForceWaterLeaf.GetBool() )
+	static ConVarRef r_ForceWaterLeaf( "r_ForceWaterLeaf" );
+	if ( !r_ForceWaterLeaf.IsValid() || !r_ForceWaterLeaf.GetBool() )
 	{
 		fogVolumeInfo.m_nVisibleFogVolumeLeaf = -1;
 	}
@@ -2534,7 +3171,9 @@ void CDeferredViewRender::DrawWorldComposite( const CViewSetup &view, int nClear
 		pUnderWaterView->Setup( view, bDrawSkybox, fogVolumeInfo, info );
 		AddViewToScene( pUnderWaterView );
 	}
-#else
+	return;
+	}
+
 	MDLCACHE_CRITICAL_SECTION();
 	VisibleFogVolumeInfo_t fogVolumeInfo;
 	render->GetVisibleFogVolume( view.origin, &fogVolumeInfo );
@@ -2542,10 +3181,12 @@ void CDeferredViewRender::DrawWorldComposite( const CViewSetup &view, int nClear
 	WaterRenderInfo_t info;
 	DetermineWaterRenderInfo( fogVolumeInfo, info );
 
+	if ( fogVolumeInfo.m_bEyeInFogVolume )
+		SetUnderwaterOverlay( this, fogVolumeInfo.m_pFogVolumeMaterial );
+
 	CRefPtr<CSimpleWorldViewDeferred> pNoWaterView = new CSimpleWorldViewDeferred( this );
 	pNoWaterView->Setup( view, nClearFlags, bDrawSkybox, fogVolumeInfo, info );
 	AddViewToScene( pNoWaterView );
-#endif
 }
 
 void CDeferredViewRender::PerformLighting( const CViewSetup &view )
@@ -2637,24 +3278,38 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 		// HL2RPM: the lightning flash lasts a few frames, it must not go through the smoothing;
 		// the sky and the clouds keep the sun / moon
 		WeatherRender_SetSkyLight( lightDataState );
+		s_skyLightState = lightDataState;
+		s_bSkyLightStateValid = true;
 		if ( GetGlobalLight() && !GetLightingEditor()->IsEditorLightingActive() )
 			GetWeatherSystem()->ApplyLightningFlash( lightDataState, GetGlobalLight()->HasShadow() );
 
 		QUEUE_FIRE( CommitLightData_Global, lightDataState );
 
+		// HL2RPM: top-down depth map that tells where rain can fall. Before the weather
+		// constants of the frame, which carry its matrix: the other way round the frame that
+		// re-rendered the map (every second while walking) read the new map through the
+		// previous matrix - sky light, wet surfaces and rain shifted by the distance walked
+		// for one frame (a flash over everything near walls and roofs, only when moving)
+		if ( !r_deferred_rainmap_debug_late.GetBool() )
+			RenderRainOcclusion( view );
+
 		// HL2RPM: weather constants for this frame (clouds, sky, fog, rain...)
 		WeatherRender_CommitFrame( view, lightDataState );
 
-		// HL2RPM: top-down depth map that tells where rain can fall
-		RenderRainOcclusion( view );
+		if ( r_deferred_rainmap_debug_late.GetBool() )
+			RenderRainOcclusion( view );
 
 		if ( lightDataState.bEnabled )
 		{
 			if ( lightDataState.bShadow )
 			{
 				bDrawDebugShadow = r_deferred_debug_shadow.GetBool();
+				// HL2RPM: casters come from every leaf, culled by each cascade's own box. The PVS
+				// of the camera (and of a point toward the sun) dropped walls and props outside
+				// it: their shadows popped in and out as the camera crossed leaves (the main view
+				// sets up its own vis again before the composite)
 				Vector origins[2] = { view.origin, view.origin + lightDataState.vecLight.AsVector3D() * 1024 };
-				render->ViewSetupVis( false, 2, origins );
+				render->ViewSetupVis( r_csm_novis.GetBool(), 2, origins );
 
 				RenderCascadedShadows( view, bRadiosityEnabled );
 			}
@@ -3138,12 +3793,15 @@ void CDeferredViewRender::RenderRainOcclusion( const CViewSetup &view )
 		pRainView->m_iShadowExcludeEntIndex = pLocal->entindex();
 
 	// Everything inside the map's box must block rain, not only what the PVS of the
-	// camera (far above the map) or of the player contains: brush entities and props
-	// over the player were missing, so the ground under them got wet.
-	const bool bOldForceNoVis = m_bForceNoVis;
-	m_bForceNoVis = true;
+	// camera contains: brush entities and props over the player were missing, so the
+	// ground under them got wet. (Shadow views build their lists from the engine's
+	// current vis - m_bForceNoVis only affects CViewRender::SetupVis, which they don't
+	// call; the main view sets up its own vis again before the composite.)
+	render->ViewSetupVis( true, 1, &view.origin );
 	AddViewToScene( pRainView );
-	m_bForceNoVis = bOldForceNoVis;
+
+	// the sky visibility of the ambient light is filtered from it once per render
+	DeferredSSAO_UpdateSkyVisibility();
 }
 
 void CDeferredViewRender::DrawLightShadowView( const CViewSetup &view, int iDesiredShadowmap, def_light_t *l )
@@ -3428,6 +4086,16 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 
 	GetClientModeNormal()->DoPostScreenSpaceEffects( &worldView );
 
+	if ( r_deferred_water_debug.GetBool() && m_UnderWaterOverlayMaterial.IsValid() )
+	{
+		static float s_flNextOverlayPrint = 0.0f;
+		if ( gpGlobals->realtime >= s_flNextOverlayPrint )
+		{
+			s_flNextOverlayPrint = gpGlobals->realtime + 1.0f;
+			Msg( "[water] underwater overlay %s\n", m_UnderWaterOverlayMaterial->GetName() );
+		}
+	}
+
 	DrawUnderwaterOverlay();
 
 	PixelVisibility_EndScene();
@@ -3468,6 +4136,10 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	#ifdef SHADEREDITOR
 	g_ShaderEditorSystem->CustomPostRender();
 	#endif
+
+	// HL2RPM: anti-aliasing of the final frame (the viewmodel included, the HUD not)
+	if ( r_deferred_fxaa.GetBool() && !building_cubemaps.GetBool() )
+		DrawDeferredFXAA( worldView );
 
 	// And here are the screen-space effects
 
@@ -3757,6 +4429,17 @@ void CDeferredViewRender::ProcessDeferredGlobals( const CViewSetup &view )
 	VMatrix frustumDeltas;
 	frustumDeltas.Identity();
 	frustumDeltas.SetBasisVectors( frustum_cc, frustum_right, frustum_up );
+
+	// HL2RPM: world -> screen texture coords of this (main) view, for the planar
+	// reflection views that look their lighting up in its light buffer
+	{
+		VMatrix matScaleBias;
+		MatrixBuildScale( matScaleBias, 0.5f, -0.5f, 1.0f );
+		matScaleBias[0][3] = matScaleBias[1][3] = 0.5f;
+		VMatrix matWorldToScreenTex;
+		MatrixMultiply( matScaleBias, matViewProj, matWorldToScreenTex );
+		QUEUE_FIRE( CommitMainViewToScreenTex, matWorldToScreenTex );
+	}
 
 #if DEFCFG_BILATERAL_DEPTH_TEST
 	VMatrix matWorldToCameraDepthTex;
@@ -4107,8 +4790,23 @@ void CAboveWaterViewDeferred::CReflectionView::Draw()
 
 	DrawSetup( GetOuter()->m_fogInfo.m_flWaterHeight, m_DrawFlags, 0.0f, GetOuter()->m_fogInfo.m_nVisibleFogVolumeLeaf );
 
+	// HL2RPM: the composite shaders take the lighting from the main view's light buffer;
+	// in a reflection they have to find the reflected point there first (REFLECTVIEW).
+	// The screen-space clouds belong to the main view too: the sky in the reflection
+	// shows the clear atmosphere only.
+	const bool bCloudsValid = WeatherRender_IsCloudTextureValid();
+	if ( bCloudsValid )
+		WeatherRender_SetCloudTextureValid( false );
+	const bool bReflectionOn = true;
+	QUEUE_FIRE( CommitReflectionView, bReflectionOn );
+
 	EnableWorldFog();
 	DrawExecute( GetOuter()->m_fogInfo.m_flWaterHeight, VIEW_REFLECTION, 0.0f );
+
+	const bool bReflectionOff = false;
+	QUEUE_FIRE( CommitReflectionView, bReflectionOff );
+	if ( bCloudsValid )
+		WeatherRender_SetCloudTextureValid( true );
 
 	PopComposite();
 
@@ -4223,19 +4921,7 @@ void CUnderWaterViewDeferred::Setup( const CViewSetup &view, bool bDrawSkybox, c
 	CalcWaterEyeAdjustments( fogInfo, m_waterHeight, m_waterZAdjust, m_bSoftwareUserClipPlane );
 
 	IMaterial *pWaterMaterial = fogInfo.m_pFogVolumeMaterial;
-	if (engine->GetDXSupportLevel() >= 90 )					// screen overlays underwater are a dx9 feature
-	{
-		IMaterialVar *pScreenOverlayVar = pWaterMaterial->FindVar( "$underwateroverlay", NULL, false );
-		if ( pScreenOverlayVar && ( pScreenOverlayVar->IsDefined() ) )
-		{
-			char const *pOverlayName = pScreenOverlayVar->GetStringValue();
-			if ( pOverlayName[0] != '0' )						// fixme!!!
-			{
-				IMaterial *pOverlayMaterial = materials->FindMaterial( pOverlayName,  TEXTURE_GROUP_OTHER );
-				m_pMainView->SetWaterOverlayMaterial( pOverlayMaterial );
-			}
-		}
-	}
+	SetUnderwaterOverlay( m_pMainView, pWaterMaterial );
 	// NOTE: We're not drawing the 2d skybox under water since it's assumed to not be visible.
 
 	// render the world underwater

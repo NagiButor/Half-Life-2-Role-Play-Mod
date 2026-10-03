@@ -123,9 +123,10 @@ struct def_light_t
 		return iLighttype == DEFLIGHTTYPE_SPOT;
 	};
 
+	// HL2RPM: the light's own flag or a shadow lent by the shadow budget for this frame
 	FORCEINLINE bool HasShadow()
 	{
-		return ( iFlags & DEFLIGHT_SHADOW_ENABLED ) != 0;
+		return ( iFlags & DEFLIGHT_SHADOW_ENABLED ) != 0 || bBudgetShadow;
 	};
 	FORCEINLINE bool HasCookie()
 	{
@@ -218,6 +219,11 @@ private:
 
 	float flDistance_ViewOrigin;
 	float flShadowFade;
+
+	// HL2RPM: shadow budget (CLightingManager::UpdateShadowBudget) - the nearest point lights
+	// without shadows get one; iFlags stays as authored (editor, saved lights)
+	bool bBudgetShadow;
+	float flBudgetFade;		// 0 = full budget shadow .. 1 = none (fades in / out)
 
 	float flLastRandomTime;
 	float flLastRandomValue;

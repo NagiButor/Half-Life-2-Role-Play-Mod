@@ -1019,20 +1019,15 @@ CON_COMMAND( r_deferred_light_editor_toggle, "" )
 	CVGUILightEditor::ToggleEditor();
 }
 
-// HL2RPM: opens the F1 editor straight on the "time of day and weather" window
-CON_COMMAND( r_deferred_timecycle_editor, "Open the time of day / weather editor" )
+// HL2RPM: the "time of day and weather" window (same as F1)
+CON_COMMAND( r_deferred_timecycle_editor, "Open the time of day / weather window" )
 {
-	if ( !engine->IsInGame() )
-		return;
-
-	if ( !CVGUILightEditor::IsEditorVisible() )
-		CVGUILightEditor::ToggleEditor();
-
-	VPANEL hEditor = CVGUILightEditor::GetEditorPanel();
-	if ( hEditor )
-		ivgui()->PostMessage( hEditor, new KeyValues( "EditTimecycleWeather" ), NULL );
+	TimeWeatherPanel_Open();
 }
 
+// HL2RPM: F1 opens only the time of day / weather window. The full light editor
+// (VMF light placement, global light parameters) replaces the world's lighting
+// with its own while it is open, so it stays a developer tool: r_deferred_light_editor_toggle.
 static class CLightEditorHelper : public CAutoGameSystemPerFrame
 {
 public:
@@ -1045,15 +1040,17 @@ public:
 	void LevelShutdownPostEntity()
 	{
 		CVGUILightEditor::DestroyEditor();
+		TimeWeatherPanel_Destroy();
 		m_bWasF1Down = false;
 	}
 
 	void Update( float ft )
 	{
-		if ( !engine->IsInGame() || engine->Con_IsVisible() )
+		if ( !engine->IsInGame() )
 		{
 			if ( g_EditorInstance && CVGUILightEditor::IsEditorVisible() )
 				CVGUILightEditor::ToggleEditor();
+			TimeWeatherPanel_Close();
 
 			m_bWasF1Down = false;
 			return;
@@ -1061,8 +1058,23 @@ public:
 
 		const bool bIsF1Down = vgui::input()->IsKeyDown( KEY_F1 );
 
+		// the console and the menus own the keyboard: F1 there isn't ours. The windows stay
+		// as they are - they used to be closed here every frame, so the console commands
+		// r_deferred_light_editor_toggle / r_deferred_timecycle_editor (typed while the
+		// console is open) closed their window again on the very next frame
+		if ( engine->Con_IsVisible() || enginevgui->IsGameUIVisible() )
+		{
+			m_bWasF1Down = bIsF1Down;
+			return;
+		}
+
 		if ( bIsF1Down && !m_bWasF1Down )
-			CVGUILightEditor::ToggleEditor();
+		{
+			if ( CVGUILightEditor::IsEditorVisible() )
+				CVGUILightEditor::ToggleEditor();	// F1 also leaves the developer editor
+			else
+				TimeWeatherPanel_Toggle();
+		}
 
 		m_bWasF1Down = bIsF1Down;
 	}

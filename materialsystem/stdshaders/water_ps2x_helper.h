@@ -25,7 +25,17 @@ struct DrawWater_params_t
 	float fWaterFogEndMinusStart;
 	float3 vEyePos;
 	float3 vWorldPos;
+	float fRefractDepthEncoded;	// HL2RPM: 1 = the refraction alpha is the depth under the surface (deferred)
 };
+
+// HL2RPM: with the deferred renderer the alpha of the refraction view is the depth under the
+// water surface, sqrt( depth / 1024 units ), the same for every water in sight
+// (composite_ps30): turned into this water's fog here. (The stock alpha was the fog of the
+// one water the engine picked - other waters showed its fog.)
+float DecodeRefractFog( float a, DrawWater_params_t i )
+{
+	return ( i.fRefractDepthEncoded > 0.5f ) ? saturate( a * a * 1024.0f / max( i.fWaterFogEndMinusStart, 1.0f ) ) : a;
+}
 
 void DrawWater( in DrawWater_params_t i, 
 #if BASETEXTURE
@@ -64,7 +74,7 @@ void DrawWater( in DrawWater_params_t i,
 	float2 unwarpedRefractTexCoord = i.vReflectXY_vRefractYX.wz * ooW;
 
 #if ABOVEWATER
-	float waterFogDepthValue = tex2D( RefractSampler, unwarpedRefractTexCoord ).a;
+	float waterFogDepthValue = DecodeRefractFog( tex2D( RefractSampler, unwarpedRefractTexCoord ).a, i );
 #else
 	// We don't actually have valid depth values in alpha when we are underwater looking out, so 
 	// just set to farthest value.
@@ -151,7 +161,7 @@ void DrawWater( in DrawWater_params_t i,
 		// Don't mess with this in the underwater case since we don't really have
 		// depth values there.
 		// get the blurred depth value to be used for fog.
-	waterFogDepthValue = vRefractColor.a;
+	waterFogDepthValue = DecodeRefractFog( vRefractColor.a, i );
 #	endif
 #else
 	vReflectColor *= i.vReflectTint;
@@ -160,7 +170,7 @@ void DrawWater( in DrawWater_params_t i,
 #	if ABOVEWATER
 	// Don't mess with this in the underwater case since we don't really have
 	// depth values there.
-	waterFogDepthValue = tex2D( RefractSampler, vRefractTexCoord ).a;
+	waterFogDepthValue = DecodeRefractFog( tex2D( RefractSampler, vRefractTexCoord ).a, i );
 #	endif
 #endif
 

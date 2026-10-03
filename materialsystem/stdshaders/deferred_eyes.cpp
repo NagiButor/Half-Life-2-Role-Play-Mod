@@ -43,7 +43,8 @@ BEGIN_VS_SHADER( DEFERRED_EYES, "Deferred lighting version of SDK_Eyes" )
 	void SetupParmsGBuffer( defParms_gBuffer &p )
 	{
 		p.bModel = true;
-		p.bDepthBias = true;
+		// HL2RPM: no depth bias (see DrawCompositeEyes)
+		p.bDepthBias = false;
 		p.iAlbedo = BASETEXTURE;
 		p.iAlphatestRef = ALPHATESTREFERENCE;
 		p.iPhongExp = PHONG_EXP;
@@ -187,8 +188,11 @@ BEGIN_VS_SHADER( DEFERRED_EYES, "Deferred lighting version of SDK_Eyes" )
 			pShaderShadow->EnableAlphaWrites( true );
 			pShaderShadow->EnableDepthWrites( true );
 
-			// Push eye geometry slightly back to prevent z-fighting with eyelids
-			pShaderShadow->EnablePolyOffset( SHADER_POLYOFFSET_SHADOW_BIAS );
+			// HL2RPM: no SHADER_POLYOFFSET_SHADOW_BIAS here (nor in the G-buffer pass): it is the
+			// *slope-scaled* bias of the shadow maps (2..4 x the depth slope, whatever the last
+			// shadow view set). Where the eyeball curves away from the camera the slope is huge
+			// and its pixels went behind the whole scene - the wall behind the head showed
+			// through a gap under the eyelids. The stock Eyes shader has no offset either.
 
 			DefaultFog();
 

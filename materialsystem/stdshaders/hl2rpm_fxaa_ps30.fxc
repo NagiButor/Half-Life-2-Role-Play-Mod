@@ -1,0 +1,200 @@
+//========= HL2RPM ============================================================//
+//
+// FXAA 3.11 (Timothy Lottes, NVIDIA - public domain algorithm), PC quality,
+// search steps of preset 23. The deferred renderer has no working MSAA (the
+// composite reads one lit surface per pixel): thin geometry - the ribs of
+// corrugated metal, roof trims, railings, wires - turned into dotted lines that
+// crawled while the player walked. Runs on the final frame (after the engine's
+// post processing), luma from the gamma space color.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+sampler sFrame						: register( s0 );	// the frame (bilinear)
+
+const float4 g_vecFxaa0				: register( c0 );	// xy 1 / frame texture size, z subpixel amount, w edge threshold
+const float4 g_vecFxaa1				: register( c1 );	// x edge threshold minimum, y debug (1 = show the edges)
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+};
+
+float FxaaLuma( float3 c )
+{
+	return dot( c, float3( 0.299f, 0.587f, 0.114f ) );
+}
+
+float3 FxaaTap( float2 uv )
+{
+	return tex2Dlod( sFrame, float4( uv, 0, 0 ) ).rgb;
+}
+
+// search steps of FXAA_QUALITY__PRESET 23
+#define FXAA_STEPS 6
+static const float g_flFxaaStep[FXAA_STEPS] = { 1.0f, 1.5f, 2.0f, 2.0f, 2.0f, 8.0f };
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	float2 pos = In.vTexCoord;
+	const float2 rcpFrame = g_vecFxaa0.xy;
+
+	const float3 rgbM = FxaaTap( pos );
+	const float lumaM = FxaaLuma( rgbM );
+	float lumaS = FxaaLuma( FxaaTap( pos + float2( 0, 1 ) * rcpFrame ) );
+	const float lumaE = FxaaLuma( FxaaTap( pos + float2( 1, 0 ) * rcpFrame ) );
+	float lumaN = FxaaLuma( FxaaTap( pos + float2( 0, -1 ) * rcpFrame ) );
+	const float lumaW = FxaaLuma( FxaaTap( pos + float2( -1, 0 ) * rcpFrame ) );
+
+	const float maxSM = max( lumaS, lumaM );
+	const float minSM = min( lumaS, lumaM );
+	const float maxESM = max( lumaE, maxSM );
+	const float minESM = min( lumaE, minSM );
+	const float maxWN = max( lumaN, lumaW );
+	const float minWN = min( lumaN, lumaW );
+	const float rangeMax = max( maxWN, maxESM );
+	const float rangeMin = min( minWN, minESM );
+	const float range = rangeMax - rangeMin;
+
+	// no edge: the pixel as it is
+	[branch]
+	if ( range < max( g_vecFxaa1.x, rangeMax * g_vecFxaa0.w ) )
+		return float4( rgbM, 1 );
+
+	const float lumaNW = FxaaLuma( FxaaTap( pos + float2( -1, -1 ) * rcpFrame ) );
+	const float lumaSE = FxaaLuma( FxaaTap( pos + float2( 1, 1 ) * rcpFrame ) );
+	const float lumaNE = FxaaLuma( FxaaTap( pos + float2( 1, -1 ) * rcpFrame ) );
+	const float lumaSW = FxaaLuma( FxaaTap( pos + float2( -1, 1 ) * rcpFrame ) );
+
+	const float lumaNS = lumaN + lumaS;
+	const float lumaWE = lumaW + lumaE;
+	const float subpixRcpRange = 1.0f / range;
+	const float subpixNSWE = lumaNS + lumaWE;
+	const float edgeHorz1 = ( -2.0f * lumaM ) + lumaNS;
+	const float edgeVert1 = ( -2.0f * lumaM ) + lumaWE;
+
+	const float lumaNESE = lumaNE + lumaSE;
+	const float lumaNWNE = lumaNW + lumaNE;
+	const float edgeHorz2 = ( -2.0f * lumaE ) + lumaNESE;
+	const float edgeVert2 = ( -2.0f * lumaN ) + lumaNWNE;
+
+	const float lumaNWSW = lumaNW + lumaSW;
+	const float lumaSWSE = lumaSW + lumaSE;
+	const float edgeHorz4 = ( abs( edgeHorz1 ) * 2.0f ) + abs( edgeHorz2 );
+	const float edgeVert4 = ( abs( edgeVert1 ) * 2.0f ) + abs( edgeVert2 );
+	const float edgeHorz3 = ( -2.0f * lumaW ) + lumaNWSW;
+	const float edgeVert3 = ( -2.0f * lumaS ) + lumaSWSE;
+	const float edgeHorz = abs( edgeHorz3 ) + edgeHorz4;
+	const float edgeVert = abs( edgeVert3 ) + edgeVert4;
+
+	const float subpixNWSWNESE = lumaNWSW + lumaNESE;
+	float lengthSign = rcpFrame.x;
+	const bool horzSpan = edgeHorz >= edgeVert;
+	const float subpixA = subpixNSWE * 2.0f + subpixNWSWNESE;
+
+	if ( !horzSpan )
+	{
+		lumaN = lumaW;
+		lumaS = lumaE;
+	}
+	else
+	{
+		lengthSign = rcpFrame.y;
+	}
+	const float subpixB = ( subpixA * ( 1.0f / 12.0f ) ) - lumaM;
+
+	const float gradientN = lumaN - lumaM;
+	const float gradientS = lumaS - lumaM;
+	float lumaNN = lumaN + lumaM;
+	const float lumaSS = lumaS + lumaM;
+	const bool pairN = abs( gradientN ) >= abs( gradientS );
+	const float gradient = max( abs( gradientN ), abs( gradientS ) );
+	if ( pairN )
+		lengthSign = -lengthSign;
+	const float subpixC = saturate( abs( subpixB ) * subpixRcpRange );
+
+	// r_deferred_fxaa_debug: the detected edges in red
+	if ( g_vecFxaa1.y > 0.5f )
+		return float4( lerp( rgbM, float3( 1, 0, 0 ), 0.7f ), 1 );
+
+	float2 posB = pos;
+	float2 offNP;
+	offNP.x = ( !horzSpan ) ? 0.0f : rcpFrame.x;
+	offNP.y = ( horzSpan ) ? 0.0f : rcpFrame.y;
+	if ( !horzSpan )
+		posB.x += lengthSign * 0.5f;
+	else
+		posB.y += lengthSign * 0.5f;
+
+	float2 posN = posB - offNP * g_flFxaaStep[0];
+	float2 posP = posB + offNP * g_flFxaaStep[0];
+	const float subpixD = ( ( -2.0f ) * subpixC ) + 3.0f;
+	float lumaEndN = FxaaLuma( FxaaTap( posN ) );
+	const float subpixE = subpixC * subpixC;
+	float lumaEndP = FxaaLuma( FxaaTap( posP ) );
+
+	if ( !pairN )
+		lumaNN = lumaSS;
+	const float gradientScaled = gradient * ( 1.0f / 4.0f );
+	const float lumaMM = lumaM - lumaNN * 0.5f;
+	const float subpixF = subpixD * subpixE;
+	const bool lumaMLTZero = lumaMM < 0.0f;
+
+	lumaEndN -= lumaNN * 0.5f;
+	lumaEndP -= lumaNN * 0.5f;
+	bool doneN = abs( lumaEndN ) >= gradientScaled;
+	bool doneP = abs( lumaEndP ) >= gradientScaled;
+	if ( !doneN )
+		posN -= offNP * g_flFxaaStep[1];
+	if ( !doneP )
+		posP += offNP * g_flFxaaStep[1];
+
+	// walk along the edge until both of its ends are found
+	[loop]
+	for ( int i = 2; i < FXAA_STEPS; i++ )
+	{
+		if ( doneN && doneP )
+			break;
+		if ( !doneN )
+			lumaEndN = FxaaLuma( FxaaTap( posN ) ) - lumaNN * 0.5f;
+		if ( !doneP )
+			lumaEndP = FxaaLuma( FxaaTap( posP ) ) - lumaNN * 0.5f;
+		doneN = abs( lumaEndN ) >= gradientScaled;
+		doneP = abs( lumaEndP ) >= gradientScaled;
+		if ( !doneN )
+			posN -= offNP * g_flFxaaStep[i];
+		if ( !doneP )
+			posP += offNP * g_flFxaaStep[i];
+	}
+
+	float dstN = pos.x - posN.x;
+	float dstP = posP.x - pos.x;
+	if ( !horzSpan )
+	{
+		dstN = pos.y - posN.y;
+		dstP = posP.y - pos.y;
+	}
+
+	const bool goodSpanN = ( lumaEndN < 0.0f ) != lumaMLTZero;
+	const float spanLength = ( dstP + dstN );
+	const bool goodSpanP = ( lumaEndP < 0.0f ) != lumaMLTZero;
+	const float spanLengthRcp = 1.0f / spanLength;
+
+	const bool directionN = dstN < dstP;
+	const float dst = min( dstN, dstP );
+	const bool goodSpan = directionN ? goodSpanN : goodSpanP;
+	const float subpixG = subpixF * subpixF;
+	const float pixelOffset = ( dst * ( -spanLengthRcp ) ) + 0.5f;
+	const float subpixH = subpixG * g_vecFxaa0.z;
+
+	const float pixelOffsetGood = goodSpan ? pixelOffset : 0.0f;
+	const float pixelOffsetSubpix = max( pixelOffsetGood, subpixH );
+	if ( !horzSpan )
+		pos.x += pixelOffsetSubpix * lengthSign;
+	else
+		pos.y += pixelOffsetSubpix * lengthSign;
+
+	return float4( FxaaTap( pos ), 1 );
+}

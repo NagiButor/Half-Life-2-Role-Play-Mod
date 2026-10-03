@@ -22,6 +22,7 @@
 // STATIC:		"PARALLAXCORRECT"			"0..1"
 
 // DYNAMIC:		"PIXELFOGTYPE"		"0..1"
+// DYNAMIC:		"REFLECTVIEW"		"0..1"
 
 // SKIP:		$ALPHATEST && $TRANSLUCENT
 // SKIP:		!$ENVMAP && $ENVMAPFRESNEL
@@ -66,6 +67,19 @@ sampler sNormals						: register( s1 );
 #endif
 
 sampler sLightAccum						: register( s2 );
+
+// HL2RPM: the G-buffer depth and how it was written (WriteDepth: forward, scale; w 0 = the
+// MSAA light lookup is off)
+const float4 g_vecMainFwd				: register( c21 );	// xyz view forward, w G-buffer depth scale
+sampler sMainDepth						: register( s11 );
+
+#if REFLECTVIEW
+// HL2RPM: a planar reflection (water, glass) is drawn with the main view's light buffer
+// bound: find the reflected point in the main view and take its lighting from there
+const float4 g_vecMainToScreen[4]		: register( c16 );	// world -> main view screen texcoords (rows)
+const float4 g_vecMainEye				: register( c20 );	// xyz main view origin
+const float4 g_vecFallbackLight			: register( c22 );	// lighting of points the main view doesn't see
+#endif
 
 const float2 g_vecFullScreenTexel		: register( c1 );
 const float4 g_vecFogParams				: register( c2 );
@@ -226,10 +240,64 @@ PS_OUTPUT main( const PS_INPUT In )
 	//float2 screenPos = GetLightAccumUVs( In.vProjPosXYW, g_vecHalfScreenTexel );
 	float2 screenPos = ( In.vScreenPos + 0.5f ) * g_vecFullScreenTexel;
 
-	float4 flLighting = ReadLighting( tex2D( sLightAccum, screenPos ) );
+#if REFLECTVIEW
+	float4 mainPos = float4( In.vWorldPos, 1.0f );
+	float4 mainTex = float4( dot( g_vecMainToScreen[0], mainPos ), dot( g_vecMainToScreen[1], mainPos ),
+		0.0f, dot( g_vecMainToScreen[3], mainPos ) );
+	float2 mainUV = mainTex.xy / max( mainTex.w, 0.001f );
+	float mainZ = dot( In.vWorldPos - g_vecMainEye.xyz, g_vecMainFwd.xyz );
+	float gbufZ = tex2D( sMainDepth, mainUV ).x / max( g_vecMainFwd.w, 1e-6f );
+	float2 edge = saturate( mainUV ) - mainUV;
+	float flVisible = ( mainTex.w > 0.0f && dot( edge, edge ) == 0.0f
+		&& abs( gbufZ - mainZ ) < max( 8.0f, mainZ * 0.02f ) ) ? 1.0f : 0.0f;
+	float4 flLighting = lerp( g_vecFallbackLight, ReadLighting( tex2D( sLightAccum, mainUV ) ), flVisible );
+	screenPos = mainUV;
+#else
+#if !TRANSLUCENT
+	// HL2RPM: with MSAA the pixel shader runs once per pixel for every triangle covering it,
+	// but the light buffer holds one surface per pixel - the one at the pixel's center. The
+	// fragments of the other triangles (thin ribs of corrugated metal, railings, wires, the
+	// silhouette of everything) took the light of whatever was behind or next to them: lit
+	// and shadowed stripes crawled along every edge while walking. The light of the
+	// neighbouring pixel whose G-buffer depth matches this fragment instead.
+	[branch]
+	if ( g_vecMainFwd.w > 0.0f )
+	{
+		const float fragZ = dot( g_vecMainFwd.xyz, In.vWorldPos - g_vecOrigin ) * g_vecMainFwd.w;
+		float best = abs( tex2Dlod( sMainDepth, float4( screenPos, 0, 0 ) ).x - fragZ );
+		[branch]
+		if ( best > max( g_vecMainFwd.w, fragZ * 0.004f ) )
+		{
+			const float2 vecOffsets[8] =
+			{
+				float2( -1, 0 ), float2( 1, 0 ), float2( 0, -1 ), float2( 0, 1 ),
+				float2( -1, -1 ), float2( 1, -1 ), float2( -1, 1 ), float2( 1, 1 ),
+			};
+			float2 bestUV = screenPos;
+			[unroll]
+			for ( int k = 0; k < 8; k++ )
+			{
+				const float2 uvN = screenPos + vecOffsets[k] * g_vecFullScreenTexel;
+				const float dN = abs( tex2Dlod( sMainDepth, float4( uvN, 0, 0 ) ).x - fragZ );
+				if ( dN < best )
+				{
+					best = dN;
+					bestUV = uvN;
+				}
+			}
+			screenPos = bestUV;
+		}
+	}
+#endif
+	// (explicit LOD: the coordinates may come from the branch above; the targets have no mips)
+	float4 flLighting = ReadLighting( tex2Dlod( sLightAccum, float4( screenPos, 0, 0 ) ) );
+#endif
 
 #if READNORMAL
-	float3 worldNormal = tex2D( sNormals, screenPos ).xyz * 2.0f - 1.0f;
+	float3 worldNormal = tex2Dlod( sNormals, float4( screenPos, 0, 0 ) ).xyz * 2.0f - 1.0f;
+#if REFLECTVIEW
+	worldNormal = lerp( float3( 0, 0, 1 ), worldNormal, flVisible );
+#endif
 #endif
 
 
@@ -338,7 +406,25 @@ PS_OUTPUT main( const PS_INPUT In )
 #if PIXELFOGTYPE == 0
 	float fogAmt = CalcPixelFogFactor( PIXELFOGTYPE, g_vecFogParams, g_vecOrigin, In.vWorldPos, 0 );
 
-	Out.vColor_0.xyz = lerp( Out.vColor_0.xyz, g_LinearFogColor, fogAmt );
+	// HL2RPM: squared like BlendPixelFog of the stock shaders ("closer to hardware fog"):
+	// linear, half way to the fog end was half fogged instead of a quarter - the distant
+	// skybox city and the Citadel were all hazy where the maps only fog their far parts
+	fogAmt = saturate( fogAmt );
+	Out.vColor_0.xyz = lerp( Out.vColor_0.xyz, g_LinearFogColor, fogAmt * fogAmt );
+#else
+	// HL2RPM: fog below the water surface = the refraction view of a water. The water shader
+	// fades its fog color in by the dest alpha of this view (without it the target kept the
+	// clear alpha 255: every water was opaque fog color). The stock shaders
+	// (WRITEWATERFOGTODESTALPHA) write the fog amount of the water the engine picked - the one
+	// closest in view - and fog the color with it; but one refraction view serves every water
+	// in sight: turning the camera next to a clear pool and a murky one, the clear pool turned
+	// opaque olive whenever the murky one was picked. The alpha is the depth under the surface
+	// now, sqrt( depth / 1024 units ), the color unfogged: each water makes its own fog of it
+	// (water_ps2x_helper.h, DecodeRefractFog).
+	const float flDepthUnder = saturate( ( g_vecFogParams.y - In.vWorldPos.z - 2.0f ) * ( 1.0f / 1024.0f ) );
+#if !TRANSLUCENT
+	Out.vColor_0.w = sqrt( flDepthUnder );
+#endif
 #endif
 
 	return Out;

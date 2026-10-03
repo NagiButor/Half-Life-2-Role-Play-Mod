@@ -61,7 +61,13 @@ struct PS_OUTPUT
 	float4 vColor_1				:	COLOR1;
 	float4 vColor_2				:	COLOR2;
 #endif
-#if !SHADOWMAPPING_USE_COLOR
+// HL2RPM: the sun cascades, the rain map, the spot lights and the point lights' cube faces
+// don't write the depth from the shader any more: their slope bias is the rasterizer's
+// (SetShadowDepthBiasFactors in the views' CommitData), so early-z and depth compression
+// work. The rasterized depth is the same value (z / w). A point light's six 2048^2 faces
+// cost ~9.5 ms on a GTX 960M with the shader depth. Only the legacy dual paraboloid maps
+// (non-linear projection) still write it.
+#if !SHADOWMAPPING_USE_COLOR && SHADOW_MODE == DEFERRED_SHADOW_MODE_DPSM
 	float flDepth				:	DEPTH;
 #endif
 };
@@ -118,6 +124,7 @@ float depth;
 #else
 	depth = In.flDepth;
 #endif
+	const float rawDepth = depth;
 
 	// Bias Free Shadow Mapping: d + fwidth(d) * (1 + pcfRadius)
 	// Mapbase's high-quality PCF uses 5x5 filtering (radius 2)
@@ -127,8 +134,14 @@ float depth;
 #if SHADOWMAPPING_USE_COLOR
 	Out.vColor_0 = float4( depth.xxx, 1 );
 #else
-	Out.vColor_0 = float4( 1, 1, 1, 1 );
+	// HL2RPM: the caster depth for the PCSS blocker search (R32F color target of the sun
+	// atlas; the other shadow maps have a null color target). The rasterized depth itself,
+	// unbiased: the same value the lookups compute for a receiver (a slope bias here blew
+	// up for faces edge-on to a low sun and lost their long shadows).
+	Out.vColor_0 = float4( rawDepth, rawDepth, rawDepth, 1 );
+#if SHADOW_MODE == DEFERRED_SHADOW_MODE_DPSM
 	Out.flDepth = depth;
+#endif
 #endif
 
 	return Out;

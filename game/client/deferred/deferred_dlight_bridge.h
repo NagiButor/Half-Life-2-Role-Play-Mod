@@ -20,4 +20,8 @@ void DeferredDLights_Update( const Vector &vecViewOrigin );
 // Removes every mirrored light (level shutdown).
 void DeferredDLights_Clear();
 
+// Is this deferred light a mirrored engine dlight?
+struct def_light_t;
+bool DeferredDLights_IsMirrored( const def_light_t *l );
+
 #endif // DEFERRED_DLIGHT_BRIDGE_H

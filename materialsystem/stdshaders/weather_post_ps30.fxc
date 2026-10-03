@@ -106,7 +106,11 @@ float4 main( const PS_INPUT In ) : COLOR
 	float dist = length( toPoint );
 	float3 rd = toPoint / max( dist, 1e-3 );
 
-	float3 N = normalize( tex2D( sNormals, In.vTexCoord ).xyz * 2.0 - 1.0 );
+	float4 vecNormalCtrl = tex2D( sNormals, In.vTexCoord );
+	float3 N = normalize( vecNormalCtrl.xyz * 2.0 - 1.0 );
+	// HL2RPM: lighting controls 1.0 = the 3D skybox (gbuffer_ps30): the rain map holds the
+	// map's roofs at its reconstructed position, not the skybox's - it is under the open sky
+	const bool bSkybox = vecNormalCtrl.a > ( 254.5 / 255.0 );
 
 	float4 result = float4( 0, 0, 0, 1 );
 
@@ -122,7 +126,7 @@ float4 main( const PS_INPUT In ) : COLOR
 	float wetness = g_vecRain.y;
 	if ( g_vecFlags.y > 0.5 && wetness > 0.001 )
 	{
-		float exposure = RainExposure( worldPos, N );
+		float exposure = bSkybox ? 1.0 : RainExposure( worldPos, N );
 		float wet = wetness * exposure * saturate( N.z * 1.1 + 0.35 );
 
 		float2 puv = worldPos.xy / 700.0;
@@ -143,13 +147,21 @@ float4 main( const PS_INPUT In ) : COLOR
 		float3 V = -rd;
 		float3 R = reflect( rd, Nw );
 		float NdV = saturate( dot( Nw, V ) );
-		float F = 0.02 + 0.98 * pow( 1.0 - NdV, 5.0 );
+		float fresnel = pow( 1.0 - NdV, 5.0 );
 
-		float3 sky = lerp( g_vecSkyHorizon.rgb, g_vecSkyZenith.rgb, saturate( R.z * 1.2 ) );
+		// standing water is a mirror: the sharp sky, the sun's glint, Fresnel up to 1
+		float3 skySharp = lerp( g_vecSkyHorizon.rgb, g_vecSkyZenith.rgb, saturate( R.z * 1.2 ) );
 		float sunSpec = pow( saturate( dot( R, g_vecLightDir.xyz ) ), 220.0 ) * saturate( g_vecLightDir.z * 5.0 );
-		float3 refl = ( sky + g_vecLightColor.rgb * sunSpec * 0.5 ) * F * ( wet * 0.6 + puddle );
+		float3 reflPuddle = ( skySharp + g_vecLightColor.rgb * sunSpec * 0.5 ) * ( 0.02 + 0.98 * fresnel );
 
-		result.rgb += refl;
+		// the water film on a rough surface is not: it reflects a blurred sky, and little even
+		// at grazing angles. (It used to reach ~60 % toward the horizon, so the wet look came
+		// and went with the pitch of the view and travelled with the player; the darkening
+		// below is what reads as "wet" and doesn't depend on the view.)
+		float3 skyRough = lerp( g_vecSkyHorizon.rgb, g_vecSkyZenith.rgb, 0.45 + 0.25 * saturate( R.z ) );
+		float3 reflWet = skyRough * ( 0.02 + 0.13 * fresnel );
+
+		result.rgb += reflWet * wet * ( 1.0 - puddle ) + reflPuddle * puddle;
 		result.a *= 1.0 - ( wet * 0.40 + puddle * 0.25 );
 	}
 

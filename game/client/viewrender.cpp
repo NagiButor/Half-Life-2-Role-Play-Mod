@@ -85,6 +85,9 @@
 // Projective textures
 #include "C_Env_Projected_Texture.h"
 
+// HL2RPM: the fog takes the color of the weather / time of day
+#include "weather/weather_render.h"
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -3899,7 +3902,10 @@ void CRendering3dView::SetupRenderablesList( int viewID )
 		setupInfo.m_nRenderFrame = m_pMainView->BuildRenderablesListsNumber();	// only one incremented?
 		setupInfo.m_nDetailBuildFrame = m_pMainView->BuildWorldListsNumber();	//
 		setupInfo.m_pRenderList = m_pRenderablesList;
-		setupInfo.m_bDrawDetailObjects = g_pClientMode->ShouldDrawDetailObjects() && r_DrawDetailProps.GetInt();
+		// HL2RPM: no detail props (grass sprites) in shadow depth views: they fade with the
+		// distance from the player - their shadows popped in and out while walking
+		setupInfo.m_bDrawDetailObjects = g_pClientMode->ShouldDrawDetailObjects() && r_DrawDetailProps.GetInt()
+			&& viewID != VIEW_SHADOW_DEPTH_TEXTURE;
 		setupInfo.m_bDrawTranslucentObjects = (viewID != VIEW_SHADOW_DEPTH_TEXTURE);
 
 		setupInfo.m_vecRenderOrigin = origin;
@@ -3908,7 +3914,9 @@ void CRendering3dView::SetupRenderablesList( int viewID )
 		float fMaxDist = cl_maxrenderable_dist.GetFloat();
 
 		// Shadowing light typically has a smaller farz than cl_maxrenderable_dist
-		setupInfo.m_flRenderDistSq = (viewID == VIEW_SHADOW_DEPTH_TEXTURE) ? MIN(zFar, fMaxDist) : fMaxDist;
+		// HL2RPM: the sun cascades' light camera sits at their center with a negative near
+		// plane (the casters toward the sun are behind it): the whole depth range counts
+		setupInfo.m_flRenderDistSq = (viewID == VIEW_SHADOW_DEPTH_TEXTURE) ? MIN(zFar - MIN(zNear, 0.0f), fMaxDist) : fMaxDist;
 		setupInfo.m_flRenderDistSq *= setupInfo.m_flRenderDistSq;
 
 		ClientLeafSystem()->BuildRenderablesList( setupInfo );
@@ -3977,7 +3985,11 @@ void CRendering3dView::BuildWorldRenderLists( bool bDrawEntities, int iForceView
 		}
 	}
 
-	if ( bDrawEntities )
+	// HL2RPM: not in shadow depth views - the static prop fades and the detail prop list are
+	// global state, they were computed from every shadow camera in turn (the sun's cascades
+	// 12000 units away: props with a fade distance never cast a shadow). The shadow views use
+	// what the main view computed (its G-buffer pass runs first).
+	if ( bDrawEntities && !bShadowDepth )
 	{
 		UpdateRenderablesOpacity();
 	}
@@ -4774,6 +4786,31 @@ void CRendering3dView::DrawTranslucentWorldAndDetailPropsInLeaves( int iCurLeafI
 }
 
 
+// HL2RPM
+void CRendering3dView::DrawDetailPropsInAllLeaves()
+{
+	if ( !m_pWorldListInfo )
+		return;
+
+	const ClientWorldListInfo_t& info = *m_pWorldListInfo;
+	if ( info.m_LeafCount <= 0 )
+		return;
+
+	LeafIndex_t *pLeafList = (LeafIndex_t*)stackalloc( info.m_LeafCount * sizeof( LeafIndex_t ) );
+	int nLeafCount = 0;
+	for ( int i = 0; i < info.m_LeafCount; i++ )
+	{
+		if ( ClientLeafSystem()->ShouldDrawDetailObjectsInLeaf( info.m_pLeafList[i], m_pMainView->BuildWorldListsNumber() ) )
+			pLeafList[ nLeafCount++ ] = info.m_pLeafList[i];
+	}
+	if ( !nLeafCount )
+		return;
+
+	DetailObjectSystem()->BeginTranslucentDetailRendering();
+	DetailObjectSystem()->RenderTranslucentDetailObjects( CurrentViewOrigin(), CurrentViewForward(), CurrentViewRight(), CurrentViewUp(), nLeafCount, pLeafList );
+}
+
+
 //-----------------------------------------------------------------------------
 // Renders all translucent entities in the render list
 //-----------------------------------------------------------------------------
@@ -5172,6 +5209,11 @@ void CRendering3dView::EnableWorldFog( void )
 	{
 		float fogColor[3];
 		GetFogColor( pFogParams, fogColor );
+		// HL2RPM: the map's fog color is a fixed daylight color - with the weather system the
+		// distant world fades into the current sky light instead (at night it was washed in
+		// a glowing grey, while the 3D skybox already took the weather's color)
+		if ( !fog_override.GetInt() )
+			WeatherRender_GetSkyboxFogColor( fogColor );
 		pRenderContext->FogMode( MATERIAL_FOG_LINEAR );
 		pRenderContext->FogColor3fv( fogColor );
 		pRenderContext->FogStart( GetFogStart( pFogParams ) );

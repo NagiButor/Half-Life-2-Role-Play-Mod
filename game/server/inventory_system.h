@@ -22,6 +22,12 @@ namespace InventorySystem
 
     bool PopInventoryEntryAtIndex(CBasePlayer *pPlayer, int slotIndex, InvItem &outItem);
 
+    // HL2RPM: save game support
+    void ClearInventoryState();
+    void PrintInventory(CBasePlayer *pPlayer);
+    void SaveInventoryState(class ISave *pSave);
+    void RestoreInventoryState(class IRestore *pRestore);
+
     void AddWeaponToPlayer(CBasePlayer *pPlayer, const char *itemName, int clip1, int clip2, int reserveAmmoIndex, int reserveAmmoCount);
 
     // Add/remove simple named item for a player

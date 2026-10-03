@@ -119,6 +119,57 @@ static void ApplyProceduralSky()
 	sv_skyname.SetValue( WEATHER_PROCEDURAL_SKY );
 }
 
+// ---------------------------------------------------------------------------
+// HL2RPM: the weather outlives a map like the clock (see env_timecycle.cpp):
+// after a changelevel the next map continues the current weather, its automatic
+// cycle and the wind; a new game starts with the map's own start weather.
+// ---------------------------------------------------------------------------
+struct WorldWeather_t
+{
+	bool bValid;
+	int iPreset;
+	bool bAutomatic;
+	float flWindYaw;
+	float flSecondsToNextChange;
+};
+static WorldWeather_t s_WorldWeather = { false, 0, true, 0.0f, 0.0f };
+
+class CWorldWeatherSystem : public CAutoGameSystem
+{
+public:
+	CWorldWeatherSystem() : CAutoGameSystem( "CWorldWeatherSystem" ) {}
+	virtual void LevelInitPreEntity()
+	{
+		if ( gpGlobals->eLoadType == MapLoad_NewGame || gpGlobals->eLoadType == MapLoad_Background )
+			s_WorldWeather.bValid = false;
+	}
+};
+static CWorldWeatherSystem g_WorldWeatherSystem;
+
+void CEnvWeather::StoreWorldWeather()
+{
+	s_WorldWeather.bValid = true;
+	s_WorldWeather.iPreset = m_iTargetPreset;
+	s_WorldWeather.bAutomatic = m_bAutomatic;
+	s_WorldWeather.flWindYaw = m_flWindYaw;
+	s_WorldWeather.flSecondsToNextChange = Max( 0.0f, m_flNextChangeTime - gpGlobals->curtime );
+}
+
+bool CEnvWeather::ApplyWorldWeather()
+{
+	if ( gpGlobals->eLoadType != MapLoad_Transition || !s_WorldWeather.bValid )
+		return false;
+
+	m_iTargetPreset = clamp( s_WorldWeather.iPreset, 0, WEATHER_PRESET_COUNT - 1 );
+	m_flTransitionStartTime = gpGlobals->curtime;
+	m_flTransitionDuration = 0.0f;
+	m_iTransitionSerial = ( m_iTransitionSerial + 1 ) & 0xFFFF;
+	m_bAutomatic = s_WorldWeather.bAutomatic;
+	m_flWindYaw = m_flWindYawTarget = s_WorldWeather.flWindYaw;
+	m_flNextChangeTime = gpGlobals->curtime + s_WorldWeather.flSecondsToNextChange;
+	return true;
+}
+
 void CEnvWeather::Spawn()
 {
 	BaseClass::Spawn();
@@ -147,6 +198,10 @@ void CEnvWeather::Spawn()
 
 	ScheduleNextChange();
 
+	// changelevel: continue the weather of the previous map
+	ApplyWorldWeather();
+	StoreWorldWeather();
+
 	ApplyProceduralSky();
 
 	SetThink( &CEnvWeather::WeatherThink );
@@ -167,6 +222,10 @@ void CEnvWeather::OnRestore()
 	// the client must snap to the saved weather instead of blending from the menu map
 	m_iTransitionSerial = m_iTransitionSerial + 1;
 	m_flTransitionDuration = 0.0f;
+
+	// revisited map: its saved weather is from when the player left, continue the world's
+	ApplyWorldWeather();
+	StoreWorldWeather();
 }
 
 int CEnvWeather::UpdateTransmitState()
@@ -205,6 +264,7 @@ void CEnvWeather::SetWeather( int iPreset, float flTransitionSeconds )
 	m_iTransitionSerial = ( m_iTransitionSerial + 1 ) & 0xFFFF;
 
 	ScheduleNextChange();
+	StoreWorldWeather();	// a changelevel right after this must carry the new weather
 
 	DevMsg( "env_weather: -> %s over %.0f s (auto %s)\n", GetWeatherPresetInfo( iPreset ).pszName,
 		flTransitionSeconds, m_bAutomatic ? "on" : "off" );
@@ -215,11 +275,13 @@ void CEnvWeather::SetAutomatic( bool bAuto )
 	m_bAutomatic = bAuto;
 	if ( bAuto )
 		ScheduleNextChange();
+	StoreWorldWeather();
 }
 
 void CEnvWeather::WeatherThink()
 {
 	SetNextThink( gpGlobals->curtime + 1.0f );
+	StoreWorldWeather();
 
 	// slow random walk of the wind direction
 	if ( fabsf( AngleDiff( m_flWindYawTarget, m_flWindYaw ) ) < 1.0f && RandomFloat() < 0.02f )
@@ -361,6 +423,20 @@ CON_COMMAND( sv_weather_list, "List weather presets" )
 {
 	for ( int i = 0; i < WEATHER_PRESET_COUNT; i++ )
 		Msg( "  %d  %s\n", i, GetWeatherPresetInfo( i ).pszName );
+}
+
+// HL2RPM: time and weather of the world (tests: save/load, changelevel continuity)
+CON_COMMAND( sv_world_status, "Print the world's time of day and weather" )
+{
+	float flHours = 0.0f;
+	const bool bClock = WorldClock_GetHours( flHours );
+	CEnvWeather *pWeather = GetWeatherEntity();
+	Msg( "[world] map %s  time %s%02d:%02d  weather %s%s  (world weather %s, preset %d)\n",
+		STRING( gpGlobals->mapname ), bClock ? "" : "(no clock) ",
+		(int)flHours, (int)( ( flHours - (int)flHours ) * 60.0f ),
+		pWeather ? GetWeatherPresetInfo( pWeather->GetTargetPreset() ).pszName : "(no env_weather)",
+		( pWeather && pWeather->IsAutomatic() ) ? " auto" : "",
+		s_WorldWeather.bValid ? "valid" : "unset", s_WorldWeather.iPreset );
 }
 
 #endif // GAME_DLL

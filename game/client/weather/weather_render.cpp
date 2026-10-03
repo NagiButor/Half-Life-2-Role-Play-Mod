@@ -17,6 +17,7 @@
 #include "tier1/KeyValues.h"
 #include "tier1/callqueue.h"
 #include "vstdlib/random.h"
+#include "hl2rpm_crashdebug.h"
 
 #include "tier0/memdbgon.h"
 
@@ -104,11 +105,14 @@ void InitWeatherRTs()
 		MATERIAL_RT_DEPTH_NONE,
 		TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_RENDERTARGET, 0 ) );
 
+	// the color target keeps the raw depth (R32F, written by the shadow pass like the sun
+	// atlas' one): the sky visibility of the ambient light is filtered from it
+	// (deferred_ssao.cpp, DEFERRED_SKYVIS)
 	g_tex_RainDummy.Init( materials->CreateNamedRenderTargetTextureEx2(
-		"_rt_hl2rpm_rainmap_dummy",
+		"_rt_hl2rpm_rainmap_raw",
 		RAINMAP_RES, RAINMAP_RES,
 		RT_SIZE_NO_CHANGE,
-		materials->GetNullTextureFormat(),
+		IMAGE_FORMAT_R32F,
 		MATERIAL_RT_DEPTH_NONE,
 		TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_RENDERTARGET | TEXTUREFLAGS_POINTSAMPLE, 0 ) );
 }
@@ -243,6 +247,8 @@ void WeatherRender_SetSkyLight( const lightData_Global_t &light )
 	s_vecSkyLightDiff = light.diff;
 }
 
+static void UpdateForwardMaterials( float flScale );
+
 void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t &light )
 {
 	C_WeatherSystem *pSys = GetWeatherSystem();
@@ -252,10 +258,12 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 	{
 		data.bEnabled = false;
 		QUEUE_FIRE( CommitWeatherData, data );
+		UpdateForwardMaterials( 1.0f );
 		return;
 	}
 
 	EnsureWeatherMaterials();
+	UpdateForwardMaterials( pSys->GetEnvLightScale() );
 
 	const WeatherParams_t &p = pSys->GetParams();
 	pSys->FillRenderData( data, view );
@@ -341,7 +349,7 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 	Vector vecAmbLow = light.ambl.AsVector3D();
 	Vector vecZenith = vecAmbHigh * p.flSkyBrightness;
 	Vector vecHorizon = ( vecAmbHigh * 0.75f + vecAmbLow * 0.25f ) * ( 1.15f * p.flSkyBrightness ) + light.diff.AsVector3D() * 0.04f;
-	data.vecSkyZenith.Init( vecZenith.x, vecZenith.y, vecZenith.z, 0.0f );
+	data.vecSkyZenith.Init( vecZenith.x, vecZenith.y, vecZenith.z, pSys->GetEnvLightScale() );
 	data.vecSkyHorizon.Init( vecHorizon.x, vecHorizon.y, vecHorizon.z, 0.0f );
 
 	static ConVarRef cl_weather_debug( "cl_weather_debug" );
@@ -418,9 +426,17 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 	QUEUE_FIRE( CommitTexture_Weather, pCloud, pHistory, pCloudRaw, pNoise, pWeatherMap, pRainMap );
 }
 
+static bool s_bCloudTextureValidNow = false;
+
 void WeatherRender_SetCloudTextureValid( bool bValid )
 {
+	s_bCloudTextureValidNow = bValid;
 	QUEUE_FIRE( CommitWeatherCloudTextureValid, bValid );
+}
+
+bool WeatherRender_IsCloudTextureValid()
+{
+	return s_bCloudTextureValidNow;
 }
 
 // ---------------------------------------------------------------------------
@@ -498,6 +514,7 @@ static void BuildRainMesh()
 	if ( g_pRainMesh || !g_pMatRain )
 		return;
 
+	RPM_CRUMB( "weather: build rain mesh" );
 	CMatRenderContextPtr pRenderContext( materials );
 	const VertexFormat_t fmt = VERTEX_POSITION | VERTEX_TEXCOORD_SIZE( 0, 2 ) | VERTEX_TEXCOORD_SIZE( 1, 4 );
 	g_pRainMesh = pRenderContext->CreateStaticMesh( fmt, TEXTURE_GROUP_STATIC_VERTEX_BUFFER_OTHER, g_pMatRain );
@@ -827,10 +844,12 @@ bool WeatherRender_ShouldUpdateRainMap( const CViewSetup &view, Vector &vecCente
 	flSize = Clamp( r_weather_rainmap_size.GetFloat(), 1024.0f, 8192.0f );
 	const float flTexel = flSize / RAINMAP_RES;
 
-	// snap to texels so the map doesn't swim
-	vecCenter.x = floorf( view.origin.x / flTexel ) * flTexel;
-	vecCenter.y = floorf( view.origin.y / flTexel ) * flTexel;
-	vecCenter.z = view.origin.z;
+	// snap so a re-render of the same world gives the same map: to 4 texels (the sky
+	// visibility filter halves the resolution) and to 64 units of height
+	const float flSnap = flTexel * 4.0f;
+	vecCenter.x = floorf( view.origin.x / flSnap ) * flSnap;
+	vecCenter.y = floorf( view.origin.y / flSnap ) * flSnap;
+	vecCenter.z = floorf( view.origin.z / 64.0f ) * 64.0f;
 
 	if ( !g_bRainMapValid || fabsf( g_flRainMapSize - flSize ) > 1.0f )
 		return true;
@@ -854,6 +873,137 @@ void WeatherRender_OnRainMapRendered( const VMatrix &matWorldToTexture, const Ve
 }
 
 // ---------------------------------------------------------------------------
+// Forward materials under the time of day.
+// Water, glass and other alpha-blended materials are not drawn by the deferred
+// pipeline: the stock shaders light them with the baked lightmaps / static prop
+// lighting and reflect the baked cubemaps - all made for the map's daylight, so at
+// night they glowed. Their colors are scaled with the world's brightness now.
+// ---------------------------------------------------------------------------
+// The material is referenced and the variable looked up by name every time: the
+// IMaterialVar pointers used to be kept, but the deferred material passthru rebuilds
+// a material's variables when it replaces its shader (SetShaderAndParams, often long
+// after this scan, when a model first uses it) and materials are freed on map changes -
+// the next update wrote into freed memory (heap corruption: crashes on map change, in
+// mat_reloadallmaterials, in GameUI...).
+struct ForwardMatVar_t
+{
+	IMaterial *pMat;
+	const char *pszVar;		// a string literal
+	Vector vecOrig;
+};
+static CUtlVector< ForwardMatVar_t > s_ForwardVars;
+static int s_nForwardMatCount = -1;
+static float s_flForwardScale = 1.0f;
+
+static IMaterialVar *FindForwardVar( IMaterial *pMat, const char *pszVar )
+{
+	bool bFound = false;
+	IMaterialVar *pVar = pMat->FindVar( pszVar, &bFound, false );
+	if ( !bFound || !pVar || pVar->GetType() != MATERIAL_VAR_TYPE_VECTOR )
+		return NULL;
+	return pVar;
+}
+
+static void AddForwardVar( IMaterial *pMat, const char *pszVar )
+{
+	IMaterialVar *pVar = FindForwardVar( pMat, pszVar );
+	if ( !pVar )
+		return;
+
+	float flVec[3] = { 1.0f, 1.0f, 1.0f };
+	pVar->GetVecValue( flVec, 3 );
+	pMat->IncrementReferenceCount();
+	ForwardMatVar_t &v = s_ForwardVars[ s_ForwardVars.AddToTail() ];
+	v.pMat = pMat;
+	v.pszVar = pszVar;
+	v.vecOrig.Init( flVec[0], flVec[1], flVec[2] );
+}
+
+static void RestoreForwardMaterials()
+{
+	for ( int i = 0; i < s_ForwardVars.Count(); i++ )
+	{
+		const ForwardMatVar_t &v = s_ForwardVars[i];
+		IMaterialVar *pVar = FindForwardVar( v.pMat, v.pszVar );
+		if ( pVar )
+			pVar->SetVecValue( v.vecOrig.x, v.vecOrig.y, v.vecOrig.z );
+		v.pMat->DecrementReferenceCount();
+	}
+	s_ForwardVars.RemoveAll();
+	s_nForwardMatCount = -1;
+	s_flForwardScale = 1.0f;
+}
+
+static void ScanForwardMaterials()
+{
+	RestoreForwardMaterials();
+
+	for ( MaterialHandle_t h = materials->FirstMaterial(); h != materials->InvalidMaterial(); h = materials->NextMaterial( h ) )
+	{
+		IMaterial *pMat = materials->GetMaterial( h );
+		if ( !pMat || pMat->IsErrorMaterial() )
+			continue;
+		const char *pszShader = pMat->GetShaderName();
+		if ( !pszShader )
+			continue;
+
+		if ( V_stristr( pszShader, "Water" ) )
+		{
+			// the water's own color
+			AddForwardVar( pMat, "$fogcolor" );
+			// real-time reflections are lit right (REFLECTVIEW); the cubemap one isn't
+			bool bFound = false;
+			IMaterialVar *pReflect = pMat->FindVar( "$reflecttexture", &bFound, false );
+			if ( !bFound || !pReflect || !pReflect->IsDefined() || !pReflect->IsTexture() )
+				AddForwardVar( pMat, "$reflecttint" );
+		}
+		else if ( pMat->IsTranslucent() && ( V_stristr( pszShader, "LightmappedGeneric" ) || V_stristr( pszShader, "VertexLitGeneric" ) ) )
+		{
+			// glass & co: baked lighting and a baked cubemap
+			AddForwardVar( pMat, "$envmaptint" );
+			// (models: studiorender overwrites $color with the entity's color modulation on
+			// every draw - the scaled value never showed, the translucent shell of the skybox
+			// Citadel shone blue at night. Their static tint is $color2, which the base
+			// shader multiplies in.)
+			AddForwardVar( pMat, V_stristr( pszShader, "VertexLitGeneric" ) ? "$color2" : "$color" );
+		}
+	}
+
+	s_nForwardMatCount = materials->GetNumMaterials();
+	s_flForwardScale = -1.0f;	// apply on the next update
+}
+
+static bool IsDeferredShaderMaterial( IMaterial *pMat )
+{
+	const char *pszShader = pMat->GetShaderName();
+	return pszShader && V_strnicmp( pszShader, "DEFERRED_", 9 ) == 0;
+}
+
+static void UpdateForwardMaterials( float flScale )
+{
+	// a scanned material the passthru has since replaced by a deferred shader (it copied
+	// our scaled values): put the original values back, it isn't a forward one any more
+	bool bReplaced = false;
+	for ( int i = 0; i < s_ForwardVars.Count() && !bReplaced; i++ )
+		bReplaced = IsDeferredShaderMaterial( s_ForwardVars[i].pMat );
+
+	if ( bReplaced || materials->GetNumMaterials() != s_nForwardMatCount )
+		ScanForwardMaterials();
+
+	if ( fabsf( flScale - s_flForwardScale ) < 0.01f )
+		return;
+	s_flForwardScale = flScale;
+
+	for ( int i = 0; i < s_ForwardVars.Count(); i++ )
+	{
+		const ForwardMatVar_t &v = s_ForwardVars[i];
+		IMaterialVar *pVar = FindForwardVar( v.pMat, v.pszVar );
+		if ( pVar )
+			pVar->SetVecValue( v.vecOrig.x * flScale, v.vecOrig.y * flScale, v.vecOrig.z * flScale );
+	}
+}
+
+// ---------------------------------------------------------------------------
 class CWeatherRenderSystem : public CAutoGameSystem
 {
 public:
@@ -862,6 +1012,13 @@ public:
 	virtual void LevelInitPostEntity()
 	{
 		WeatherRender_LevelInit();
+		ScanForwardMaterials();
+	}
+
+	virtual void LevelShutdownPreEntity()
+	{
+		// the materials outlive the map: leave them as they were loaded
+		RestoreForwardMaterials();
 	}
 
 	virtual void Shutdown()

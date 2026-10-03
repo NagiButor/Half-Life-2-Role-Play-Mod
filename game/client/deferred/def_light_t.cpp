@@ -77,6 +77,8 @@ def_light_t::def_light_t( bool bWorld )
 
 	iLighttype = DEFLIGHTTYPE_POINT;
 	iFlags = DEFLIGHT_DIRTY_XFORMS | DEFLIGHT_DIRTY_RENDERMESH;
+	bBudgetShadow = false;
+	flBudgetFade = 1.0f;
 	iCookieIndex = 0;
 	iOldCookieIndex = 0;
 	pCookie = NULL;

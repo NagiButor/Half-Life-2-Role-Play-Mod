@@ -21,6 +21,7 @@ static CTextureReference g_tex_VolumePrepass;
 static CTextureReference g_tex_VolumetricsBuffer[ 2 ];
 
 static CTextureReference g_tex_ShadowColor_Ortho[ MAX_SHADOW_ORTHO ];
+static bool g_bShadowRawDepth = false;	// HL2RPM: g_tex_ShadowColor_Ortho holds the caster depth (R32F)
 static CTextureReference g_tex_ShadowDepth_Ortho[ MAX_SHADOW_ORTHO ];
 static CTextureReference g_tex_ShadowRad_Albedo_Ortho[ MAX_SHADOW_ORTHO ];
 static CTextureReference g_tex_ShadowRad_Normal_Ortho[ MAX_SHADOW_ORTHO ];
@@ -47,6 +48,13 @@ static CTextureReference g_tex_SkyAtmoSkyViewLUT;
 
 static bool g_bRadiosityRTsFullSize = false;
 bool AreRadiosityRTsAvailable() { return g_bRadiosityRTsFullSize; }
+
+static void OnShadowOrthoDepthChanged( IConVar *var, const char *pOldValue, float flOldValue )
+{
+	RequestDeferredRTRefresh();
+}
+static ConVar r_deferred_shadow_ortho_depth24( "r_deferred_shadow_ortho_depth24", "1", 0,
+	"Sun shadow cascades in a 24 bit depth map where the hardware's shadow depth format is 16 bit", OnShadowOrthoDepthChanged );
 
 static float g_flDepthScalar = 65536.0f;
 static bool g_bDeferredRTRefreshPending = false;
@@ -82,13 +90,20 @@ void RequestDeferredRTRefresh()
 	if ( g_bInDeferredRTInit )
 		return;
 
+	// -nodeferred / r_deferred 0: the shadow quality convars (config.cfg) still call this,
+	// and creating the deferred render targets then crashed at startup
+	if ( !GetDeferredManager() || !GetDeferredManager()->IsDeferredRenderingEnabled() )
+		return;
+
 	if ( !engine->IsInGame() )
 	{
+		DevMsg( 2, "[deferred] render targets re-created (not in game)\n" );
 		InitDeferredRTs();
 		g_bDeferredRTRefreshPending = false;
 		return;
 	}
 
+	DevMsg( 2, "[deferred] render target refresh requested\n" );
 	g_bDeferredRTRefreshPending = true;
 }
 
@@ -100,12 +115,14 @@ void ServiceDeferredRTRefresh()
 	if ( engine->IsInGame() )
 		return;
 
+	DevMsg( 2, "[deferred] render targets re-created (pending refresh)\n" );
 	InitDeferredRTs();
 	g_bDeferredRTRefreshPending = false;
 }
 
 void DefRTsOnModeChanged()
 {
+	DevMsg( 2, "[deferred] video mode changed (in game %d)\n", engine->IsInGame() ? 1 : 0 );
 	if ( engine->IsInGame() )
 	{
 		RequestDeferredRTRefresh();
@@ -160,16 +177,33 @@ const ImageFormat fmt_gbuffer0 =
 #endif
 
 	const ImageFormat fmt_depth = GetDeferredManager()->GetShadowDepthFormat();
+	// HL2RPM: the sun cascades in 24 bits. They reach ~13000 units toward the sun: 16 bits
+	// over that are 0.2 unit steps - as coarse as a texel of the first cascade, too much for
+	// the half texel of constant bias (acne on surfaces facing the sun). Point and spot
+	// shadows keep the hardware's format (their depth range is the light's radius).
+	const ImageFormat fmt_depthOrtho = ( fmt_depth == IMAGE_FORMAT_NV_DST16 && r_deferred_shadow_ortho_depth24.GetBool() )
+		? IMAGE_FORMAT_NV_DST24 : fmt_depth;
 	const ImageFormat fmt_depthColor = bShadowUseColor ? IMAGE_FORMAT_R32F
 		: materials->GetNullTextureFormat();
 	const ImageFormat fmt_radAlbedo = IMAGE_FORMAT_RGB888;
 	const ImageFormat fmt_radNormal = IMAGE_FORMAT_RGB888;
 	const ImageFormat fmt_radBuffer = IMAGE_FORMAT_RGB888;
 
-	if ( fmt_depth == IMAGE_FORMAT_NV_DST16 || fmt_depth == IMAGE_FORMAT_ATI_DST16 )
+	// (the depth steps of the sun cascades: GetDepthMapDepthResolution snaps the cascades to them)
+	if ( fmt_depthOrtho == IMAGE_FORMAT_NV_DST16 || fmt_depthOrtho == IMAGE_FORMAT_ATI_DST16 )
 		g_flDepthScalar = pow( 2.0, 16 );
-	else if ( fmt_depth == IMAGE_FORMAT_NV_DST24 || fmt_depth == IMAGE_FORMAT_ATI_DST24 )
+	else if ( fmt_depthOrtho == IMAGE_FORMAT_NV_DST24 || fmt_depthOrtho == IMAGE_FORMAT_ATI_DST24 )
 		g_flDepthScalar = pow( 2.0, 24 );
+	{
+		static ImageFormat s_LastReported = IMAGE_FORMAT_UNKNOWN;
+		if ( s_LastReported != fmt_depthOrtho )
+		{
+			s_LastReported = fmt_depthOrtho;
+			Msg( "[deferred] shadow depth: hardware %s, sun cascades %s\n",
+				( fmt_depth == IMAGE_FORMAT_NV_DST16 || fmt_depth == IMAGE_FORMAT_ATI_DST16 ) ? "16 bit" : "24 bit",
+				( g_flDepthScalar > 65536.0f ) ? "24 bit" : "16 bit" );
+		}
+	}
 
 	AssertMsg( fmt_depth == IMAGE_FORMAT_NV_DST16 || fmt_depth == IMAGE_FORMAT_NV_DST24 || fmt_depth == IMAGE_FORMAT_ATI_DST16 || fmt_depth == IMAGE_FORMAT_ATI_DST24, "Unexpected depth format" );
 
@@ -308,17 +342,22 @@ const ImageFormat fmt_gbuffer0 =
 				VarArgs( "%s%02i", DEFRTNAME_SHADOWDEPTH_ORTHO, i ),
 				iResolution_x, iResolution_y,
 				RT_SIZE_NO_CHANGE,
-				fmt_depth,
+				fmt_depthOrtho,
 				MATERIAL_RT_DEPTH_NONE,
 				depthFlags, 0 ) );
 
+			// HL2RPM: the sun atlas' color target keeps the caster depth (R32F) for the
+			// PCSS blocker search - the hardware shadow map can only be compared against.
+			// (Not with radiosity on: its MRT albedo/normal targets are 24 bit.)
+			const bool bRawDepth = !bShadowUseColor && !r_deferred_radiosity.GetBool();
 			g_tex_ShadowColor_Ortho[i].Init( materials->CreateNamedRenderTargetTextureEx2(
 				VarArgs( "%s%02i", DEFRTNAME_SHADOWCOLOR_ORTHO, i ),
 				iResolution_x, iResolution_y,
 				RT_SIZE_NO_CHANGE,
-				fmt_depthColor,
+				bRawDepth ? IMAGE_FORMAT_R32F : fmt_depthColor,
 				MATERIAL_RT_DEPTH_NONE,
 				shadowColorFlags, 0 ) );
+			g_bShadowRawDepth = bRawDepth;
 
 #if DEFCFG_ENABLE_RADIOSITY
 			// HL2RPM: the radiosity MRT targets must match the shadow atlas, but they're only
@@ -536,9 +575,12 @@ const ImageFormat fmt_gbuffer0 =
 		g_tex_Lightaccum );
 
 	for ( int i = 0; i < MAX_SHADOW_ORTHO; i++ )
+	{
 		GetDeferredExt()->CommitTexture_CascadedDepth( i,
 			bShadowUseColor ? g_tex_ShadowColor_Ortho[i] : g_tex_ShadowDepth_Ortho[i]
 		);
+		GetDeferredExt()->CommitTexture_CascadedDepthRaw( i, g_bShadowRawDepth ? (ITexture*)g_tex_ShadowColor_Ortho[i] : NULL );
+	}
 
 	for ( int i = 0; i < MAX_SHADOW_DP; i++ )
 		GetDeferredExt()->CommitTexture_DualParaboloidDepth( i,

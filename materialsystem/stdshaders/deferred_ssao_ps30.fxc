@@ -1,14 +1,21 @@
 //========= HL2RPM ============================================================//
 //
-// Screen-space ambient occlusion from the G-buffer (linear depth + normals),
-// rendered at half resolution; blurred by deferred_ssaoblur_ps30 and applied
-// to the sky light in lightingpass_global_ps30.
+// Ambient occlusion of the sky light at half resolution, blurred by
+// deferred_ssaoblur_ps30 and applied in lightingpass_global_ps30:
+//   R - screen-space ambient occlusion from the G-buffer (1 when it's off)
+//   G - sky visibility from the top-down occlusion map of the weather
 //
-// Horizon-style estimator: for samples on a spiral around the pixel, how far
-// the surrounding geometry rises above the tangent plane (cosine of the angle),
-// weighted down with distance. No matrices needed: the world ray of any pixel
-// is linear in screen space, its gradient comes from ddx/ddy of the
+// SSAO: horizon-style estimator - for samples on a spiral around the pixel, how
+// far the surrounding geometry rises above the tangent plane (cosine of the
+// angle), weighted down with distance. No matrices needed: the world ray of any
+// pixel is linear in screen space, its gradient comes from ddx/ddy of the
 // interpolated frustum ray.
+//
+// Sky visibility: how much of the area around the point is open to the sky, from
+// the map deferred_skyvis_ps30 makes out of the top-down rain occlusion map (64
+// taps per texel, once per render of that map): one smooth lookup. The 3 rings of
+// 8 binary taps per pixel it replaces stepped every time a tap crossed a wall - the
+// shade of a wall had stripes of different brightness ("overlapping shadows").
 //
 //=============================================================================//
 
@@ -16,9 +23,16 @@
 
 sampler sDepth			: register( s0 );	// G-buffer linear depth (0 = sky)
 sampler sNormals		: register( s1 );	// G-buffer normals
+sampler sSkyMap		: register( s2 );	// sky visibility map (deferred_skyvis_ps30), bilinear
+sampler sRainRaw		: register( s3 );	// raw top-down depth of the rain map, point sampled
+sampler sSkyMapWide		: register( s4 );	// the same as sSkyMap with a 512 unit disk
 
-const float4 g_vecAO	: register( c0 );	// x radius (units), y intensity, z cos bias, w projection scale (px per unit at depth 1)
+const float4 g_vecAO	: register( c0 );	// x radius (units), y intensity (0 = off), z cos bias, w projection scale (px per unit at depth 1)
 const float4 g_vecAO2	: register( c1 );	// x 1/viewport w, y 1/viewport h, z max radius (px), w frame
+const float3 g_vecViewOrigin	: register( c2 );
+const float4 g_matRainMap[3]	: register( c3 );	// rows of world -> rain map texture (c3 - c5)
+const float4 g_vecRainMap		: register( c6 );	// x open scale in the open (sky visibility), y size (units), z texel size, w valid
+const float4 g_vecSky			: register( c7 );	// x sky visibility on, y depth range of the rain map (units), z 1 / disk radius (units), w open scale
 
 struct PS_INPUT
 {
@@ -29,6 +43,51 @@ struct PS_INPUT
 
 static const int NUM_SAMPLES = 12;
 static const float NUM_TURNS = 7.0;
+
+float SkyVisibility( float3 worldPos, float3 normal )
+{
+	// (off the surface along its normal: a point on a wall looks at the ground in front
+	// of it, not at the top of the wall)
+	float4 wp = float4( worldPos + normal * 6.0, 1.0 );
+	float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
+
+	// outside the map: no information, treat as outdoors
+	float2 edge = abs( uvz.xy * 2.0 - 1.0 );
+	float inside = saturate( ( 1.0 - max( edge.x, edge.y ) ) * 10.0 );
+
+	const float4 vis = tex2Dlod( sSkyMap, float4( uvz.xy, 0, 0 ) );
+	const float4 visWide = tex2Dlod( sSkyMapWide, float4( uvz.xy, 0, 0 ) );
+	const float dColumn = tex2Dlod( sRainRaw, float4( uvz.xy, 0, 0 ) ).x;
+
+	// under the top of its own column (a roof, a canopy, a bridge over it - more than 24
+	// units over it, so curbs and steps next to it don't count)
+	const float below = ( uvz.z - dColumn ) * g_vecSky.y;
+	const float cover = saturate( ( below - 24.0 ) / 24.0 );
+
+	// in the open only nearly enclosed spots lose sky light (g_vecRainMap.x, a large open
+	// scale): at the foot of a wall or a curb the shade must look like the rest of the shade
+	// (a soft dark band along every wall read as a second shadow)
+	float vTop = saturate( vis.x * g_vecRainMap.x );
+	// above the lowest top of the texel (up a wall, on top of a thin wall): more sky
+	vTop = lerp( vTop, 1.0, saturate( ( vis.z - uvz.z ) * g_vecSky.y * g_vecSky.z ) );
+
+	// under a cover: the open part around at the lowest ground the map sees there - none,
+	// if that ground is well above the point (deep inside a building nothing around is open
+	// at its level; judged at the roof the middle of a big roof read as open). High covers
+	// (a floating block, a high hall) let the sky in through the gaps around them: the wide
+	// disk, more of it the higher the cover is
+	const float vLow = vis.y * saturate( 1.0 - ( ( uvz.z - vis.w ) * g_vecSky.y - 24.0 ) / 24.0 );
+	const float vLowWide = visWide.y * saturate( 1.0 - ( ( uvz.z - visWide.w ) * g_vecSky.y - 24.0 ) / 24.0 );
+	const float vCover = lerp( vLow, vLowWide, saturate( ( below - 128.0 ) / 384.0 ) );
+
+	const float v = lerp( vTop, saturate( vCover * g_vecSky.w ), cover );
+
+	// r_deferred_skyvis_debug 1..3: open part in the open (raw), under a cover (raw), cover
+	if ( g_vecSky.x > 1.5 )
+		return ( g_vecSky.x > 3.5 ) ? cover : ( ( g_vecSky.x > 2.5 ) ? vCover : vis.x );
+
+	return lerp( 1.0, v, inside );
+}
 
 float4 main( const PS_INPUT In ) : COLOR
 {
@@ -45,10 +104,12 @@ float4 main( const PS_INPUT In ) : COLOR
 	float3 dRdu = ddx( ray ) / max( ddx( uv.x ), 1e-6 );
 	float3 dRdv = ddy( ray ) / max( abs( ddy( uv.y ) ), 1e-6 ) * sign( ddy( uv.y ) );
 
+	float sky = ( g_vecSky.x > 0.5 && g_vecRainMap.w > 0.5 ) ? SkyVisibility( g_vecViewOrigin + P, N ) : 1.0;
+
 	float radius = g_vecAO.x;
 	float radiusPx = radius * g_vecAO.w / depth;
-	if ( radiusPx < 1.5 )
-		return float4( 1, 1, 1, 1 );
+	if ( g_vecAO.y <= 0.0 || radiusPx < 1.5 )
+		return float4( 1, sky, 1, 1 );
 	radiusPx = min( radiusPx, g_vecAO2.z );
 
 	// interleaved gradient noise: rotation of the spiral per pixel
@@ -79,5 +140,5 @@ float4 main( const PS_INPUT In ) : COLOR
 	}
 
 	float ao = saturate( 1.0 - occlusion * ( g_vecAO.y / NUM_SAMPLES ) * 1.6 );
-	return float4( ao, ao, ao, 1 );
+	return float4( ao, sky, ao, 1 );
 }

@@ -30,6 +30,12 @@
 	vis_range(integer) : "Visible fade range" : 512 : ""
 	shadow_dist(integer) : "Shadow distance" : 1536 : ""
 	shadow_range(integer) : "Shadow fade range" : 512 : ""
+	//Pravka: a light without a shadow shines through walls - shadows unless switched off here
+	autoshadow(choices) : "Automatic shadow" : 1 : "Cast a shadow even when 'Enable shadow' is not set (a light without a shadow shines through walls). No = a cheap fill light without a shadow. Also sv_deferred_light_autoshadow." =
+	[
+		0 : "No"
+		1 : "Yes"
+	]
 
 	cookietex(string) : "Cookie texture" : : "Path to vtf or vgui projectable factory name."
 
@@ -87,6 +93,12 @@
 	vis_range(integer) : "Visible fade range" : 512 : ""
 	shadow_dist(integer) : "Shadow distance" : 1536 : ""
 	shadow_range(integer) : "Shadow fade range" : 512 : ""
+	//Pravka: a light without a shadow shines through walls - shadows unless switched off here
+	autoshadow(choices) : "Automatic shadow" : 1 : "Cast a shadow even when 'Enable shadow' is not set (a light without a shadow shines through walls). No = a cheap fill light without a shadow. Also sv_deferred_light_autoshadow." =
+	[
+		0 : "No"
+		1 : "Yes"
+	]
 
 	cookietex(string) : "Cookie texture" : : "Path to vtf or vgui projectable factory name."
 
@@ -132,7 +144,8 @@
 @PointClass base(Targetname) iconsprite("editor/logic_script.vmt") = env_timecycle
 [
 	start_time(float) : "Start time (hours)" : "12.0" : ""
-	time_scale(float) : "Time scale multiplier" : "10.0" : "Real day is 2.4 hours when day_length_seconds=8640 and time_scale=10."
+	//Pravka: sv_timecycle_speed_scale (0.1) multiplies it - the old text was wrong (it was a 14.4 minute day)
+	time_scale(float) : "Time scale multiplier" : "10.0" : "Real length of a day = day_length_seconds / (time_scale * sv_timecycle_speed_scale). With the defaults (8640, 10, 0.1) a day lasts 2.4 hours."
 	day_length_seconds(float) : "Day length (seconds)" : "8640.0" : ""
 
 	sunrise_hour(float) : "Sunrise hour" : "6.0" : ""
@@ -160,6 +173,9 @@
 		8 : "Misty"
 		9 : "Snowfall"		//Pravka
 		10 : "Falling ash"	//Pravka
+		11 : "Cumulus (towers in the afternoon)"	//Pravka
+		12 : "Broken clouds (stratocumulus)"	//Pravka
+		13 : "High clouds (cirrus, altocumulus)"	//Pravka
 	]
 	auto_weather(choices) : "Automatic weather changes" : 1 : "The weather changes by itself over time (plausible sequences, fog in the morning, storms in the afternoon)." =
 	[
@@ -168,7 +184,7 @@
 	]
 	duration_scale(float) : "Weather duration scale" : "1.0" : "Multiplier for how long each automatic weather lasts."
 
-	input SetWeather(string) : "Blend to a weather: clear, fair, partlycloudy, overcast, fog, drizzle, rain, thunderstorm, misty, snow, ash. Optional transition time in seconds after the name, e.g. 'rain 30'. Snow and ash are never chosen by the automatic weather."
+	input SetWeather(string) : "Blend to a weather: clear, fair, partlycloudy, overcast, fog, drizzle, rain, thunderstorm, misty, snow, ash, cumulus, stratocumulus, highclouds. Optional transition time in seconds after the name, e.g. 'rain 30'. Snow and ash are never chosen by the automatic weather."
 	input SetWeatherInstant(string) : "Switch to a weather immediately (same names as SetWeather)."
 	input EnableAuto(void) : "Enable automatic weather changes."
 	input DisableAuto(void) : "Disable automatic weather changes."

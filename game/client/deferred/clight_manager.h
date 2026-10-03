@@ -55,6 +55,9 @@ public:
 	// update volatile data - internal xforms, final light col bleh
 	void PrepareLights();
 
+	// HL2RPM: lend shadows to the nearest point lights that have none (once per frame)
+	void UpdateShadowBudget( const Vector &vecViewOrigin );
+
 	// initialize the render list
 	void CullLights();
 
@@ -121,6 +124,7 @@ private:
 	Vector m_vecForward;
 	float m_flzNear;
 	bool m_bDrawVolumetrics;
+	int m_iShadowBudgetFrame;
 
 	FORCEINLINE float DoLightStyle( def_light_t *l );
 	FORCEINLINE int WriteLight( def_light_t *l, float *pfl4 );

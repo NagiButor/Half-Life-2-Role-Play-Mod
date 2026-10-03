@@ -61,6 +61,8 @@ public:
 	float GetOuterSkyExposure() const { return m_flOuterExposure; }
 	// outdoor light now relative to the map's baked daylight (particle lighting)
 	float GetParticleLightScale() const { return m_flParticleLightScale; }
+	// brightness of the world now relative to the daylight the cubemaps were baked in
+	float GetEnvLightScale() const { return m_flEnvLightScale; }
 	const Vector &GetMoonDir() const { return m_vecMoonDir; }
 	const Vector &GetSunDir() const { return m_vecSunDir; }
 	Vector2D GetWindDir() const { return m_vecWindDir; }
@@ -158,6 +160,7 @@ private:
 	float m_flSkyExposure;
 	float m_flOuterExposure;
 	mutable float m_flParticleLightScale;
+	mutable float m_flEnvLightScale;
 	float m_flNextExposureTrace;
 	float m_flRainVolumeOut;
 	float m_flRainVolumeIn;

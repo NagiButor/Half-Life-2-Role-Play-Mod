@@ -159,7 +159,7 @@ struct weatherData_t
 	Vector4D vecFogColor;		// rgb fog color (linear), w max opacity
 	Vector4D vecRainParams;		// x rain, y wetness, z puddles, w time (s)
 	Vector4D vecSunColor;		// rgb direct light color reaching the clouds, w night factor
-	Vector4D vecSkyZenith;		// rgb sky ambient from above
+	Vector4D vecSkyZenith;		// rgb sky ambient from above, w cubemap reflection scale (world brightness now / daylight)
 	Vector4D vecSkyHorizon;		// rgb sky ambient at the horizon
 	Vector4D vecMoonDir;		// xyz moon direction, w moon brightness
 	Vector4D vecSunDir;			// xyz real sun direction (the global light may be the moon), w sun altitude (deg)
@@ -277,9 +277,18 @@ public:
 	// HL2RPM ambient occlusion
 	virtual void CommitSSAOData( const ssaoData_t &data ) = 0;
 	virtual void CommitTexture_SSAO( ITexture *pAO, ITexture *pBlur ) = 0;
+
+	// HL2RPM: world -> screen texture coords of the main view (its G-buffer and light buffer),
+	// and whether a planar reflection view (water, glass) is being drawn right now: the
+	// composite of such a view reprojects into the main view's light buffer
+	virtual void CommitMainViewToScreenTex( const VMatrix &matWorldToScreenTex ) = 0;
+	virtual void CommitReflectionView( const bool &bReflection ) = 0;
+
+	// HL2RPM: the sun shadow atlas' caster depth as a readable R32F texture (PCSS blocker search)
+	virtual void CommitTexture_CascadedDepthRaw( const int &index, ITexture *pTexDepthRaw ) = 0;
 };
 
-#define DEFERRED_EXTENSION_VERSION "DeferredExtensionVersion005"
+#define DEFERRED_EXTENSION_VERSION "DeferredExtensionVersion006"
 
 #ifdef STDSHADER_DX9_DLL_EXPORT
 
@@ -340,6 +349,14 @@ public:
 	virtual void CommitSSAOData( const ssaoData_t &data );
 	virtual void CommitTexture_SSAO( ITexture *pAO, ITexture *pBlur );
 	inline const ssaoData_t &GetSSAOData() { return m_dataSSAO; }
+
+	virtual void CommitMainViewToScreenTex( const VMatrix &matWorldToScreenTex );
+	virtual void CommitReflectionView( const bool &bReflection );
+	inline float *GetMainViewToScreenTexBase() { return m_matMainViewToScreenTex.Base(); }
+	inline bool IsReflectionView() const { return m_bReflectionView; }
+
+	virtual void CommitTexture_CascadedDepthRaw( const int &index, ITexture *pTexDepthRaw );
+	inline ITexture *GetTexture_ShadowDepthRaw_Ortho( const int &index ) { return m_pTexShadowDepthRaw_Ortho[ index ]; }
 	inline ITexture *GetTexture_SSAO() { return m_pTexSSAO; }
 	inline ITexture *GetTexture_SSAOBlur() { return m_pTexSSAOBlur; }
 
@@ -404,6 +421,8 @@ private:
 	Vector4D m_vecForward;
 	float m_flZDists[3];
 	VMatrix m_matTFrustumD;
+	VMatrix m_matMainViewToScreenTex;
+	bool m_bReflectionView;
 #if DEFCFG_BILATERAL_DEPTH_TEST
 	VMatrix m_matWorldCameraDepthTex;
 #endif
@@ -434,6 +453,7 @@ private:
 	ITexture *m_pTexSpecular;
 #endif
 	ITexture *m_pTexShadowDepth_Ortho[ MAX_SHADOW_ORTHO ];
+	ITexture *m_pTexShadowDepthRaw_Ortho[ MAX_SHADOW_ORTHO ];
 	ITexture *m_pTexShadowDepth_DP[ MAX_SHADOW_DP ];
 	ITexture *m_pTexShadowDepth_Proj[ MAX_SHADOW_PROJ ];
 	ITexture *m_pTexCookie[ NUM_COOKIE_SLOTS ];

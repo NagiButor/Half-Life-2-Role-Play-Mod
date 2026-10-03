@@ -133,11 +133,16 @@ float2 SkyViewUV( float3 rayDir, float3 sunDir )
 	return float2( u, v );
 }
 
+// HL2RPM: extended Reinhard (white point W): the dark and mid tones (the clear sky) are the
+// same as with plain Reinhard, but the highlights reach white instead of piling up at
+// 0.8 - sunlit cloud tops are white and their shaded sides stay visibly grey
 float3 jodieReinhardTonemap( float3 c )
 {
+	const float invW2 = 1.0 / ( 5.0 * 5.0 );
 	float l = dot( c, float3( 0.2126, 0.7152, 0.0722 ) );
-	float3 tc = c / ( c + 1.0 );
-	return lerp( c / ( l + 1.0 ), tc, tc );
+	float3 tc = c * ( 1.0 + c * invW2 ) / ( c + 1.0 );
+	float3 lc = c * ( 1.0 + l * invW2 ) / ( l + 1.0 );
+	return saturate( lerp( lc, tc, saturate( tc ) ) );
 }
 
 float3 sunWithBloom( float3 rayDir, float3 sunDir )
@@ -385,9 +390,13 @@ float4 main( const PS_INPUT In ) : COLOR
 			{
 				float T = saturate( clouds.a );
 				lum = lum * T + clouds.rgb;
-				sunLum *= T;
-				stars *= T;
-				moon *= T;
+				// the discs are far brighter than the sky around them (and the night exposure is
+				// high): with plain T a thick cloud still let the moon through as a sharp dot.
+				// T^3: gone behind a real cloud, a soft glow behind a thin one
+				float T3 = T * T * T;
+				sunLum *= T3;
+				stars *= T * T;
+				moon *= T3;
 			}
 		}
 
@@ -407,10 +416,14 @@ float4 main( const PS_INPUT In ) : COLOR
 	// ---- the horizon melts into the weather fog (same color the world fog uses)
 	if ( bWeather && g_wFog.x > 0.0 )
 	{
+		// optical depth of the (exponential height) fog along the ray: a dense fog hides the
+		// zenith too (the "fog" preset used to show clear sky and holes overhead), haze only
+		// the horizon
 		float fogDensity = g_wFog.x * 0.001;
+		float fogScaleH = 1000.0 / max( g_wFog.y, 0.05 );
+		float pathUp = fogScaleH / max( rayDir.z, 0.02 );
 		float pathToHorizon = 12000.0 / max( abs( rayDir.z ) + 0.03, 0.03 );
-		float fogSky = 1.0 - exp( -fogDensity * pathToHorizon * 0.35 );
-		fogSky *= saturate( 1.0 - rayDir.z * 1.5 );
+		float fogSky = 1.0 - exp( -fogDensity * min( pathUp, pathToHorizon * 0.35 ) );
 		// half-way to the hue of the sky behind it: the fog color comes from the scene
 		// light and would otherwise show as a tinted band where it meets the clouds
 		float3 fogCol = g_wFogColor.rgb;

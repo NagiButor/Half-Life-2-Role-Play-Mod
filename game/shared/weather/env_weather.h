@@ -39,7 +39,14 @@ public:
 	virtual void Spawn();
 	virtual void Activate();
 	virtual int UpdateTransmitState();
+	// HL2RPM: world lighting/weather belongs to its map: never carried through a
+	// changelevel landmark (point entities are by default -> doubled suns and lamps)
+	virtual int ObjectCaps() { return BaseClass::ObjectCaps() & ~FCAP_ACROSS_TRANSITION; }
 	virtual void OnRestore();
+
+	// HL2RPM: weather continuity across level transitions
+	void StoreWorldWeather();
+	bool ApplyWorldWeather();
 
 	void SetWeather( int iPreset, float flTransitionSeconds );
 	void SetAutomatic( bool bAuto );

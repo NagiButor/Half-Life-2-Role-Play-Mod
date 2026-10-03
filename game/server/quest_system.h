@@ -52,9 +52,17 @@ class CQuestSystem : public CAutoGameSystem, public CGameEventListener
 public:
 	CQuestSystem();
 
+	virtual void LevelInitPreEntity();
 	virtual void LevelInitPostEntity();
 	virtual void LevelShutdownPostEntity();
 	virtual void FireGameEvent( IGameEvent *event );
+
+	// HL2RPM: quests and reputation are part of the save game and survive level
+	// transitions; a new game clears them
+	void ClearPlayerData();
+	void PrintState() const;
+	void SaveState( class ISave *pSave );
+	void RestoreState( class IRestore *pRestore );
 
 	void RegisterQuestDef( const QuestDef &def );
 	const QuestDef *FindQuestDef( const char *questId ) const;

@@ -9,6 +9,10 @@
 
 static CCommandBufferBuilder< CFixedCommandStorageBuffer< 512 > > tmpBuf;
 
+// HL2RPM: see the skybox mark in DrawPassGBuffer
+static ConVar r_deferred_skybox_sunshadow( "r_deferred_skybox_sunshadow", "0", 0,
+	"1 = the 3D skybox looks up the sun's shadow maps like the map (they hold the map's casters, not the skybox's)" );
+
 void InitParmsGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMaterialVar **params )
 {
 	if ( PARM_NO_DEFAULT( info.iAlphatestRef ) ||
@@ -362,6 +366,17 @@ void DrawPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 		pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_0, vPos );
 		pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_1, GetDeferredExt()->GetForwardBase() );
 		pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_2, zScale );
+
+		// HL2RPM: the 3D skybox (its depth is scaled by the skybox scale, the main view's and
+		// the view model's by ~1) marks its pixels - see gbuffer_ps30 / lightingpass_global_ps30.
+		// So does the local player's first person body (the client sets the render parameter
+		// while it draws it): the sun pass ignores the body's own casters there.
+		{
+			const bool bMark = zScale[0] > 1.5f && !r_deferred_skybox_sunshadow.GetBool();
+			const bool bBody = !bMark && pShaderAPI->GetIntRenderingParameter( INT_RENDERPARM_DEFERRED_LOCAL_BODY ) != 0;
+			float flSkybox[4] = { bMark ? 1.0f : 0.0f, bBody ? 1.0f : 0.0f, 0, 0 };
+			pShaderAPI->SetPixelShaderConstant( 3, flSkybox, 1, true );
+		}
 
 		pShader->LoadViewMatrixIntoVertexShaderConstant( VERTEX_SHADER_AMBIENT_LIGHT );
 

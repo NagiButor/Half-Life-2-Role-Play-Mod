@@ -1,0 +1,113 @@
+//========= HL2RPM ============================================================//
+//
+// Sky visibility map, made from the rain occlusion map (top-down raw depth,
+// R32F, 0 = the map's camera high above, 1 = its far plane / nothing there)
+// whenever that is rendered. Per texel (24 units):
+//
+//   R - the open part of a disk around the texel for a point on its own top
+//       (the lowest top in it): ground next to a high box sees less sky, a
+//       roof top sees all of it
+//   G - the same for a point under a cover, judged at the lowest level around
+//       (the ground the cover stands over): under a small canopy the sky is
+//       seen from the sides, deep inside a building not at all
+//   B - the depth of that lowest top of the texel (deferred_ssao_ps30 tells
+//       how high a point is above it - walls see more sky higher up)
+//   A - the depth of that lowest level around: a point under a cover far below
+//       it has no ground in sight around (deep inside a building: covered)
+//
+// Made twice, with a 128 and a 512 unit disk (c0.z): the sky under a high cover
+// (a floating block, a high hall roof) is seen through the gaps around it, so
+// deferred_ssao_ps30 takes the wide one for covers high over the point.
+//
+// The disk is sampled densely (192 taps, Vogel, weights falling smoothly to
+// zero at its rim - with a hard rim every wall entering the disk drew a
+// polygonal step) once per render of the rain map, in world space: the result
+// is smooth and the same every frame. The 25 binary taps per pixel it replaces
+// drew steps of sky light parallel to every wall ("overlapping shadows" in the
+// shade) and changed whenever the map was re-rendered.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+sampler sRaw		: register( s0 );	// raw top-down depth (1024x1024), point sampled
+
+const float4 g_vecParams	: register( c0 );	// x this map's texel / 4 (uv), y depth range (units), z disk radius (uv), w lowest level allowed below the own top (depth units)
+const float4 g_vecLevels	: register( c1 );	// x cover softness (units), y cover height (units): taller covers hide the sky
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+};
+
+static const int NUM_TAPS_LOW = 48;
+static const int NUM_TAPS = 192;
+static const float VOID_DEPTH = 0.99999;
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	const float2 uv = In.vTexCoord;
+	const float texel = g_vecParams.x;
+	const float range = g_vecParams.y;
+	const float radius = g_vecParams.z;
+
+	// the lowest top of this texel (the deepest of 4x4 samples over it; nothing = void)
+	float dSelf = 0.0;
+	[unroll]
+	for ( int y = 0; y < 4; y++ )
+	{
+		[unroll]
+		for ( int x = 0; x < 4; x++ )
+		{
+			const float d = tex2Dlod( sRaw, float4( uv + ( float2( x, y ) - 1.5 ) * texel, 0, 0 ) ).x;
+			dSelf = max( dSelf, ( d < VOID_DEPTH ) ? d : 0.0 );
+		}
+	}
+	if ( dSelf <= 0.0 )
+		return float4( 1, 1, 1, 1 );	// nothing at all here: open (A 1 = the far plane: any point is above)
+
+	// the lowest level around (void doesn't count, and not much below the own top: a pit
+	// or the end of the map nearby doesn't make the ground under a cover a cellar)
+	float dLow = dSelf;
+	[loop]
+	for ( int i = 0; i < NUM_TAPS_LOW; i++ )
+	{
+		float2 dir;
+		sincos( i * 2.39996323, dir.y, dir.x );
+		const float2 off = dir * ( radius * sqrt( ( i + 0.5 ) / NUM_TAPS_LOW ) );
+		const float d = tex2Dlod( sRaw, float4( uv + off, 0, 0 ) ).x;
+		if ( d < VOID_DEPTH )
+			dLow = max( dLow, d );
+	}
+	dLow = min( dLow, dSelf + g_vecParams.w );
+
+	// open part of the disk at the own top and at the lowest level: a tap is covered when
+	// its top is higher than the level by more than g_vecLevels.y (soft over .x)
+	float openTop = 0.0;
+	float openLow = 0.0;
+	float wsum = 0.0;
+	[loop]
+	for ( int j = 0; j < NUM_TAPS; j++ )
+	{
+		float2 dir;
+		sincos( j * 2.39996323, dir.y, dir.x );
+		const float r = sqrt( ( j + 0.5 ) / NUM_TAPS );
+		const float d = tex2Dlod( sRaw, float4( uv + dir * ( radius * r ), 0, 0 ) ).x;
+		// (nearer taps weigh more, down to nothing at the rim)
+		const float w = ( 1.0 - r * r ) * ( 1.0 - r * r );
+		if ( d >= VOID_DEPTH )
+		{
+			openTop += w;
+			openLow += w;
+		}
+		else
+		{
+			// height of the tap's top above the level = ( level depth - tap depth ) * range
+			openTop += w * saturate( ( g_vecLevels.y - ( dSelf - d ) * range ) / g_vecLevels.x + 1.0 );
+			openLow += w * saturate( ( g_vecLevels.y - ( dLow - d ) * range ) / g_vecLevels.x + 1.0 );
+		}
+		wsum += w;
+	}
+
+	return float4( openTop / wsum, openLow / wsum, dSelf, dLow );
+}

@@ -294,7 +294,7 @@ public:
 		AssertMsg( !( m_nSELFILLUM_MASK && m_nSELFILLUM_ENVMAP_ALPHA ), "Invalid combo combination ( SELFILLUM_MASK && SELFILLUM_ENVMAP_ALPHA )" );
 		AssertMsg( !( m_nSELFILLUM_MASK && m_nENVMAPMASK ), "Invalid combo combination ( SELFILLUM_MASK && ENVMAPMASK )" );
 		AssertMsg( !( m_nSELFILLUM_ENVMAP_ALPHA && !m_nENVMAPMASK ), "Invalid combo combination ( SELFILLUM_ENVMAP_ALPHA && !ENVMAPMASK )" );
-		return ( 2 * m_nALPHATEST ) + ( 4 * m_nTRANSLUCENT ) + ( 8 * m_nREADNORMAL ) + ( 16 * m_nNOCULL ) + ( 32 * m_nPHONGFRESNEL ) + ( 64 * m_nENVMAP ) + ( 128 * m_nENVMAPMASK ) + ( 256 * m_nENVMAPFRESNEL ) + ( 512 * m_nRIMLIGHT ) + ( 1024 * m_nRIMLIGHTMODULATELIGHT ) + ( 2048 * m_nBASETEXTURE2 ) + ( 4096 * m_nBLENDMODULATE ) + ( 8192 * m_nMULTIBLEND ) + ( 16384 * m_nSELFILLUM ) + ( 32768 * m_nSELFILLUM_MASK ) + ( 65536 * m_nSELFILLUM_ENVMAP_ALPHA ) + ( 131072 * m_nPARALLAXCORRECT ) + 0;
+		return ( 4 * m_nALPHATEST ) + ( 8 * m_nTRANSLUCENT ) + ( 16 * m_nREADNORMAL ) + ( 32 * m_nNOCULL ) + ( 64 * m_nPHONGFRESNEL ) + ( 128 * m_nENVMAP ) + ( 256 * m_nENVMAPMASK ) + ( 512 * m_nENVMAPFRESNEL ) + ( 1024 * m_nRIMLIGHT ) + ( 2048 * m_nRIMLIGHTMODULATELIGHT ) + ( 4096 * m_nBASETEXTURE2 ) + ( 8192 * m_nBLENDMODULATE ) + ( 16384 * m_nMULTIBLEND ) + ( 32768 * m_nSELFILLUM ) + ( 65536 * m_nSELFILLUM_MASK ) + ( 131072 * m_nSELFILLUM_ENVMAP_ALPHA ) + ( 262144 * m_nPARALLAXCORRECT ) + 0;
 	}
 };
 
@@ -304,8 +304,10 @@ public:
 class composite_ps30_Dynamic_Index
 {
 	unsigned int m_nPIXELFOGTYPE : 2;
+	unsigned int m_nREFLECTVIEW : 2;
 #ifdef _DEBUG
 	bool m_bPIXELFOGTYPE : 1;
+	bool m_bREFLECTVIEW : 1;
 #endif	// _DEBUG
 public:
 	void SetPIXELFOGTYPE( int i )
@@ -317,20 +319,31 @@ public:
 #endif	// _DEBUG
 	}
 
+	void SetREFLECTVIEW( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nREFLECTVIEW = i;
+#ifdef _DEBUG
+		m_bREFLECTVIEW = true;
+#endif	// _DEBUG
+	}
+
 	composite_ps30_Dynamic_Index( IShaderDynamicAPI* pShaderAPI )
 	{
 		m_nPIXELFOGTYPE = 0;
+		m_nREFLECTVIEW = 0;
 #ifdef _DEBUG
 		m_bPIXELFOGTYPE = false;
+		m_bREFLECTVIEW = false;
 #endif	// _DEBUG
 	}
 
 	int GetIndex() const
 	{
-		Assert( m_bPIXELFOGTYPE );
-		return ( 1 * m_nPIXELFOGTYPE ) + 0;
+		Assert( m_bPIXELFOGTYPE && m_bREFLECTVIEW );
+		return ( 1 * m_nPIXELFOGTYPE ) + ( 2 * m_nREFLECTVIEW ) + 0;
 	}
 };
 
-#define shaderDynamicTest_composite_ps30 psh_forgot_to_set_dynamic_PIXELFOGTYPE
+#define shaderDynamicTest_composite_ps30 psh_forgot_to_set_dynamic_PIXELFOGTYPE + psh_forgot_to_set_dynamic_REFLECTVIEW
 

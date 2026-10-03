@@ -1,6 +1,7 @@
 //========= HL2RPM ============================================================//
 //
-// Depth-aware (bilateral) separable blur of the half resolution SSAO.
+// Depth-aware (bilateral) separable blur of the half resolution SSAO (r) and
+// sky visibility (g).
 //
 //=============================================================================//
 
@@ -26,7 +27,8 @@ float4 main( const PS_INPUT In ) : COLOR
 
 	static const float w[5] = { 0.2270270, 0.1945946, 0.1216216, 0.0540541, 0.0162162 };
 
-	float sum = tex2D( sAO, uv * g_vecBlur.w ).r * w[0];
+	// r: SSAO, g: sky visibility
+	float2 sum = tex2D( sAO, uv * g_vecBlur.w ).rg * w[0];
 	float wsum = w[0];
 	float invTol = 1.0 / max( d0 * g_vecBlur.z, 1.0 );
 
@@ -38,16 +40,16 @@ float4 main( const PS_INPUT In ) : COLOR
 		float2 uvA = uv + off;
 		float dA = tex2D( sDepth, uvA ).x;
 		float wA = w[i] * saturate( 1.0 - abs( dA - d0 ) * invTol );
-		sum += tex2D( sAO, uvA * g_vecBlur.w ).r * wA;
+		sum += tex2D( sAO, uvA * g_vecBlur.w ).rg * wA;
 		wsum += wA;
 
 		float2 uvB = uv - off;
 		float dB = tex2D( sDepth, uvB ).x;
 		float wB = w[i] * saturate( 1.0 - abs( dB - d0 ) * invTol );
-		sum += tex2D( sAO, uvB * g_vecBlur.w ).r * wB;
+		sum += tex2D( sAO, uvB * g_vecBlur.w ).rg * wB;
 		wsum += wB;
 	}
 
-	float ao = sum / max( wsum, 1e-4 );
-	return float4( ao, ao, ao, 1 );
+	float2 ao = sum / max( wsum, 1e-4 );
+	return float4( ao.x, ao.y, ao.x, 1 );
 }

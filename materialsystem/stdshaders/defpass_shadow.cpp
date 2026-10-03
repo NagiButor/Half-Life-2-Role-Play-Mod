@@ -37,7 +37,6 @@ void DrawPassShadowPass( const defParms_shadow &info, CBaseVSShader *pShader, IM
 	const bool bModel = info.bModel;
 	const bool bIsDecal = IS_FLAG_SET( MATERIAL_VAR_DECAL );
 	const bool bFastVTex = g_pHardwareConfig->HasFastVertexTextures();
-	const bool bNoCull = IS_FLAG_SET( MATERIAL_VAR_NOCULL );
 
 	const bool bAlbedo = PARM_TEX( info.iAlbedo );
 	const bool bAlbedo2 = PARM_TEX( info.iAlbedo2 );
@@ -56,15 +55,16 @@ void DrawPassShadowPass( const defParms_shadow &info, CBaseVSShader *pShader, IM
 
 		pShaderShadow->EnableSRGBWrite( false );
 
-		if ( info.bDepthBias )
-		{
-			pShaderShadow->EnablePolyOffset( SHADER_POLYOFFSET_SHADOW_BIAS );
-		}
+		// HL2RPM: always - the sun cascades take their slope bias from the rasterizer now
+		// (the shadow pass writes no depth for them, see shadowpass_ps30); the modes that
+		// still write the depth from the shader ignore it
+		pShaderShadow->EnablePolyOffset( SHADER_POLYOFFSET_SHADOW_BIAS );
 
-		if ( bNoCull )
-		{
-			pShaderShadow->EnableCulling( false );
-		}
+		// HL2RPM: both sides cast. vbsp drops nodraw faces, so a wall brush textured on one
+		// side only (nodraw on the other) is a single face: turned away from the light it was
+		// culled and only its edges cast a thin shadow. A closed object loses nothing - its
+		// faces toward the light are nearer and win the depth test.
+		pShaderShadow->EnableCulling( false );
 
 		int iVFmtFlags = VERTEX_POSITION | VERTEX_NORMAL;
 		int iUserDataSize = 0;

@@ -37,6 +37,10 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 		SHADER_PARAM( SELFILLUMFRESNEL, SHADER_PARAM_TYPE_BOOL, "0", "Self illum fresnel" )
 		SHADER_PARAM( SELFILLUMMASK, SHADER_PARAM_TYPE_TEXTURE, "shadertest/BaseTexture", "If we bind a texture here, it overrides base alpha (if any) for self illum" )
 
+		// HL2RPM: blended, but composited here (lit by the light buffer behind it) instead of
+		// falling back to VertexLitGeneric (materialsystem_passthru.cpp sets it)
+		SHADER_PARAM( DEFERREDTRANSLUCENT, SHADER_PARAM_TYPE_BOOL, "0", "" )
+
 	END_SHADER_PARAMS
 
 	void SetupParmsGBuffer( defParms_gBuffer &p )
@@ -155,7 +159,7 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 		const bool bTranslucent = IS_FLAG_SET( MATERIAL_VAR_TRANSLUCENT );
 		const bool bIsDecal = IS_FLAG_SET( MATERIAL_VAR_DECAL );
 
-		if ( bTranslucent && !bIsDecal )
+		if ( bTranslucent && !bIsDecal && !( params[DEFERREDTRANSLUCENT]->IsDefined() && params[DEFERREDTRANSLUCENT]->GetIntValue() != 0 ) )
 			return "VertexlitGeneric";
 
 		return 0;

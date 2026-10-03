@@ -10,6 +10,7 @@
 #include "flashlighteffect.h"
 #include "deferred/cdeferred_manager_client.h"
 #include "deferred/flashlighteffect_deferred.h"
+#include "renderparm.h"
 #include "weapon_selection.h"
 #include "history_resource.h"
 #include "iinput.h"
@@ -1788,7 +1789,14 @@ int C_BasePlayer::DrawModel( int flags )
 #ifdef MAPBASE
 	if (DrawingLegs() && InFirstPersonView() && InPerspectiveView())
 	{
-		return BaseClass::DrawModel( flags );
+		// HL2RPM: the deferred G-buffer marks the first person body: the shadow maps get the
+		// whole model (head and arms included) while this view scales them away, and the
+		// hidden head and shoulders shadowed the visible torso and legs (defpass_gbuffer)
+		CMatRenderContextPtr pRenderContext( materials );
+		pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_LOCAL_BODY, 1 );
+		const int nDrawn = BaseClass::DrawModel( flags );
+		pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_LOCAL_BODY, 0 );
+		return nDrawn;
 	}
 
 	if (DrawingPlayerModelExternally())

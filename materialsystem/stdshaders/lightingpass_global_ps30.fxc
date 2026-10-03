@@ -40,60 +40,31 @@ const float g_flCSMColorize				: register( c61 );
 const float4 g_vecCloud0					: register( c62 );	// coverage, density, type, darkness
 const float4 g_vecCloud1					: register( c63 );	// base (m), thickness (m), cirrus, time
 const float4 g_vecWind						: register( c64 );	// xy cloud offset (m)
-const float4 g_vecWeatherFlags				: register( c65 );	// x cloud shadow strength
+const float4 g_vecWeatherFlags				: register( c65 );	// x cloud shadow strength, y cloud space meters per unit
 
 sampler sWeatherMap							: register( s4 );
 sampler sCloudNoise							: register( s5 );
 
 // ---- HL2RPM: ambient occlusion + sky visibility of the ambient light ----
-sampler sSSAO								: register( s6 );	// half resolution AO (top left of a full size RT)
-sampler sRainMap							: register( s7 );	// top-down occlusion map (hardware depth compare)
-const float4 g_matRainMap[3]				: register( c66 );	// rows of world -> rain map texture
-const float4 g_vecRainMap					: register( c69 );	// depth bias, size, texel size, valid
-const float4 g_vecAmbientCtrl				: register( c70 );	// x sky visibility on, y indoor ambient, z sample radius (units), w AO uv scale (0 = off)
-
-// How much of the sky a point sees, from the top-down map: open straight above and
-// on a disk around it. Deep inside buildings the sky light fades to the indoor level.
-float SkyVisibility( float3 worldPos, float3 normal )
-{
-	if ( g_vecAmbientCtrl.x < 0.5 || g_vecRainMap.w < 0.5 )
-		return 1.0;
-
-	float4 wp = float4( worldPos + normal * 4.0, 1.0 );
-	float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
-
-	// outside the map: no information, treat as outdoors
-	float2 edge = abs( uvz.xy * 2.0 - 1.0 );
-	float inside = saturate( ( 1.0 - max( edge.x, edge.y ) ) * 10.0 );
-
-	float z = uvz.z - g_vecRainMap.x;
-	float r = g_vecAmbientCtrl.z / g_vecRainMap.y;
-	float sum = tex2Dproj( sRainMap, float4( uvz.xy, z, 1 ) ).x * 2.0;
-	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2(  r,  0 ), z, 1 ) ).x;
-	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2( -r,  0 ), z, 1 ) ).x;
-	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2(  0,  r ), z, 1 ) ).x;
-	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2(  0, -r ), z, 1 ) ).x;
-	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2(  r,  r ) * 0.7071, z, 1 ) ).x;
-	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2( -r,  r ) * 0.7071, z, 1 ) ).x;
-	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2(  r, -r ) * 0.7071, z, 1 ) ).x;
-	sum += tex2Dproj( sRainMap, float4( uvz.xy + float2( -r, -r ) * 0.7071, z, 1 ) ).x;
-	float vis = sum / 10.0;
-
-	return lerp( 1.0, vis, inside );
-}
+// half resolution (top left of a full size RT), blurred: r SSAO, g sky visibility
+// from the top-down occlusion map (see deferred_ssao_ps30). Deep inside buildings
+// the sky light fades to the indoor level.
+sampler sSSAO								: register( s6 );
+const float4 g_vecAmbientCtrl				: register( c70 );	// y indoor ambient, w AO uv scale (0 = off)
 
 // Density of the cloud column above a point, looking toward the light.
 // Uses the same weather map / shape noise as the volumetric clouds so the
 // shadows on the ground match the clouds in the sky.
 float CloudShadow( float3 worldPos, float3 lightDir )
 {
-	float3 pm = worldPos * 0.0254;
+	// same cloud space as the volumetric clouds (horizontal scale), real heights
+	float3 pm = float3( worldPos.xy * ( ( g_vecWeatherFlags.y > 0.0 ) ? g_vecWeatherFlags.y : 0.0254 ), worldPos.z * 0.0254 );
 	float midH = g_vecCloud1.x + g_vecCloud1.y * 0.35;
 	float tMid = ( midH - pm.z ) / max( lightDir.z, 0.1 );
 	float2 cxy = pm.xy + lightDir.xy * tMid + g_vecWind.xy;
 
 	float2 wm = tex2Dlod( sWeatherMap, float4( cxy / 40000.0, 0, 0 ) ).rg;
-	float coverage = saturate( g_vecCloud0.x + ( wm.x - 0.5 ) * 0.5 * ( 1.0 - g_vecCloud0.x * 0.6 ) );
+	float coverage = saturate( g_vecCloud0.x + ( wm.x - 0.5 ) * 0.5 * ( 1.0 - g_vecCloud0.x * 0.6 ) * saturate( ( 1.0 - g_vecCloud0.x ) * 6.0 ) );
 	float type = saturate( g_vecCloud0.z + ( wm.y - 0.5 ) * 0.7 );
 
 	// one slice of the shape noise where the height profile peaks (same parameterization as the clouds)
@@ -118,6 +89,265 @@ float CloudShadow( float3 worldPos, float3 lightDir )
 	return 1.0 - g_vecWeatherFlags.x * ( 1.0 - exp( -opticalDepth ) );
 }
 
+
+#if HAS_SHADOW
+// ---- HL2RPM: soft sun shadows (PCSS) ----
+sampler sShadowRaw							: register( s8 );	// caster depth of the sun atlas (R32F)
+const float4 g_vecPCSS						: register( c71 );	// x penumbra radius per unit of caster distance (sun), y max penumbra (texels), z max penumbra (world units), w r_csm_pcss (0 = no blocker search)
+// x: how far in front of the local player's first person body casters are ignored (world
+// units, r_csm_body_bias) - its hidden head and shoulders shadowed the visible torso and legs
+const float4 g_vecShadowExtra				: register( c66 );	// y: shadow normal (0 G-buffer, 1 2x2 quad derivatives, 2 own surface from the depth)
+
+// Blocker search: a fixed Vogel disk (unit radius), the same for every pixel - a disk rotated
+// per pixel gives noise that boils as soon as the shadow map shifts under it (the sun moving
+// with the time of day). xy offset, z weight (falls off toward the rim, the weights add up to
+// 10) so the estimated caster depth - and with it the penumbra - doesn't jump each time a
+// tap crosses the texel staircase of a silhouette.
+static const float3 g_vecPCSSBlockerDisk[16] =
+{
+	float3( -0.085703, -0.154612, 0.9766 ), float3(  0.290350,  0.097194, 0.9297 ),
+	float3( -0.361154,  0.160679, 0.8828 ), float3(  0.186672, -0.428840, 0.8359 ),
+	float3(  0.172387,  0.501530, 0.7891 ), float3( -0.515063, -0.280108, 0.7422 ),
+	float3(  0.618570, -0.153693, 0.6953 ), float3( -0.378427,  0.570564, 0.6484 ),
+	float3( -0.113240, -0.720019, 0.6016 ), float3(  0.602455,  0.480415, 0.5547 ),
+	float3( -0.808195,  0.055414, 0.5078 ), float3(  0.584497, -0.614095, 0.4609 ),
+	float3( -0.016863,  0.883723, 0.4141 ), float3( -0.607443, -0.689031, 0.3672 ),
+	float3(  0.946566,  0.101304, 0.3203 ), float3( -0.792385,  0.583845, 0.2734 ),
+};
+
+// Percentage-closer soft shadows: the penumbra grows with the distance between the caster
+// and the receiver - crisp at the foot of a wall or a tree trunk, softer where the shadow of
+// a crown or a roof edge falls far away.
+//
+// HL2RPM (2026-10-02): the depth test is filtered with a cubic B-spline - hardware bilinear
+// compares, each one weighting a pair of texels per axis: 4 of them for the sharpest kernel,
+// 16 for a wider one (up to twice as wide). The result is a smooth function of the position:
+// up close, where one texel of the shadow map covers many pixels, the old disk of bilinear
+// taps showed the texel staircase and a stripe along every texel column across a penumbra.
+// One filter for the whole cascade and for the band blended into the next one (the old one
+// switched between 12 and 24 taps, skipped the filter in a probed umbra and blended in a
+// hard 4 tap lookup of the next cascade: contours inside penumbrae, "one shadow lying over
+// another", and acne coming and going with the camera as the band moved over the surfaces).
+
+// cubic B-spline (support -2..2, the weights of four texels at distances t add up to 1)
+float4 BSplineWeights( float4 t )
+{
+	float4 a = abs( t );
+	float4 b = saturate( 2.0f - a );
+	float4 outer = b * b * b * ( 1.0f / 6.0f );
+	float4 inner = ( 2.0f / 3.0f ) + a * a * ( 0.5f * a - 1.0f );
+	return ( a < 1.0f ) ? inner : outer;
+}
+
+// shadow map position of a receiver, moved along its geometric normal - up to
+// r_csm_bias_normal texels off the surface at grazing angles. That is a depth margin of as
+// many texels per unit of tan( angle to the sun ), but unlike a depth bias it doesn't let
+// the light through under the foot of a caster (the point only rises off the floor).
+float3 SunShadowUVZ( float3 worldPos, float3 flNormal, float NdotL, int c )
+{
+	// g_vecSlopeData[c].z = half a texel in world units
+	const float sinA = sqrt( saturate( 1.0f - NdotL * NdotL ) );
+	worldPos += flNormal * ( sinA * 2.0f * g_vecSlopeData[c].z * g_vecAmbientCtrl.x );
+	return mul( float4( worldPos, 1 ), g_matOrtho[c] ).xyz;
+}
+
+bool InsideCascade( float3 uvz )
+{
+	return !any( floor( ( uvz.xy - 0.0015f ) * 1.003f ) );
+}
+
+// filtered sun shadow from cascade c
+float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBias, float3 footX, float3 footY, int c, bool bDebug )
+{
+	const float4 tile = g_vecUVTransform[c];		// atlas offset / scale of this cascade
+	const float2 atlasTexel = g_vecFilterConfig_A[c].xy;
+	const float oneTexelDepth = 2.0f * g_vecSlopeData[c].x;
+
+	// the receiver's plane in shadow space: depth change per texel of offset - a kernel wider
+	// than a texel would otherwise shadow the surface itself
+	const float3 gu = float3( g_matOrtho[c][0].x, g_matOrtho[c][1].x, g_matOrtho[c][2].x );
+	const float3 gv = float3( g_matOrtho[c][0].y, g_matOrtho[c][1].y, g_matOrtho[c][2].y );
+	const float3 gz = float3( g_matOrtho[c][0].z, g_matOrtho[c][1].z, g_matOrtho[c][2].z );
+	float nz = dot( flNormal, gz );
+	nz = ( nz < 0.0f ) ? min( nz, -1e-5f ) : max( nz, 1e-5f );
+	const float gz2 = dot( gz, gz );
+	float2 dzdTexel = -float2( dot( flNormal, gu ) * gz2 / dot( gu, gu ), dot( flNormal, gv ) * gz2 / dot( gv, gv ) ) / nz;
+	dzdTexel *= atlasTexel / tile.zw;
+	dzdTexel = clamp( dzdTexel, -6.0f * oneTexelDepth, 6.0f * oneTexelDepth );
+
+	// a small depth bias on top of the normal offset (r_csm_bias_slope texels per unit of tan):
+	// within one bilinear compare the plane is not followed. The caster side keeps only a
+	// small slope bias now - the old 3x pushed steep walls behind the floor at their foot
+	// (a lit gap along the base of every wall)
+	const float cosA = max( abs( NdotL ), 0.05f );
+	const float tanA = min( sqrt( 1.0f - cosA * cosA ) / cosA, 8.0f );
+	uvz.z -= oneTexelDepth * ( 0.1f + g_vecAmbientCtrl.z * tanA );
+	// (world units to depth: g_vecSlopeData x / z = half a texel of depth / half a texel)
+	uvz.z -= extraBias * g_vecSlopeData[c].x / g_vecSlopeData[c].z;
+
+	const float2 atlasUV = uvz.xy * tile.zw + tile.xy;
+	const float2 tileMin = tile.xy + atlasTexel;
+	const float2 tileMax = tile.xy + tile.zw - atlasTexel;
+
+	// r_csm_pcss 3: caster depth - receiver depth at the point (grey = equal), 4: the caster depth itself
+	if ( bDebug && g_vecPCSS.w > 2.5f && g_vecPCSS.w < 4.5f )
+	{
+		float raw = tex2Dlod( sShadowRaw, float4( atlasUV, 0, 0 ) ).x;
+		return ( g_vecPCSS.w > 3.5f ) ? frac( raw * 20.0f ) : saturate( ( raw - uvz.z ) / ( 4.0f * oneTexelDepth ) + 0.5f );
+	}
+
+	// kernel scale: 1 = the sharpest B-spline (sigma 0.58 texel), up to 2. The penumbra adds
+	// a disk of its radius (sigma = radius / 2). The widest penumbra is the same in world units
+	// in every cascade (what the first one allows): the coarse far cascades filter only the
+	// texels right around the point - most of an open view - and skip the blocker search.
+	const float maxPenumbra = min( g_vecPCSS.y, g_vecPCSS.z / ( 2.0f * g_vecSlopeData[c].z ) );
+	const float maxScale = min( sqrt( 1.0f + 0.75f * maxPenumbra * maxPenumbra ), 2.0f );
+	float scale = 1.0f;
+	[branch]
+	if ( maxScale > 1.15f && g_vecPCSS.w > 0.5f )
+	{
+		// blockers: the mean depth of what is between the point and the sun, searched over
+		// the reach of the widest kernel
+		const float searchRadius = 1.5f * maxScale + 1.0f;
+		float blockers = 0.0f;
+		float blockerSum = 0.0f;
+		[unroll]
+		for ( int b = 0; b < 16; b++ )
+		{
+			float2 o = g_vecPCSSBlockerDisk[b].xy * searchRadius;
+			float d = tex2Dlod( sShadowRaw, float4( clamp( atlasUV + o * atlasTexel, tileMin, tileMax ), 0, 0 ) ).x;
+			float isBlocker = step( d, uvz.z + dot( o, dzdTexel ) - oneTexelDepth ) * g_vecPCSSBlockerDisk[b].z;
+			blockers += isBlocker;
+			blockerSum += d * isBlocker;
+		}
+		if ( bDebug && abs( g_vecPCSS.w - 2.0f ) < 0.5f )
+			return blockers / 10.0f;	// r_csm_pcss 2: how many blockers the search found
+		if ( blockers < 0.01f )
+		{
+			// nothing between the point and the sun. The caster depth map can miss casters
+			// the hardware map has (long sunrise shadows of distant buildings did): ask the
+			// hardware map at the point itself before calling it lit
+			if ( tex2Dlod( sShadowDepth, float4( atlasUV, uvz.z, 0 ) ).x > 0.99f )
+				return 1.0f;
+		}
+		else
+		{
+			// penumbra radius (texels) from the caster distance: the sun's angular radius
+			const float penumbra = ( uvz.z - blockerSum / blockers ) * g_vecPCSS.x / oneTexelDepth;
+			scale = clamp( sqrt( 1.0f + 0.75f * penumbra * penumbra ), 1.0f, maxScale );
+		}
+	}
+	else if ( bDebug && abs( g_vecPCSS.w - 2.0f ) < 0.5f )
+	{
+		return 0.0f;
+	}
+
+	// the pixel's footprint on the shadow map (texels): far away and at grazing angles one
+	// pixel covers several texels, and the shadows of thin things (rods, ribs, railings)
+	// smaller than a pixel flickered from texel to texel while walking. The kernel covers the
+	// footprint instead, like a mip level (up to the widest kernel). (g_vecShadowExtra.z: on)
+	{
+		const float texelsPerUV = tile.z / atlasTexel.x;
+		const float2 fx = float2( dot( footX, gu ), dot( footX, gv ) ) * texelsPerUV;
+		const float2 fy = float2( dot( footY, gu ), dot( footY, gv ) ) * texelsPerUV;
+		const float footprint = sqrt( max( dot( fx, fx ), dot( fy, fy ) ) );
+		scale = max( scale, min( footprint * g_vecShadowExtra.z, 2.0f ) );
+	}
+
+	// texel centre units: the centre of texel k at k
+	const float2 x = atlasUV / atlasTexel - 0.5f;
+	const float2 i = floor( x );
+	const float2 f = x - i;
+
+	// (explicit LOD: no gradients inside the branches; the hardware still compares with z)
+	float shadow = 0.0f;
+	[branch]
+	if ( scale < 1.01f )
+	{
+		// texels i-1 .. i+2, a pair of them per bilinear compare and axis
+		const float4 wx = BSplineWeights( f.x - float4( -1, 0, 1, 2 ) );
+		const float4 wy = BSplineWeights( f.y - float4( -1, 0, 1, 2 ) );
+		const float2 Wx = wx.xz + wx.yw;
+		const float2 Wy = wy.xz + wy.yw;
+		const float2 Px = i.x + float2( -1, 1 ) + wx.yw / Wx;
+		const float2 Py = i.y + float2( -1, 1 ) + wy.yw / Wy;
+		[unroll]
+		for ( int a = 0; a < 2; a++ )
+		{
+			[unroll]
+			for ( int b = 0; b < 2; b++ )
+			{
+				float2 p = float2( Px[a], Py[b] );
+				float2 uv = clamp( ( p + 0.5f ) * atlasTexel, tileMin, tileMax );
+				shadow += Wx[a] * Wy[b] * tex2Dlod( sShadowDepth, float4( uv, uvz.z + dot( p - x, dzdTexel ), 0 ) ).x;
+			}
+		}
+	}
+	else
+	{
+		// texels i-3 .. i+4: the kernel scaled up to twice the width
+		const float rs = 1.0f / scale;
+		const float4 wx0 = BSplineWeights( ( f.x - float4( -3, -2, -1, 0 ) ) * rs );
+		const float4 wx1 = BSplineWeights( ( f.x - float4( 1, 2, 3, 4 ) ) * rs );
+		const float4 wy0 = BSplineWeights( ( f.y - float4( -3, -2, -1, 0 ) ) * rs );
+		const float4 wy1 = BSplineWeights( ( f.y - float4( 1, 2, 3, 4 ) ) * rs );
+		const float4 Wx = float4( wx0.xz + wx0.yw, wx1.xz + wx1.yw );
+		const float4 Wy = float4( wy0.xz + wy0.yw, wy1.xz + wy1.yw );
+		const float4 Px = i.x + float4( -3, -1, 1, 3 ) + float4( wx0.yw, wx1.yw ) / max( Wx, 1e-6f );
+		const float4 Py = i.y + float4( -3, -1, 1, 3 ) + float4( wy0.yw, wy1.yw ) / max( Wy, 1e-6f );
+		[unroll]
+		for ( int a = 0; a < 4; a++ )
+		{
+			[unroll]
+			for ( int b = 0; b < 4; b++ )
+			{
+				float2 p = float2( Px[a], Py[b] );
+				float2 uv = clamp( ( p + 0.5f ) * atlasTexel, tileMin, tileMax );
+				shadow += Wx[a] * Wy[b] * tex2Dlod( sShadowDepth, float4( uv, uvz.z + dot( p - x, dzdTexel ), 0 ) ).x;
+			}
+		}
+		shadow /= dot( Wx, 1.0f ) * dot( Wy, 1.0f );
+	}
+	return shadow;
+}
+
+// flNormal: the geometric normal (see main), NdotL: its dot with the direction to the sun
+float SunShadowPCSS( float3 worldPos, float3 flNormal, float NdotL, float extraBias, float3 footX, float3 footY, out int outCascade )
+{
+	int c = -1;
+	float3 uvz = 0;
+	[unroll]
+	for ( int i = 0; i < SHADOW_NUM_CASCADES; i++ )
+	{
+		float3 cand = SunShadowUVZ( worldPos, flNormal, NdotL, i );
+		if ( InsideCascade( cand ) )
+		{
+			c = i;
+			uvz = cand;
+			break;
+		}
+	}
+	outCascade = c;
+	if ( c < 0 )
+		return 1.0f;
+
+	float shadow = SunShadowCascade( uvz, flNormal, NdotL, extraBias, footX, footY, c, true );
+
+	// a narrow band at the rim of the cascade fades into the next one, filtered the same way
+	float2 centered = abs( uvz.xy * 2.0f - 1.0f );
+	float blendFactor = smoothstep( 0.92f, 0.995f, max( centered.x, centered.y ) );
+	[branch]
+	if ( blendFactor > 0.0f && c < ( SHADOW_NUM_CASCADES - 1 ) && ( g_vecPCSS.w < 1.5f || g_vecPCSS.w > 4.5f ) )
+	{
+		float3 uvzNext = SunShadowUVZ( worldPos, flNormal, NdotL, c + 1 );
+		if ( InsideCascade( uvzNext ) )
+			shadow = lerp( shadow, SunShadowCascade( uvzNext, flNormal, NdotL, extraBias, footX, footY, c + 1, false ), blendFactor );
+	}
+
+	return shadow;
+}
+#endif
+
 struct PS_INPUT
 {
 	float2 vTexCoord				: TEXCOORD0;
@@ -136,7 +366,32 @@ PS_OUTPUT main( const PS_INPUT In )
 
 	float flDepth = tex2D( sDepth, In.vTexCoord ).x;
 
-	clip( flDepth - 0.1f );
+#if HAS_SHADOW
+	// HL2RPM: the geometric normal of the surface for the sun shadow lookups, from the depth
+	// buffer. The G-buffer normal carries the bump map: a normal offset, a slope bias and a
+	// receiver plane built from it let a bumpy surface shadow itself in a pattern following its
+	// normal map. (Screen space steps - the derivatives of the interpolants - are taken here,
+	// ahead of any branch; they are the same all over the screen.)
+	const float3 vecRayPos = In.vecWorldRay * flDepth;
+	const float3 vecPosDx = ddx( vecRayPos );
+	const float3 vecPosDy = ddy( vecRayPos );
+	const float3 vecGeoCross = cross( vecPosDx, vecPosDy );
+	const float2 vecTexelUV = float2( ddx( In.vTexCoord.x ), ddy( In.vTexCoord.y ) );
+	const float3 vecRayDx = ddx( In.vecWorldRay );
+	const float3 vecRayDy = ddy( In.vecWorldRay );
+#endif
+
+	// HL2RPM: no geometry (sky). Translucent surfaces in front of the sky - windows, the glass
+	// of vehicles - take this pixel's light, and it kept whatever an earlier frame had left
+	// there (the pass used to clip): glass glowed at night. The light of the open sky instead.
+	if ( flDepth < 0.1f )
+	{
+		float3 skyAmbientLow = max( 2.0 * g_light_ambient_low_half - g_light_ambient_high, 0.0 );
+		float skySunUp = saturate( ( g_vecLightVec_Forward.z + 0.02 ) / 0.08 ) * saturate( g_vecLightVec_Forward.z );
+		Out.vColor_0 = WriteLighting( float4( g_light_ambient_high * 0.75 + skyAmbientLow * 0.25
+			+ g_light_diffuse * 0.45 * skySunUp, 0 ) );
+		return Out;
+	}
 
 	float phong_exp;
 	bool half_lambert, litface;
@@ -153,6 +408,27 @@ PS_OUTPUT main( const PS_INPUT In )
 	}
 #else
 	UnpackLightingControls( flNormalCtrl.a, phong_exp, half_lambert, litface );
+#endif
+
+	// HL2RPM: lighting controls 1.0 = a pixel of the 3D skybox (gbuffer_ps30). Its position is
+	// reconstructed x skybox scale, where the sun's shadow maps hold the map's own casters (a
+	// tree near the edge of the map threw sparkling shadows on the skybox city): plain Lambert,
+	// no shadow map lookups.
+	const bool bSkybox = flNormalCtrl.a > ( 254.5f / 255.0f );
+	if ( bSkybox )
+	{
+		half_lambert = false;
+		litface = false;
+	}
+
+#if HAS_SHADOW
+	// r_csm_pcss 8: what the G-buffer holds - red the 3D skybox, green the map, blue the body
+	if ( g_vecPCSS.w > 7.5f )
+	{
+		const bool bBody = abs( flNormalCtrl.a * 255.0f - 254.0f ) < 0.5f;
+		Out.vColor_0 = WriteLighting( float4( bSkybox ? 1 : 0, ( bSkybox || bBody ) ? 0 : 1, bBody ? 1 : 0, 0 ) );
+		return Out;
+	}
 #endif
 
 	float3 flLitNormal = lerp( 1, dot( flNormal, g_vecLightVec_Forward ), litface ) * flNormal;
@@ -178,24 +454,88 @@ PS_OUTPUT main( const PS_INPUT In )
 	// HL2RPM: the sky light is occluded - by the geometry right around the point (SSAO)
 	// and by roofs (indoors it drops to a dim bounce level)
 	if ( g_vecAmbientCtrl.w > 0.0 )
-		ambient *= tex2D( sSSAO, In.vTexCoord * g_vecAmbientCtrl.w ).r;
-	if ( flDepth < DEPTH_RECONSTRUCTION_LIMIT )
 	{
-		float skyVis = SkyVisibility( g_vecViewOrigin + In.vecWorldRay * flDepth, flNormal );
-		ambient *= lerp( g_vecAmbientCtrl.y, 1.0, skyVis );
+		float2 aoSky = tex2D( sSSAO, In.vTexCoord * g_vecAmbientCtrl.w ).rg;
+		// (the rain map behind the sky visibility holds the map's roofs, not the skybox's)
+		if ( bSkybox )
+			aoSky.y = 1.0;
+		ambient *= aoSky.x * lerp( g_vecAmbientCtrl.y, 1.0, aoSky.y );
+
+#if HAS_SHADOW
+		// r_csm_pcss 6 / 7: the sky visibility / the SSAO alone
+		if ( g_vecPCSS.w > 5.5f )
+		{
+			Out.vColor_0 = WriteLighting( float4( ( ( g_vecPCSS.w > 6.5f ) ? aoSky.x : aoSky.y ).xxx, 0 ) );
+			return Out;
+		}
+#endif
 	}
 
 	if ( g_vecWeatherFlags.x > 0.0 && lightAmount > 0.0 && flDepth < DEPTH_RECONSTRUCTION_LIMIT )
 		lightAmount *= CloudShadow( g_vecViewOrigin + In.vecWorldRay * flDepth, g_vecLightVec_Forward );
 
 #if HAS_SHADOW
-	if ( flDepth < DEPTH_RECONSTRUCTION_LIMIT )
+	// (surfaces turned away from the sun need no shadow lookup; the cascade view needs it)
+	if ( !bSkybox && flDepth < DEPTH_RECONSTRUCTION_LIMIT && ( lightAmount > 0.0f || g_flCSMColorize > 0.5f ) )
 	{
 		float3 worldPos = g_vecViewOrigin + In.vecWorldRay * flDepth;
 
+		// The geometric normal, facing the camera. The derivatives of a 2x2 pixel quad straddle
+		// every crease (the foot of a wall, the ribs of corrugated metal) and mix both surfaces -
+		// and which pixels pair up changes with any move of the camera: speckles flickering
+		// along all the creases while walking. Per axis the side whose linear extrapolation
+		// predicts this pixel (1 / depth is linear in screen space on a plane): the pixel's own
+		// surface. (r_csm_shadow_normal 1: the quad derivatives, 0: the G-buffer normal.)
+		float3 geoCross = vecGeoCross;
+		// (the pixel footprint: the steps to the neighbouring pixels, on the pixel's own surface
+		// when it's known - the 2x2 quad steps straddle the edges)
+		float3 footX = vecPosDx;
+		float3 footY = vecPosDy;
+		[branch]
+		if ( g_vecShadowExtra.y > 1.5f )
+		{
+			const float2 uv = In.vTexCoord;
+			const float2 dx = float2( vecTexelUV.x, 0 );
+			const float2 dy = float2( 0, vecTexelUV.y );
+			const float iz0 = 1.0f / flDepth;
+			const float dL1 = max( tex2Dlod( sDepth, float4( uv - dx, 0, 0 ) ).x, 0.1f );
+			const float dL2 = max( tex2Dlod( sDepth, float4( uv - 2.0f * dx, 0, 0 ) ).x, 0.1f );
+			const float dR1 = max( tex2Dlod( sDepth, float4( uv + dx, 0, 0 ) ).x, 0.1f );
+			const float dR2 = max( tex2Dlod( sDepth, float4( uv + 2.0f * dx, 0, 0 ) ).x, 0.1f );
+			const float dU1 = max( tex2Dlod( sDepth, float4( uv - dy, 0, 0 ) ).x, 0.1f );
+			const float dU2 = max( tex2Dlod( sDepth, float4( uv - 2.0f * dy, 0, 0 ) ).x, 0.1f );
+			const float dD1 = max( tex2Dlod( sDepth, float4( uv + dy, 0, 0 ) ).x, 0.1f );
+			const float dD2 = max( tex2Dlod( sDepth, float4( uv + 2.0f * dy, 0, 0 ) ).x, 0.1f );
+			const float errL = abs( 2.0f / dL1 - 1.0f / dL2 - iz0 );
+			const float errR = abs( 2.0f / dR1 - 1.0f / dR2 - iz0 );
+			const float errU = abs( 2.0f / dU1 - 1.0f / dU2 - iz0 );
+			const float errD = abs( 2.0f / dD1 - 1.0f / dD2 - iz0 );
+			const float3 tx = ( errR < errL ) ? ( ( In.vecWorldRay + vecRayDx ) * dR1 - vecRayPos )
+				: ( vecRayPos - ( In.vecWorldRay - vecRayDx ) * dL1 );
+			const float3 ty = ( errD < errU ) ? ( ( In.vecWorldRay + vecRayDy ) * dD1 - vecRayPos )
+				: ( vecRayPos - ( In.vecWorldRay - vecRayDy ) * dU1 );
+			geoCross = cross( tx, ty );
+			footX = tx;
+			footY = ty;
+		}
+		float3 shadowNormal = geoCross * rsqrt( max( dot( geoCross, geoCross ), 1e-30f ) );
+		shadowNormal *= ( dot( shadowNormal, In.vecWorldRay ) > 0.0f ) ? -1.0f : 1.0f;
+		// (a sliver one pixel wide, a silhouette: no surface to tell - the G-buffer normal)
+		shadowNormal = ( dot( shadowNormal, flNormal ) > 0.3f && g_vecShadowExtra.y > 0.5f ) ? shadowNormal : flNormal;
+		float shadowNdotL = dot( shadowNormal, g_vecLightVec_Forward );
+		// (foliage lit from both sides: the face toward the sun)
+		if ( litface && shadowNdotL < 0.0f )
+		{
+			shadowNormal = -shadowNormal;
+			shadowNdotL = -shadowNdotL;
+		}
+
+		// (r_csm_pcss 0: the same filter, always the sharpest kernel - no blocker search)
+		// the local player's first person body (lighting controls 254, gbuffer_ps30)
+		const float bodyBias = ( abs( flNormalCtrl.a * 255.0f - 254.0f ) < 0.5f ) ? g_vecShadowExtra.x : 0.0f;
+
 		int csmCascadeIndex = 0;
-		float shadowMult = PerformCascadedShadowEx( sShadowDepth, worldPos, g_matOrtho, g_vecUVTransform, g_vecSlopeData,
-									g_vecFilterConfig_A, g_vecFilterConfig_B, flLitNormal, viewFwdDot, csmCascadeIndex );
+		float shadowMult = SunShadowPCSS( worldPos, shadowNormal, shadowNdotL, bodyBias, footX, footY, csmCascadeIndex );
 		if ( g_flCSMColorize > 0.5f )
 		{
 			float3 cascadeColor = float3( 1, 0, 1 );
@@ -216,6 +556,13 @@ PS_OUTPUT main( const PS_INPUT In )
 		lightAmount *= max( shadowMult, (1.0f - saturate( viewFwdDot )) * half_lambert );
 #else
 		lightAmount *= shadowMult;
+
+		// r_csm_pcss 5: the sun shadow term alone (white lit, black shadowed)
+		if ( g_vecPCSS.w > 4.5f )
+		{
+			Out.vColor_0 = WriteLighting( float4( shadowMult.xxx, 0 ) );
+			return Out;
+		}
 #endif
 	}
 #endif

@@ -5,11 +5,16 @@
 #include "weather/env_weather.h"
 #include "weather/c_weather_system.h"
 
+#include "clientmode.h"
+#include "ienginevgui.h"
 #include "vgui/ILocalize.h"
+#include "vgui/IInput.h"
+#include "vgui/ISurface.h"
 #include "vgui_controls/ComboBox.h"
 #include "vgui_controls/Label.h"
 #include "vgui_controls/CheckButton.h"
 #include "vgui_controls/Button.h"
+#include "vgui_controls/Slider.h"
 
 #include "tier0/memdbgon.h"
 
@@ -19,6 +24,7 @@ namespace
 {
 	const char *s_pszTimeScales[] =
 	{
+		"0",
 		"1",
 		"5",
 		"10",
@@ -44,14 +50,20 @@ namespace
 		{ "#HL2RPM_TCE_180s", "180" },
 	};
 
-	const int FRAME_WIDE = 340;
-	const int FRAME_TALL = 404;
+	const int FRAME_WIDE = 360;
+	const int FRAME_TALL = 450;
+
+	// the time slider works in quarter hours
+	const int TIME_STEPS = 24 * 4;
 }
 
 CVGUILightEditor_Timecycle::CVGUILightEditor_Timecycle( Panel *pParent )
 	: BaseClass( pParent, "LightEditorTimecycle" )
 {
 	m_bRefreshing = false;
+	m_bDraggingTime = false;
+	m_flNextTimeApply = 0.0f;
+	m_iPendingQuarterHours = -1;
 	m_iLastDisplayedHour = -1;
 	m_iLastDisplayedMinute = -1;
 	m_iLastWeatherTarget = -1;
@@ -70,19 +82,26 @@ CVGUILightEditor_Timecycle::CVGUILightEditor_Timecycle( Panel *pParent )
 	m_pLabelCurrentTimeTitle = new Label( this, "label_current_time_title", "#HL2RPM_TCE_CurrentTime" );
 	m_pLabelCurrentTimeValue = new Label( this, "label_current_time_value", "12:00" );
 	m_pLabelTimeOfDay = new Label( this, "label_time_of_day", "#HL2RPM_TCE_TimeOfDay" );
+	m_pLabelSliderTime = new Label( this, "label_slider_time", "12:00" );
 	m_pLabelTimeScale = new Label( this, "label_time_scale", "#HL2RPM_TCE_TimeSpeed" );
 	m_pLabelWeatherState = new Label( this, "label_weather_state", "" );
 	m_pLabelWeatherPreset = new Label( this, "label_weather_preset", "#HL2RPM_TCE_WeatherPreset" );
 	m_pLabelWeatherTransition = new Label( this, "label_weather_transition", "#HL2RPM_TCE_Transition" );
 
-	m_pComboTimeOfDay = new ComboBox( this, "combo_time_of_day", 8, false );
-	m_pComboTimeScale = new ComboBox( this, "combo_time_scale", 7, false );
+	m_pSliderTime = new Slider( this, "slider_time" );
+	m_pSliderTime->SetRange( 0, TIME_STEPS );
+	m_pSliderTime->SetNumTicks( 8 );
+	m_pSliderTime->SetTickCaptions( "0:00", "24:00" );
+	m_pSliderTime->AddActionSignalTarget( this );
+
+	m_pComboTimeScale = new ComboBox( this, "combo_time_scale", ARRAYSIZE( s_pszTimeScales ), false );
 	m_pComboWeatherPreset = new ComboBox( this, "combo_weather_preset", WEATHER_PRESET_COUNT, false );
 	m_pComboWeatherTransition = new ComboBox( this, "combo_weather_transition", ARRAYSIZE( s_WeatherTransitions ), false );
 
 	m_pCheckAutoWeather = new CheckButton( this, "check_auto_weather", "#HL2RPM_TCE_AutoWeather" );
 	m_pButtonNextWeather = new Button( this, "button_next_weather", "#HL2RPM_TCE_NextWeather", this, "NextWeather" );
 	m_pButtonLightning = new Button( this, "button_lightning", "#HL2RPM_TCE_Lightning", this, "Lightning" );
+	m_pButtonClose = new Button( this, "button_close", "#HL2RPM_TCE_Close", this, "CloseWindow" );
 
 	PopulateCombos();
 	RefreshFromTimecycle();
@@ -103,9 +122,12 @@ CVGUILightEditor_Timecycle::~CVGUILightEditor_Timecycle()
 void CVGUILightEditor_Timecycle::OpenEditor()
 {
 	RefreshFromTimecycle();
+	m_iLastDisplayedHour = -1;
 	RefreshCurrentTimeDisplay();
 	m_iLastWeatherTarget = -1;
 	RefreshWeatherDisplay();
+	SetMouseInputEnabled( true );
+	SetKeyBoardInputEnabled( true );
 	SetVisible( true );
 	MoveToFront();
 	Activate();
@@ -115,11 +137,19 @@ void CVGUILightEditor_Timecycle::OnThink()
 {
 	BaseClass::OnThink();
 
-	if ( IsVisible() )
+	if ( !IsVisible() )
+		return;
+
+	// dragging the time slider: follow it at up to 10 updates a second
+	if ( m_iPendingQuarterHours >= 0 && gpGlobals->realtime >= m_flNextTimeApply )
 	{
-		RefreshCurrentTimeDisplay();
-		RefreshWeatherDisplay();
+		ApplyTimeOfDay( m_iPendingQuarterHours );
+		m_iPendingQuarterHours = -1;
+		m_flNextTimeApply = gpGlobals->realtime + 0.1f;
 	}
+
+	RefreshCurrentTimeDisplay();
+	RefreshWeatherDisplay();
 }
 
 void CVGUILightEditor_Timecycle::PerformLayout()
@@ -128,7 +158,7 @@ void CVGUILightEditor_Timecycle::PerformLayout()
 	const int iLabelWide = FRAME_WIDE - iMarginX * 2;
 	const int iComboTall = 24;
 	const int iLabelTall = 18;
-	const int iBlockGap = 50;
+	const int iBlockGap = 52;
 
 	if ( GetWide() != FRAME_WIDE || GetTall() != FRAME_TALL )
 		SetSize( FRAME_WIDE, FRAME_TALL );
@@ -141,21 +171,23 @@ void CVGUILightEditor_Timecycle::PerformLayout()
 	{
 		int sw, sh;
 		engine->GetScreenSize( sw, sh );
-		SetPos( 240, Max( 32, sh / 2 - FRAME_TALL / 2 ) );
+		SetPos( Max( 16, sw / 12 ), Max( 32, sh / 2 - FRAME_TALL / 2 ) );
 	}
 
-	m_pLabelCurrentTimeTitle->SetBounds( iMarginX, 34, 160, iLabelTall );
+	m_pLabelCurrentTimeTitle->SetBounds( iMarginX, 34, 180, iLabelTall );
 	m_pLabelCurrentTimeValue->SetBounds( FRAME_WIDE - iMarginX - 74, 34, 74, iLabelTall );
 	m_pLabelCurrentTimeValue->SetContentAlignment( Label::a_east );
 
-	int yy = 60;
-	m_pLabelTimeOfDay->SetBounds( iMarginX, yy, iLabelWide, iLabelTall );
-	m_pComboTimeOfDay->SetBounds( iMarginX, yy + 18, iLabelWide, iComboTall );
-	yy += iBlockGap;
+	int yy = 62;
+	m_pLabelTimeOfDay->SetBounds( iMarginX, yy, iLabelWide - 70, iLabelTall );
+	m_pLabelSliderTime->SetBounds( FRAME_WIDE - iMarginX - 70, yy, 70, iLabelTall );
+	m_pLabelSliderTime->SetContentAlignment( Label::a_east );
+	m_pSliderTime->SetBounds( iMarginX - 4, yy + 18, iLabelWide + 8, 36 );
+	yy += iBlockGap + 14;
 
 	m_pLabelTimeScale->SetBounds( iMarginX, yy, iLabelWide, iLabelTall );
 	m_pComboTimeScale->SetBounds( iMarginX, yy + 18, iLabelWide, iComboTall );
-	yy += iBlockGap + 14;
+	yy += iBlockGap + 10;
 
 	m_pLabelWeatherState->SetBounds( iMarginX, yy, iLabelWide, iLabelTall );
 	yy += 26;
@@ -166,14 +198,16 @@ void CVGUILightEditor_Timecycle::PerformLayout()
 
 	m_pLabelWeatherTransition->SetBounds( iMarginX, yy, iLabelWide, iLabelTall );
 	m_pComboWeatherTransition->SetBounds( iMarginX, yy + 18, iLabelWide, iComboTall );
-	yy += iBlockGap + 4;
+	yy += iBlockGap + 2;
 
 	m_pCheckAutoWeather->SetBounds( iMarginX - 4, yy, iLabelWide, 24 );
-	yy += 34;
+	yy += 32;
 
 	const int iButtonWide = ( iLabelWide - 8 ) / 2;
 	m_pButtonNextWeather->SetBounds( iMarginX, yy, iButtonWide, 26 );
 	m_pButtonLightning->SetBounds( iMarginX + iButtonWide + 8, yy, iButtonWide, 26 );
+
+	m_pButtonClose->SetBounds( FRAME_WIDE - iMarginX - 110, FRAME_TALL - 38, 110, 26 );
 }
 
 void CVGUILightEditor_Timecycle::OnTextChanged( Panel *panel )
@@ -181,11 +215,7 @@ void CVGUILightEditor_Timecycle::OnTextChanged( Panel *panel )
 	if ( m_bRefreshing )
 		return;
 
-	if ( panel == m_pComboTimeOfDay )
-	{
-		ApplyTimeOfDay();
-	}
-	else if ( panel == m_pComboTimeScale )
+	if ( panel == m_pComboTimeScale )
 	{
 		ApplyTimeScale();
 	}
@@ -205,6 +235,33 @@ void CVGUILightEditor_Timecycle::OnCheckButtonChecked( Panel *panel )
 	engine->ClientCmd_Unrestricted( VarArgs( "sv_weather_auto %d\n", m_pCheckAutoWeather->IsSelected() ? 1 : 0 ) );
 }
 
+void CVGUILightEditor_Timecycle::OnSliderMoved( KeyValues *data )
+{
+	if ( m_bRefreshing )
+		return;
+
+	const int iValue = clamp( data->GetInt( "position", 48 ), 0, TIME_STEPS );
+	SetSliderTimeLabel( iValue );
+	m_iPendingQuarterHours = iValue;
+	if ( !m_bDraggingTime )
+		m_flNextTimeApply = 0.0f;	// a click on the track: apply now
+}
+
+void CVGUILightEditor_Timecycle::OnSliderDragStart( KeyValues *data )
+{
+	m_bDraggingTime = true;
+}
+
+void CVGUILightEditor_Timecycle::OnSliderDragEnd( KeyValues *data )
+{
+	m_bDraggingTime = false;
+	const int iValue = clamp( data->GetInt( "position", 48 ), 0, TIME_STEPS );
+	m_iPendingQuarterHours = -1;
+	ApplyTimeOfDay( iValue );
+	// the timecycle entity needs a moment: don't snap the slider back meanwhile
+	m_iLastDisplayedHour = -1;
+}
+
 void CVGUILightEditor_Timecycle::OnCommand( const char *pszCommand )
 {
 	if ( !Q_stricmp( pszCommand, "NextWeather" ) )
@@ -217,19 +274,41 @@ void CVGUILightEditor_Timecycle::OnCommand( const char *pszCommand )
 		engine->ClientCmd_Unrestricted( "cl_weather_lightning\n" );
 		return;
 	}
+	if ( !Q_stricmp( pszCommand, "CloseWindow" ) )
+	{
+		Close();
+		return;
+	}
 
 	BaseClass::OnCommand( pszCommand );
 }
 
+void CVGUILightEditor_Timecycle::OnKeyCodeTyped( KeyCode code )
+{
+	if ( code == KEY_ESCAPE )
+	{
+		Close();
+		return;
+	}
+	BaseClass::OnKeyCodeTyped( code );
+}
+
+void CVGUILightEditor_Timecycle::OnClose()
+{
+	BaseClass::OnClose();
+
+	// standalone window: give the mouse back to the game
+	SetKeyBoardInputEnabled( false );
+	SetMouseInputEnabled( false );
+	if ( vgui::input() )
+	{
+		vgui::input()->SetMouseCapture( (VPANEL)NULL );
+		vgui::input()->SetMouseFocus( (VPANEL)NULL );
+	}
+}
+
 void CVGUILightEditor_Timecycle::PopulateCombos()
 {
-	for ( int i = 0; i <= 24; i++ )
-	{
-		char szValue[8];
-		Q_snprintf( szValue, sizeof( szValue ), "%d", i );
-		m_pComboTimeOfDay->AddItem( szValue, new KeyValues( "item", "value", szValue ) );
-	}
-
 	for ( int i = 0; i < ARRAYSIZE( s_pszTimeScales ); i++ )
 	{
 		m_pComboTimeScale->AddItem( s_pszTimeScales[i], new KeyValues( "item", "value", s_pszTimeScales[i] ) );
@@ -256,14 +335,6 @@ void CVGUILightEditor_Timecycle::RefreshFromTimecycle()
 
 	CEnvTimecycle *pTimecycle = GetTimecycle();
 
-	int iTimeOfDay = 12;
-	if ( pTimecycle != NULL )
-		iTimeOfDay = clamp( (int)( pTimecycle->GetTimeOfDayHours() + 0.5f ), 0, 24 );
-
-	char szTime[8];
-	Q_snprintf( szTime, sizeof( szTime ), "%d", iTimeOfDay );
-	SelectItemByValue( m_pComboTimeOfDay, szTime );
-
 	const char *pszBestSpeed = "10";
 	if ( pTimecycle != NULL )
 	{
@@ -287,8 +358,18 @@ void CVGUILightEditor_Timecycle::RefreshFromTimecycle()
 	SelectItemByValue( m_pComboWeatherPreset, GetWeatherPresetInfo( iTarget ).pszName );
 	m_pCheckAutoWeather->SetSelected( pWeather ? pWeather->IsAutomatic() : false );
 	m_pCheckAutoWeather->SetEnabled( pWeather != NULL );
+	m_pComboWeatherPreset->SetEnabled( GetWeatherSystem()->IsActive() || pWeather != NULL );
 
 	m_bRefreshing = false;
+}
+
+void CVGUILightEditor_Timecycle::SetSliderTimeLabel( int iQuarterHours )
+{
+	const int iHour = ( iQuarterHours / 4 ) % 24;
+	const int iMinute = ( iQuarterHours % 4 ) * 15;
+	char szTime[16];
+	Q_snprintf( szTime, sizeof( szTime ), "%02d:%02d", iQuarterHours >= TIME_STEPS ? 24 : iHour, iMinute );
+	m_pLabelSliderTime->SetText( szTime );
 }
 
 void CVGUILightEditor_Timecycle::RefreshCurrentTimeDisplay()
@@ -321,12 +402,15 @@ void CVGUILightEditor_Timecycle::RefreshCurrentTimeDisplay()
 	Q_snprintf( szTime, sizeof( szTime ), "%02d:%02d", iHour, iMinute );
 	m_pLabelCurrentTimeValue->SetText( szTime );
 
-	char szHour[8];
-	Q_snprintf( szHour, sizeof( szHour ), "%d", iHour );
-
-	m_bRefreshing = true;
-	SelectItemByValue( m_pComboTimeOfDay, szHour );
-	m_bRefreshing = false;
+	// the slider follows the clock unless the player holds it
+	if ( !m_bDraggingTime && m_iPendingQuarterHours < 0 )
+	{
+		const int iQuarter = clamp( (int)( flHours * 4.0f + 0.5f ), 0, TIME_STEPS );
+		m_bRefreshing = true;
+		m_pSliderTime->SetValue( iQuarter, false );
+		m_bRefreshing = false;
+		SetSliderTimeLabel( iQuarter );
+	}
 }
 
 void CVGUILightEditor_Timecycle::RefreshWeatherDisplay()
@@ -372,13 +456,10 @@ void CVGUILightEditor_Timecycle::RefreshWeatherDisplay()
 	m_pLabelWeatherState->SetText( wszText );
 }
 
-void CVGUILightEditor_Timecycle::ApplyTimeOfDay()
+void CVGUILightEditor_Timecycle::ApplyTimeOfDay( int iQuarterHours )
 {
-	KeyValues *pData = m_pComboTimeOfDay->GetActiveItemUserData();
-	if ( pData == NULL )
-		return;
-
-	engine->ClientCmd( VarArgs( "sv_timecycle_set_time %s", pData->GetString( "value", "12" ) ) );
+	const float flHours = Min( iQuarterHours, TIME_STEPS - 1 ) / 4.0f;	// 24:00 = the end of the day
+	engine->ClientCmd_Unrestricted( VarArgs( "sv_timecycle_set_time %.2f\n", flHours ) );
 }
 
 void CVGUILightEditor_Timecycle::ApplyTimeScale()
@@ -387,7 +468,7 @@ void CVGUILightEditor_Timecycle::ApplyTimeScale()
 	if ( pData == NULL )
 		return;
 
-	engine->ClientCmd( VarArgs( "sv_timecycle_set_speed %s", pData->GetString( "value", "10" ) ) );
+	engine->ClientCmd_Unrestricted( VarArgs( "sv_timecycle_set_speed %s\n", pData->GetString( "value", "10" ) ) );
 }
 
 void CVGUILightEditor_Timecycle::ApplyWeather()
@@ -418,4 +499,59 @@ void CVGUILightEditor_Timecycle::SelectItemByValue( ComboBox *pCombo, const char
 	}
 
 	pCombo->SilentActivateItemByRow( 0 );
+}
+
+// ---------------------------------------------------------------------------
+// Standalone window (F1). It never touches the light editor, so the world keeps
+// its own lighting and every change is visible right away.
+// ---------------------------------------------------------------------------
+static vgui::DHANDLE< CVGUILightEditor_Timecycle > s_hTimeWeatherPanel;
+
+void TimeWeatherPanel_Open()
+{
+	if ( !engine->IsInGame() )
+		return;
+
+	if ( !s_hTimeWeatherPanel.Get() )
+	{
+		CVGUILightEditor_Timecycle *pPanel = new CVGUILightEditor_Timecycle( NULL );
+		if ( g_pClientMode && g_pClientMode->GetViewport() )
+			pPanel->SetParent( g_pClientMode->GetViewport() );
+		else
+			pPanel->SetParent( enginevgui->GetPanel( PANEL_CLIENTDLL ) );
+		s_hTimeWeatherPanel = pPanel;
+	}
+
+	CVGUILightEditor_Timecycle *pPanel = s_hTimeWeatherPanel.Get();
+	pPanel->MakePopup( false, false );
+	pPanel->SetKeyBoardInputEnabled( true );
+	pPanel->SetMouseInputEnabled( true );
+	pPanel->OpenEditor();
+	vgui::surface()->SetCursor( vgui::dc_arrow );
+}
+
+void TimeWeatherPanel_Close()
+{
+	if ( s_hTimeWeatherPanel.Get() && s_hTimeWeatherPanel->IsVisible() )
+		s_hTimeWeatherPanel->Close();
+}
+
+void TimeWeatherPanel_Toggle()
+{
+	if ( TimeWeatherPanel_IsVisible() )
+		TimeWeatherPanel_Close();
+	else
+		TimeWeatherPanel_Open();
+}
+
+bool TimeWeatherPanel_IsVisible()
+{
+	return s_hTimeWeatherPanel.Get() && s_hTimeWeatherPanel->IsVisible();
+}
+
+void TimeWeatherPanel_Destroy()
+{
+	if ( s_hTimeWeatherPanel.Get() )
+		s_hTimeWeatherPanel->MarkForDeletion();
+	s_hTimeWeatherPanel = NULL;
 }

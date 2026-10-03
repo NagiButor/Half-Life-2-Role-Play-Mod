@@ -382,4 +382,8 @@ private:
 	IMaterial * ReplaceMaterialInternal( IMaterial* pMat ) const;
 };
 
+// HL2RPM: material system release/restore hooks (no shader replacing while it restores)
+void DeferredMaterials_InstallCallbacks();
+void DeferredMaterials_RemoveCallbacks();
+
 #endif // WARS_MATERIALSYSTEM_PASSTHRU_H

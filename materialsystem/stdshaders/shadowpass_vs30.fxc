@@ -127,13 +127,15 @@ VS_OUTPUT main( const VS_INPUT In )
 
 	DecompressVertex_Normal( In.vNormal, vNormal );
 
-#if MORPHING
-#if !MORPHING_VTEX
-	ApplyMorph( In.vPosFlex, In.vNormalFlex, vPos.xyz, vNormal );
-#else
+// HL2RPM: flexes (blinking, expressions, lip sync) as in the stock shaders: the flex
+// stream (filled by studiorender) unless the GPU morphs from the morph texture. They
+// were applied only with HW morphing (off in Source 2013): faces never moved in the
+// deferred passes, eyelids didn't close and parted from the (flexed) eyeballs.
+#if MORPHING && MORPHING_VTEX
 	ApplyMorph( morphSampler, cMorphTargetTextureDim, cMorphSubrect,
 		In.vVertexID, In.vTexCoord2, vPos.xyz, vNormal );
-#endif
+#else
+	ApplyMorph( In.vPosFlex, In.vNormalFlex, vPos.xyz, vNormal );
 #endif
 
 	SkinPositionAndNormal( g_bSkinning, vPos, vNormal,
@@ -201,9 +203,11 @@ VS_OUTPUT main( const VS_INPUT In )
 	//worldPos = mul4x3( float4( worldPos, 1 ), g_matView );
 	//Out.flDepth = -worldPos.z / PROJECTION_DEPTH;
 
-	float3 worldDelta = worldPos - g_vecOrigin;
-	float dotFwd = dot( g_vecShadowForward, worldDelta );
-	Out.flDepth = dotFwd * PROJECTION_DEPTH;
+	// HL2RPM: the rasterized depth (ortho: w = 1). The pixel shader doesn't write the depth
+	// for the ortho maps any more, so the depth buffer holds exactly this - and the caster
+	// depth it writes as color (PCSS) must be the same value. (The old dot( forward ) *
+	// 1 / zFar was a couple of texels off the engine's projection.)
+	Out.flDepth = Out.vProjPos.z / Out.vProjPos.w;
 
 #elif SHADOW_MODE == DEFERRED_SHADOW_MODE_DPSM
 

@@ -27,6 +27,9 @@ public:
 	virtual bool KeyValue( const char *szKeyName, const char *szValue );
 
 	virtual int UpdateTransmitState();
+	// HL2RPM: world lighting/weather belongs to its map: never carried through a
+	// changelevel landmark (point entities are by default -> doubled suns and lamps)
+	virtual int ObjectCaps() { return BaseClass::ObjectCaps() & ~FCAP_ACROSS_TRANSITION; }
 #else
 	virtual void PostDataUpdate( DataUpdateType_t t );
 
@@ -95,15 +98,19 @@ private:
 	bool m_bLastTimeEnabled;
 	int m_iDefFlagsBase;
 	bool m_bSwitchedOn;
+	bool m_bAutoShadow;		// HL2RPM: shadows even without the flag ("autoshadow 0" opts out)
 
+	int GetInitialDefFlags();
 	void UpdateSize();
 	void TimegateThink();
 	bool IsInTimeWindow( float hour ) const;
 	void UpdateEnabledFromTime();
 #else
 	def_light_t *m_pLight;
+	bool m_bLightRegistered;
 
 	void ApplyDataToLight();
+	void UpdateLightRegistration();
 #endif
 
 	CNetworkVector( m_vecColor_Diff );

@@ -19,4 +19,7 @@ void DeferredSSAO_Render( const CViewSetup &view );
 // the sky visibility needs the weather's top-down occlusion map
 bool DeferredSSAO_WantsSkyVisibility();
 
+// right after the top-down occlusion map was rendered: filters it for the sky visibility
+void DeferredSSAO_UpdateSkyVisibility();
+
 #endif // DEFERRED_SSAO_H

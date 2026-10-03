@@ -138,13 +138,15 @@ VS_OUTPUT main( const VS_INPUT In )
 
 	DecompressVertex_NormalTangent( In.vNormal, In.vUserData, vNormal, vTangentMixed );
 
-#if MORPHING
-#if !MORPHING_VTEX
-	ApplyMorph( In.vPosFlex, In.vNormalFlex, vPos.xyz, vNormal, vTangentMixed.xyz );
-#else
+// HL2RPM: flexes (blinking, expressions, lip sync) as in the stock shaders: the flex
+// stream (filled by studiorender) unless the GPU morphs from the morph texture. They
+// were applied only with HW morphing (off in Source 2013): faces never moved in the
+// deferred passes, eyelids didn't close and parted from the (flexed) eyeballs.
+#if MORPHING && MORPHING_VTEX
 	ApplyMorph( morphSampler, cMorphTargetTextureDim, cMorphSubrect,
 		In.vVertexID, In.vTexCoord2, vPos.xyz, vNormal, vTangentMixed.xyz );
-#endif
+#else
+	ApplyMorph( In.vPosFlex, In.vNormalFlex, vPos.xyz, vNormal, vTangentMixed.xyz );
 #endif
 
 	SkinPositionNormalAndTangentSpace( g_bSkinning, vPos, vNormal, vTangentMixed,
@@ -157,13 +159,15 @@ VS_OUTPUT main( const VS_INPUT In )
 #else // TANGENTSPACE
 	DecompressVertex_Normal( In.vNormal, vNormal );
 
-#if MORPHING
-#if !MORPHING_VTEX
-	ApplyMorph( In.vPosFlex, In.vNormalFlex, vPos.xyz, vNormal );
-#else
+// HL2RPM: flexes (blinking, expressions, lip sync) as in the stock shaders: the flex
+// stream (filled by studiorender) unless the GPU morphs from the morph texture. They
+// were applied only with HW morphing (off in Source 2013): faces never moved in the
+// deferred passes, eyelids didn't close and parted from the (flexed) eyeballs.
+#if MORPHING && MORPHING_VTEX
 	ApplyMorph( morphSampler, cMorphTargetTextureDim, cMorphSubrect,
 		In.vVertexID, In.vTexCoord2, vPos.xyz, vNormal );
-#endif
+#else
+	ApplyMorph( In.vPosFlex, In.vNormalFlex, vPos.xyz, vNormal );
 #endif
 
 	SkinPositionAndNormal( g_bSkinning, vPos, vNormal,

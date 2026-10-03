@@ -575,6 +575,10 @@ EXPOSE_SINGLE_INTERFACE_GLOBALVAR(CServerGameDLL, IServerGameDLL, INTERFACEVERSI
 // When bumping the version to this interface, check that our assumption is still valid and expose the older version in the same way
 COMPILE_TIME_ASSERT( INTERFACEVERSION_SERVERGAMEDLL_INT == 9 );
 
+// HL2RPM: quests / inventory in the save game
+extern ISaveRestoreBlockHandler *GetQuestSaveRestoreBlockHandler();
+extern ISaveRestoreBlockHandler *GetInventorySaveRestoreBlockHandler();
+
 bool CServerGameDLL::DLLInit( CreateInterfaceFn appSystemFactory, 
 		CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory, 
 		CGlobalVars *pGlobals)
@@ -698,6 +702,8 @@ bool CServerGameDLL::DLLInit( CreateInterfaceFn appSystemFactory,
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetAISaveRestoreBlockHandler() );
 	// Dialog system save/restore (persist spoiled NPC list across save/load)
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetDialogSaveRestoreBlockHandler() );
+	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetQuestSaveRestoreBlockHandler() );
+	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetInventorySaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetTemplateSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetDefaultResponseSystemSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetCommentarySaveRestoreBlockHandler() );
@@ -787,6 +793,8 @@ void CServerGameDLL::DLLShutdown( void )
 	// Due to dependencies, these are not autogamesystems
 	ModelSoundsCacheShutdown();
 
+	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetInventorySaveRestoreBlockHandler() );
+	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetQuestSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetVScriptSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetAchievementSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetCommentarySaveRestoreBlockHandler() );
@@ -981,6 +989,8 @@ bool CServerGameDLL::IsRestoring()
 }
 
 // Called any time a new level is started (after GameInit() also on level transitions within a game)
+bool g_bHL2RPMRestoringLevel = false;
+
 bool CServerGameDLL::LevelInit( const char *pMapName, char const *pMapEntities, char const *pOldLevel, char const *pLandmarkName, bool loadGame, bool background )
 {
 	VPROF("CServerGameDLL::LevelInit");
@@ -1019,7 +1029,12 @@ bool CServerGameDLL::LevelInit( const char *pMapName, char const *pMapEntities, 
 		}
 
 		BeginRestoreEntities();
-		if ( !engine->LoadGameState( pMapName, 1 ) )
+		// HL2RPM: tells level-init code that the entities come from a save (a loaded
+		// game or a revisited map), so nothing is generated twice (deferred lights)
+		g_bHL2RPMRestoringLevel = true;
+		const bool bRestored = engine->LoadGameState( pMapName, 1 );
+		g_bHL2RPMRestoringLevel = false;
+		if ( !bRestored )
 		{
 			if ( pOldLevel )
 			{

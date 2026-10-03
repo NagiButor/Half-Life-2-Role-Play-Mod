@@ -94,6 +94,7 @@ float4 main( PS_INPUT i ) : COLOR
 	params.pixelFogParams = g_PixelFogParams;
 	params.fWaterFogStart = g_WaterFogStart;
 	params.fWaterFogEndMinusStart = g_WaterFogEndMinusStart;
+	params.fRefractDepthEncoded = g_WaterFogParams.w;	// HL2RPM (water.cpp)
 	params.vEyePos = g_EyePos;
 	params.vWorldPos = i.vWorldPos_projPosW.xyz;
 

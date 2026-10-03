@@ -78,6 +78,8 @@ namespace DialogDefinitions
     void MarkEntitySpoken(const char *entityName);
     void ClearEntitySpoken(const char *entityName);
     bool IsEntitySpoken(const char *entityName);
+    // HL2RPM: a new game forgets spoiled/spoken dialogs of the previous game
+    void ClearDialogProgress();
 
     extern DSDialog Example_TestNpc_Dialog;
 }

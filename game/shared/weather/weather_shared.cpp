@@ -22,13 +22,16 @@ static const WeatherPresetInfo_t s_WeatherPresets[WEATHER_PRESET_COUNT] =
 	{ "fair",          "#HL2RPM_Weather_Fair",          { 0.30f, 1.00f, 0.85f, 1500.0f, 1700.0f, 0.00f, 0.35f,  8.0f,   1.3f, 0.05f, 1.00f,   0.95f, 1.00f, 0.05f,   0.02f, 0.60f, 0.90f, 0.35f,   0.00f, 0.00f, 0.0f, 0.25f,   0.00f, 0.00f,   0.30f }, 2.0f, 6.0f },
 	{ "partlycloudy",  "#HL2RPM_Weather_PartlyCloudy",  { 0.55f, 1.10f, 0.75f, 1400.0f, 2100.0f, 0.10f, 0.20f, 10.0f,   1.6f, 0.15f, 0.95f,   0.85f, 1.05f, 0.12f,   0.04f, 0.60f, 0.85f, 0.45f,   0.00f, 0.00f, 0.0f, 0.35f,   0.00f, 0.00f,   0.40f }, 2.0f, 5.0f },
 	{ "overcast",      "#HL2RPM_Weather_Overcast",      { 0.97f, 1.30f, 0.25f, 1100.0f, 1800.0f, 0.35f, 0.00f,  9.0f,   2.2f, 0.65f, 0.80f,   0.22f, 1.25f, 0.50f,   0.08f, 0.50f, 0.50f, 0.15f,   0.00f, 0.00f, 0.0f, 0.40f,   0.00f, 0.00f,   0.00f }, 2.0f, 6.0f },
-	{ "fog",           "#HL2RPM_Weather_Fog",           { 0.92f, 1.20f, 0.15f,  900.0f, 1400.0f, 0.25f, 0.00f,  4.0f,   4.0f, 0.60f, 0.85f,   0.35f, 1.20f, 0.50f,   0.90f, 0.90f, 0.40f, 0.80f,   0.00f, 0.15f, 0.0f, 0.05f,   0.00f, 0.00f,   0.00f }, 1.0f, 3.0f },
+	{ "fog",           "#HL2RPM_Weather_Fog",           { 1.00f, 1.20f, 0.15f,  900.0f, 1400.0f, 0.25f, 0.00f,  4.0f,   4.0f, 0.60f, 0.85f,   0.35f, 1.20f, 0.50f,   0.90f, 0.90f, 0.40f, 0.80f,   0.00f, 0.15f, 0.0f, 0.05f,   0.00f, 0.00f,   0.00f }, 1.0f, 3.0f },
 	{ "drizzle",       "#HL2RPM_Weather_Drizzle",       { 0.98f, 1.40f, 0.20f, 1000.0f, 2000.0f, 0.45f, 0.00f, 10.0f,   2.8f, 0.70f, 0.72f,   0.14f, 1.10f, 0.55f,   0.18f, 0.60f, 0.45f, 0.20f,   0.25f, 0.45f, 0.0f, 0.35f,   0.00f, 0.00f,   0.00f }, 1.0f, 3.0f },
 	{ "rain",          "#HL2RPM_Weather_Rain",          { 1.00f, 1.60f, 0.35f,  900.0f, 2600.0f, 0.60f, 0.00f, 14.0f,   3.2f, 0.75f, 0.60f,   0.06f, 0.90f, 0.60f,   0.28f, 0.55f, 0.40f, 0.10f,   0.75f, 0.85f, 0.15f, 0.55f,   0.00f, 0.00f,   0.00f }, 1.0f, 3.0f },
 	{ "thunderstorm",  "#HL2RPM_Weather_Thunderstorm",  { 1.00f, 1.90f, 0.90f,  800.0f, 4500.0f, 0.85f, 0.00f, 18.0f,   3.0f, 0.80f, 0.45f,   0.03f, 0.70f, 0.60f,   0.25f, 0.55f, 0.35f, 0.10f,   1.00f, 1.00f, 3.0f, 0.90f,   0.00f, 0.00f,   0.00f }, 0.5f, 1.5f },
 	{ "misty",         "#HL2RPM_Weather_Misty",         { 0.22f, 0.90f, 0.50f, 1300.0f, 1200.0f, 0.00f, 0.30f,  5.0f,   3.5f, 0.20f, 1.05f,   0.80f, 1.10f, 0.15f,   0.45f, 1.20f, 0.85f, 1.00f,   0.00f, 0.10f, 0.0f, 0.10f,   0.00f, 0.00f,   0.35f }, 1.0f, 3.0f },
 	{ "snow",          "#HL2RPM_Weather_Snow",          { 0.95f, 1.25f, 0.20f,  900.0f, 1800.0f, 0.25f, 0.00f,  6.0f,   3.0f, 0.70f, 0.95f,   0.20f, 1.30f, 0.60f,   0.30f, 0.60f, 0.60f, 0.10f,   0.00f, 0.10f, 0.0f, 0.25f,   0.85f, 0.00f,   0.00f }, 1.0f, 3.0f },
 	{ "ash",           "#HL2RPM_Weather_Ash",           { 0.80f, 1.10f, 0.30f, 1300.0f, 2000.0f, 0.55f, 0.00f,  4.0f,   6.0f, 0.55f, 0.70f,   0.40f, 0.85f, 0.35f,   0.35f, 0.70f, 0.70f, 0.70f,   0.00f, 0.00f, 0.0f, 0.15f,   0.00f, 1.00f,   0.25f }, 1.0f, 3.0f },
+	{ "cumulus",       "#HL2RPM_Weather_Cumulus",       { 0.42f, 1.15f, 1.00f, 1300.0f, 3400.0f, 0.12f, 0.15f,  9.0f,   1.4f, 0.08f, 1.00f,   0.90f, 1.00f, 0.08f,   0.02f, 0.60f, 0.90f, 0.45f,   0.00f, 0.00f, 0.0f, 0.30f,   0.00f, 0.00f,   0.15f }, 1.5f, 4.0f },
+	{ "stratocumulus", "#HL2RPM_Weather_Stratocumulus", { 0.80f, 1.25f, 0.45f, 1100.0f, 1100.0f, 0.25f, 0.00f, 11.0f,   2.0f, 0.35f, 0.90f,   0.55f, 1.12f, 0.30f,   0.05f, 0.55f, 0.70f, 0.35f,   0.00f, 0.00f, 0.0f, 0.40f,   0.00f, 0.00f,   0.20f }, 2.0f, 5.0f },
+	{ "highclouds",    "#HL2RPM_Weather_HighClouds",    { 0.12f, 0.90f, 0.60f, 1700.0f,  900.0f, 0.00f, 0.95f, 12.0f,   1.8f, 0.20f, 0.95f,   0.80f, 1.05f, 0.10f,   0.02f, 0.60f, 0.85f, 0.30f,   0.00f, 0.00f, 0.0f, 0.30f,   0.00f, 0.00f,   0.55f }, 2.0f, 5.0f },
 };
 
 const WeatherPresetInfo_t &GetWeatherPresetInfo( int iPreset )
@@ -77,18 +80,23 @@ static const float s_flTransitionWeights[WEATHER_PRESET_COUNT][WEATHER_PRESET_CO
 {
 	// Snow and ash are never entered automatically (set them from the map, the
 	// console or the F1 editor); the automatic cycle only leads out of them.
-	//            clear  fair  partly overc  fog   drizz  rain  storm  misty  snow  ash
-	/* clear   */ { 0.0f, 0.50f, 0.25f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.25f, 0.0f, 0.0f },
-	/* fair    */ { 0.30f, 0.0f, 0.45f, 0.12f, 0.00f, 0.00f, 0.00f, 0.00f, 0.13f, 0.0f, 0.0f },
-	/* partly  */ { 0.10f, 0.30f, 0.0f, 0.33f, 0.00f, 0.14f, 0.00f, 0.13f, 0.00f, 0.0f, 0.0f },
-	/* overc   */ { 0.00f, 0.10f, 0.30f, 0.0f, 0.13f, 0.25f, 0.22f, 0.00f, 0.00f, 0.0f, 0.0f },
-	/* fog     */ { 0.00f, 0.00f, 0.00f, 0.40f, 0.0f, 0.20f, 0.00f, 0.00f, 0.40f, 0.0f, 0.0f },
-	/* drizzle */ { 0.00f, 0.00f, 0.10f, 0.40f, 0.15f, 0.0f, 0.35f, 0.00f, 0.00f, 0.0f, 0.0f },
-	/* rain    */ { 0.00f, 0.00f, 0.00f, 0.30f, 0.10f, 0.35f, 0.0f, 0.25f, 0.00f, 0.0f, 0.0f },
-	/* storm   */ { 0.00f, 0.00f, 0.00f, 0.15f, 0.00f, 0.25f, 0.60f, 0.0f, 0.00f, 0.0f, 0.0f },
-	/* misty   */ { 0.30f, 0.40f, 0.15f, 0.00f, 0.15f, 0.00f, 0.00f, 0.00f, 0.0f, 0.0f, 0.0f },
-	/* snow    */ { 0.00f, 0.00f, 0.30f, 0.50f, 0.20f, 0.00f, 0.00f, 0.00f, 0.00f, 0.0f, 0.0f },
-	/* ash     */ { 0.00f, 0.00f, 0.00f, 0.60f, 0.20f, 0.00f, 0.00f, 0.00f, 0.20f, 0.0f, 0.0f },
+	// Typical chains: clear -> high clouds -> stratocumulus -> overcast -> rain (warm front),
+	// fair -> cumulus -> thunderstorm in the afternoon, storm -> rain -> drizzle -> broken clouds.
+	//              clear  fair  partly overc  fog  drizz  rain  storm misty  snow  ash   cumul strcu high
+	/* clear    */ { 0.00f, 0.35f, 0.10f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.15f, 0.0f, 0.0f, 0.15f, 0.00f, 0.25f },
+	/* fair     */ { 0.20f, 0.00f, 0.30f, 0.05f, 0.00f, 0.00f, 0.00f, 0.00f, 0.08f, 0.0f, 0.0f, 0.20f, 0.07f, 0.10f },
+	/* partly   */ { 0.05f, 0.20f, 0.00f, 0.20f, 0.00f, 0.10f, 0.00f, 0.08f, 0.00f, 0.0f, 0.0f, 0.12f, 0.25f, 0.00f },
+	/* overc    */ { 0.00f, 0.05f, 0.15f, 0.00f, 0.10f, 0.22f, 0.20f, 0.08f, 0.00f, 0.0f, 0.0f, 0.00f, 0.20f, 0.00f },
+	/* fog      */ { 0.00f, 0.00f, 0.00f, 0.30f, 0.00f, 0.15f, 0.00f, 0.00f, 0.35f, 0.0f, 0.0f, 0.00f, 0.20f, 0.00f },
+	/* drizzle  */ { 0.00f, 0.00f, 0.10f, 0.35f, 0.10f, 0.00f, 0.30f, 0.00f, 0.00f, 0.0f, 0.0f, 0.00f, 0.15f, 0.00f },
+	/* rain     */ { 0.00f, 0.00f, 0.00f, 0.30f, 0.08f, 0.30f, 0.00f, 0.20f, 0.00f, 0.0f, 0.0f, 0.00f, 0.12f, 0.00f },
+	/* storm    */ { 0.00f, 0.00f, 0.00f, 0.15f, 0.00f, 0.20f, 0.50f, 0.00f, 0.00f, 0.0f, 0.0f, 0.00f, 0.15f, 0.00f },
+	/* misty    */ { 0.25f, 0.35f, 0.10f, 0.00f, 0.10f, 0.00f, 0.00f, 0.00f, 0.00f, 0.0f, 0.0f, 0.00f, 0.00f, 0.20f },
+	/* snow     */ { 0.00f, 0.00f, 0.30f, 0.50f, 0.20f, 0.00f, 0.00f, 0.00f, 0.00f, 0.0f, 0.0f, 0.00f, 0.00f, 0.00f },
+	/* ash      */ { 0.00f, 0.00f, 0.00f, 0.60f, 0.20f, 0.00f, 0.00f, 0.00f, 0.20f, 0.0f, 0.0f, 0.00f, 0.00f, 0.00f },
+	/* cumulus  */ { 0.00f, 0.30f, 0.30f, 0.00f, 0.00f, 0.00f, 0.00f, 0.20f, 0.00f, 0.0f, 0.0f, 0.00f, 0.20f, 0.00f },
+	/* stratocu */ { 0.00f, 0.15f, 0.30f, 0.30f, 0.00f, 0.15f, 0.00f, 0.00f, 0.00f, 0.0f, 0.0f, 0.10f, 0.00f, 0.00f },
+	/* high     */ { 0.25f, 0.25f, 0.10f, 0.20f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.0f, 0.0f, 0.00f, 0.20f, 0.00f },
 };
 
 static float TimeOfDayBias( int iPreset, float flHour )
@@ -101,6 +109,7 @@ static float TimeOfDayBias( int iPreset, float flHour )
 	case WEATHER_FOG:			return bMorning ? 2.5f : 0.5f;
 	case WEATHER_MISTY:			return bMorning ? 3.0f : 0.6f;
 	case WEATHER_THUNDERSTORM:	return bAfternoon ? 1.8f : 0.6f;
+	case WEATHER_CUMULUS:		return bAfternoon ? 2.0f : ( bMorning ? 0.4f : 0.8f );	// convection needs the day's heat
 	}
 	return 1.0f;
 }

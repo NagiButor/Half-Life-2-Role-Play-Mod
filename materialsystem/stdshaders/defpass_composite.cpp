@@ -10,6 +10,17 @@ static CCommandBufferBuilder< CFixedCommandStorageBuffer< 512 > > tmpBuf;
 
 ConVar building_cubemaps( "building_cubemaps", "0" );
 
+// HL2RPM dev: white albedo - the composite shows the lighting only (temporal stability tests:
+// without the textures motion aliasing doesn't hide light flicker)
+// HL2RPM: MSAA - the fragments of the triangles that don't own a pixel's center take the light
+// of a neighbouring pixel of their own surface (composite_ps30). Off: MSAA doesn't work in the
+// deferred view yet (mat_antialias changes nothing - one fragment per pixel, see r_deferred_fxaa),
+// the lookup only cost a depth fetch per pixel.
+static ConVar r_deferred_msaa_light( "r_deferred_msaa_light", "0", 0,
+	"Deferred composite: with MSAA, edge fragments take the light of a neighbour pixel of their own surface (less crawling on thin geometry)" );
+
+static ConVar r_deferred_debug_lighting_only( "r_deferred_debug_lighting_only", "0", FCVAR_CHEAT, "Dev: draw the deferred composite with a white albedo (lighting only)" );
+
 void InitParmsComposite( const defParms_composite &info, CBaseVSShader *pShader, IMaterialVar **params )
 {
 	if ( PARM_NO_DEFAULT( info.iAlphatestRef ) ||
@@ -174,6 +185,10 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 		pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
 		pShaderShadow->EnableSRGBRead( SHADER_SAMPLER2, false );
 
+		// HL2RPM: main view depth, read when drawing a planar reflection (REFLECTVIEW)
+		pShaderShadow->EnableTexture( SHADER_SAMPLER11, true );
+		pShaderShadow->EnableSRGBRead( SHADER_SAMPLER11, false );
+
 		if ( bEnvmap )
 		{
 			pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
@@ -221,7 +236,9 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 			}
 		}
 
-		pShaderShadow->EnableAlphaWrites( false );
+		// HL2RPM: opaque surfaces write alpha like the stock shaders: 1, or in the refraction
+		// view of a water the water fog amount the water shader reads back (composite_ps30)
+		pShaderShadow->EnableAlphaWrites( !bTranslucent );
 		pShaderShadow->EnableDepthWrites( !bTranslucent );
 
 		pShader->DefaultFog();
@@ -365,14 +382,6 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 				tmpBuf.BindTexture( pShader, SHADER_SAMPLER4, info.iSelfIllumMask );
 			}
 
-			ShaderViewport_t viewport;
-			pShaderAPI->GetViewports( &viewport, 1 );
-			float fl1[4] = { 1.0f / viewport.m_nWidth, 1.0f / viewport.m_nHeight, 0, 0 };
-
-			tmpBuf.SetPixelShaderConstant( 1, fl1 );
-
-			tmpBuf.SetPixelShaderFogParams( 2 );
-
 			tmpBuf.SetPixelShaderConstant1( 4, PARM_FLOAT( info.iPhongScale ) );
 
 			if ( bEnvmapCorrection )
@@ -397,8 +406,12 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 		SET_DYNAMIC_VERTEX_SHADER_COMBO( MORPHING, (bModel && pShaderAPI->IsHWMorphingEnabled()) ? 1 : 0 );
 		SET_DYNAMIC_VERTEX_SHADER( composite_vs30 );
 
+		// HL2RPM: planar reflection views (water, glass) reproject into the main view's light buffer
+		const bool bReflectView = GetDeferredExt()->IsReflectionView();
+
 		DECLARE_DYNAMIC_PIXEL_SHADER( composite_ps30 );
 		SET_DYNAMIC_PIXEL_SHADER_COMBO( PIXELFOGTYPE, pShaderAPI->GetPixelFogCombo() );
+		SET_DYNAMIC_PIXEL_SHADER_COMBO( REFLECTVIEW, bReflectView ? 1 : 0 );
 		SET_DYNAMIC_PIXEL_SHADER( composite_ps30 );
 
 		if ( bModel && bFastVTex )
@@ -409,12 +422,63 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 
 		pShaderAPI->ExecuteCommandBuffer( pDeferredContext->GetCommands( CDeferredPerMaterialContextData::DEFSTAGE_COMPOSITE ) );
 
+		if ( r_deferred_debug_lighting_only.GetBool() )
+			pShaderAPI->BindStandardTexture( SHADER_SAMPLER0, TEXTURE_WHITE );
+
+		// HL2RPM: the light buffer texel size and the fog belong to the view, not to the
+		// material: they used to live in the command buffer above, which is built once per
+		// material. A material first drawn in a water reflection/refraction view (1024x512
+		// target) kept that texel size, and the main view then read the light buffer at
+		// x1.56 / x1.76 - walls showed "mirror images" of the lighting of other objects
+		// (and the water views got the main view's fog, or the other way round).
+		{
+			ShaderViewport_t viewport;
+			pShaderAPI->GetViewports( &viewport, 1 );
+			float fl1[4] = { 1.0f / Max( viewport.m_nWidth, 1 ), 1.0f / Max( viewport.m_nHeight, 1 ), 0, 0 };
+			pShaderAPI->SetPixelShaderConstant( 1, fl1, 1, true );
+			pShaderAPI->SetPixelShaderFogParams( 2 );
+		}
+
 		if ( bGBufferNormal )
 			pShader->BindTexture( SHADER_SAMPLER1, GetDeferredExt()->GetTexture_Normals() );
 
 		pShader->BindTexture( SHADER_SAMPLER2, GetDeferredExt()->GetTexture_LightAccum() );
 
-		CommitBaseDeferredConstants_Origin( pShaderAPI, 3 );
+		// the G-buffer depth: forward and scale of WriteDepth (MSAA light lookup and the
+		// reflection views); w 0 turns the MSAA lookup off
+		{
+			const float *pFwd = GetDeferredExt()->GetForwardBase();
+			const bool bLookup = bReflectView || ( r_deferred_msaa_light.GetBool() && !bTranslucent );
+			float flFwd[4] = { pFwd[0], pFwd[1], pFwd[2], bLookup ? GetDeferredExt()->GetZScale() : 0.0f };
+			pShaderAPI->SetPixelShaderConstant( 21, flFwd, 1, true );
+			pShader->BindTexture( SHADER_SAMPLER11, GetDeferredExt()->GetTexture_Depth() );
+		}
+
+		if ( bReflectView )
+		{
+			pShaderAPI->SetPixelShaderConstant( 16, GetDeferredExt()->GetMainViewToScreenTexBase(), 4, true );
+			pShaderAPI->SetPixelShaderConstant( 20, GetDeferredExt()->GetOriginBase(), 1, true );
+
+			// what the main view doesn't see gets the sky light plus some of the sun
+			const lightData_Global_t &light = GetDeferredExt()->GetLightData_Global();
+			const float flSunUp = light.bEnabled ? clamp( light.vecLight.z, 0.0f, 1.0f ) : 0.0f;
+			float flFallback[4];
+			for ( int i = 0; i < 3; i++ )
+				flFallback[i] = light.ambh[i] * 0.75f + light.ambl[i] * 0.25f + light.diff[i] * 0.45f * flSunUp;
+			flFallback[3] = 0.0f;
+			pShaderAPI->SetPixelShaderConstant( 22, flFallback, 1, true );
+		}
+
+		// HL2RPM: the fog distance is measured from the camera of the view being drawn. The
+		// deferred origin is the main view's: in the 3D skybox (its own coordinates, fog
+		// distances / skybox scale) the skybox city was ~16000 units "away" from it and
+		// drowned in the fog completely - flat fog-colored silhouettes.
+		{
+			float vCameraPos[4] = { 0, 0, 0, 1 };
+			pShaderAPI->GetWorldSpaceCameraPosition( vCameraPos );
+			vCameraPos[3] = 1.0f;
+			pShaderAPI->SetPixelShaderConstant( 3, vCameraPos, 1, true );
+		}
 
 		if ( bWorldEyeVec )
 		{
@@ -431,6 +495,17 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 		if ( bSelfIllum )
 		{
 			pShaderAPI->SetPixelShaderConstant( 10, params[ info.iSelfIllumTint ]->GetVecValue() );
+		}
+
+		// HL2RPM: the cubemaps are baked once (by day); scale the reflection with how bright
+		// the world is now, or glass and metal keep reflecting a sunny sky at night
+		if ( bEnvmap )
+		{
+			const weatherData_t &w = GetDeferredExt()->GetWeatherData();
+			const float flEnvScale = w.bEnabled ? w.vecSkyZenith.w : 1.0f;
+			const float *pTint = params[ info.iEnvmapTint ]->GetVecValue();
+			float flTint[4] = { pTint[0] * flEnvScale, pTint[1] * flEnvScale, pTint[2] * flEnvScale, 0.0f };
+			pShaderAPI->SetPixelShaderConstant( 5, flTint, 1, true );
 		}
 
 		// FIX: Engine's cLightScale lives in pixel shader register c30

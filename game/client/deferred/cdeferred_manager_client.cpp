@@ -73,6 +73,7 @@ bool CDeferredManagerClient::Init()
 			materials = &g_DeferredMaterialSystem;
 			engine->Mat_Stub( &g_DeferredMaterialSystem );
 			materials->ReloadMaterials();
+			DeferredMaterials_InstallCallbacks();
 
 			m_bDefRenderingEnabled = true;
 			GetDeferredExt()->EnableDeferredLighting();
@@ -137,6 +138,7 @@ void CDeferredManagerClient::Shutdown()
 	if ( IsDeferredRenderingEnabled() )
 	{
 		materials->RemoveModeChangeCallBack( &DefRTsOnModeChanged );
+		DeferredMaterials_RemoveCallbacks();
 
 		materials = g_pOldMatSystem;
 		engine->Mat_Stub( g_pOldMatSystem );

@@ -16,6 +16,7 @@
 #include "weather/c_weather_system.h"
 
 #include "deferred/deferred_dlight_bridge.h"
+#include "deferred/deferred_bounce.h"
 
 #include "tier0/memdbgon.h"
 
@@ -29,6 +30,17 @@ ConVar r_deferred_sun_rays( "r_deferred_sun_rays", "1" );
 ConVar r_deferred_sun_rays_intensity( "r_deferred_sun_rays_intensity", "0.25" );
 ConVar r_deferred_sun_rays_radius( "r_deferred_sun_rays_radius", "0.85" );
 ConVar r_deferred_volumetrics_blur( "r_deferred_volumetrics_blur", "1" );
+
+// HL2RPM: a point light without a shadow lights everything inside its radius, through walls
+// too. Most lamps converted from the classic lights have none (a shadow for every lamp of
+// demo_map cost too much), so the nearest few get one while the camera is within their
+// shadow distance (their shadows are rendered every frame anyway, nothing to invalidate).
+static ConVar r_deferred_light_shadow_budget( "r_deferred_light_shadow_budget", "4", FCVAR_ARCHIVE,
+	"The nearest N point lights without shadows get one while the camera is within their shadow distance (lights without shadows shine through walls); 0 = off" );
+static ConVar r_deferred_light_shadow_budget_fadetime( "r_deferred_light_shadow_budget_fadetime", "0.5", 0,
+	"Seconds a budget shadow takes to fade in / out" );
+static ConVar r_deferred_light_shadow_budget_minradius( "r_deferred_light_shadow_budget_minradius", "64", 0,
+	"Smaller point lights never get a budget shadow" );
 
 extern ConVar r_csm_quality;
 
@@ -60,6 +72,7 @@ CLightingManager::CLightingManager() : BaseClass( "LightingManagerSystem" )
 	m_vecForward.Init();
 	m_flzNear          = 0;
 	m_bDrawVolumetrics = false;
+	m_iShadowBudgetFrame = -1;
 	m_pSunVolumetricLight = NULL;
 #if DEFCFG_USE_SSE
 	m_pSortDataX4     = NULL;
@@ -98,8 +111,9 @@ void CLightingManager::LevelInitPostEntity() {}
 
 void CLightingManager::LevelShutdownPostEntity()
 {
-	// HL2RPM: mirrored engine dynamic lights belong to the level
+	// HL2RPM: mirrored engine dynamic lights and the bounce lights belong to the level
 	DeferredDLights_Clear();
+	DeferredBounce_Clear();
 
 	m_hRenderLights.Purge();
 
@@ -148,6 +162,8 @@ void CLightingManager::LightSetup( const CViewSetup& setup )
 {
 	// HL2RPM: muzzle flashes, explosions, fires, flares... (engine dlights / elights)
 	DeferredDLights_Update( setup.origin );
+	// HL2RPM: the light the lamps' surfaces throw back into the room
+	DeferredBounce_Update( setup.origin );
 
 	// Remove lights that have run out of time
 	UpdateTemplights( gpGlobals->frametime );
@@ -157,6 +173,8 @@ void CLightingManager::LightSetup( const CViewSetup& setup )
 #if DEBUG
 	m_bVolatileLists = true;
 #endif
+
+	UpdateShadowBudget( setup.origin );
 
 	CullLights();
 
@@ -480,6 +498,86 @@ void CLightingManager::PrepareLights()
 	FOR_EACH_VEC_FAST_END
 }
 
+void CLightingManager::UpdateShadowBudget( const Vector &vecViewOrigin )
+{
+	if ( m_iShadowBudgetFrame == gpGlobals->framecount )
+		return;
+	m_iShadowBudgetFrame = gpGlobals->framecount;
+
+	const int iBudget = Clamp( r_deferred_light_shadow_budget.GetInt(), 0, 16 );
+	const float flMinRadius = r_deferred_light_shadow_budget_minradius.GetFloat();
+	const float flFadeTime = r_deferred_light_shadow_budget_fadetime.GetFloat();
+	const float flStep = ( flFadeTime > 0.0f ) ? gpGlobals->frametime / flFadeTime : 1.0f;
+	const bool bLeafCull = r_deferred_light_visleaf_cull.GetBool();
+
+	struct budgetCandidate_t
+	{
+		def_light_t *l;
+		float flPriority;
+	};
+	CUtlVectorFixedGrowable< budgetCandidate_t, 32 > candidates;
+
+	FOR_EACH_VEC_FAST( def_light_t*, m_hDeferredLights, l )
+	{
+		const bool bEligible = iBudget > 0 &&
+			l->IsPoint() &&
+			!( l->iFlags & DEFLIGHT_SHADOW_ENABLED ) &&
+			!l->HasVolumetrics() &&		// their volumetrics only render with a shadow: would pop in
+			l->flRadius >= flMinRadius &&
+			!IsTempLight( l ) &&
+			!DeferredBounce_IsBounceLight( l ) &&
+			!DeferredDLights_IsMirrored( l );
+
+		if ( !bEligible )
+		{
+			l->bBudgetShadow = false;
+			l->flBudgetFade = 1.0f;
+			continue;
+		}
+
+		const float flDist = l->pos.DistTo( vecViewOrigin );
+		const float flShadowEnd = (float)l->iShadow_Dist + (float)l->iShadow_Range;
+
+		if ( flDist < flShadowEnd &&
+			( !bLeafCull || render->AreAnyLeavesVisible( l->iLeaveIDs, l->iNumLeaves ) ) )
+		{
+			// the lights that already have one keep it unless another is clearly nearer
+			budgetCandidate_t c = { l, flDist * ( 0.8f + 0.2f * l->flBudgetFade ) };
+			candidates.AddToTail( c );
+		}
+		else
+		{
+			l->flBudgetFade = Min( 1.0f, l->flBudgetFade + flStep );
+			l->bBudgetShadow = l->flBudgetFade < 1.0f;
+		}
+	}
+	FOR_EACH_VEC_FAST_END
+
+	if ( candidates.Count() > iBudget )
+	{
+		struct sorter
+		{
+			static int Compare( const budgetCandidate_t *a, const budgetCandidate_t *b )
+			{
+				return ( a->flPriority < b->flPriority ) ? -1 : ( ( a->flPriority > b->flPriority ) ? 1 : 0 );
+			}
+		};
+		candidates.Sort( sorter::Compare );
+	}
+
+	for ( int i = 0; i < candidates.Count(); i++ )
+	{
+		def_light_t *l = candidates[ i ].l;
+
+		if ( i < iBudget )
+			l->flBudgetFade = Max( 0.0f, l->flBudgetFade - flStep );
+		else
+			l->flBudgetFade = Min( 1.0f, l->flBudgetFade + flStep );
+
+		l->bBudgetShadow = l->flBudgetFade < 1.0f;
+	}
+}
+
 void CLightingManager::CullLights()
 {
 	Assert( m_hRenderLights.Count() == 0 );
@@ -517,6 +615,8 @@ void CLightingManager::CullLights()
 		l->flShadowFade          = l->HasShadow()
 			                           ? ( SATURATE( ( l->flDistance_ViewOrigin - l->iShadow_Dist ) / l->iShadow_Range ) )
 			                           : 1.0f;
+		if ( l->bBudgetShadow )
+			l->flShadowFade = Max( l->flShadowFade, l->flBudgetFade );
 
 		m_hRenderLights.AddToTail( l );
 	}
@@ -1801,7 +1901,7 @@ void CLightingManager::DumpLights() const
 			outerDeg = SPOT_RAD_TO_DEGREE( l->flSpotCone_Outer );
 		}
 
-		Msg( "  %s pos=(%.1f %.1f %.1f) rad=%.1f power=%.2f shadow=%d cookie=%d cone=(%.1f %.1f)\n",
+		Msg( "  %s pos=(%.1f %.1f %.1f) rad=%.1f power=%.2f shadow=%d cookie=%d cone=(%.1f %.1f) flags=0x%x budget=%d(%.2f) shadowdist=%d+%d col=(%.2f %.2f %.2f)\n",
 			bSpot ? "spot " : "point",
 			XYZ( l->pos ),
 			l->flRadius,
@@ -1809,7 +1909,13 @@ void CLightingManager::DumpLights() const
 			bShadow ? 1 : 0,
 			bCookie ? 1 : 0,
 			innerDeg,
-			outerDeg );
+			outerDeg,
+			l->iFlags,
+			l->bBudgetShadow ? 1 : 0,
+			l->flBudgetFade,
+			l->iShadow_Dist,
+			l->iShadow_Range,
+			XYZ( l->col_diffuse ) );
 	}
 
 	Msg( "Deferred lights summary: point=%d spot=%d shadow=%d cookie=%d\n", numPoint, numSpot, numShadow, numCookie );

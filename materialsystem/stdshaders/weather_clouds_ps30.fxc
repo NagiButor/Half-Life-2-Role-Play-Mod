@@ -27,7 +27,7 @@ const float4 g_vecCloud1		: register( c6 );	// base (m), thickness (m), cirrus, 
 const float4 g_vecCloud2		: register( c7 );	// brightness, shadow strength, steps, temporal blend
 const float4 g_vecWind			: register( c8 );	// xy cloud offset (m)
 const float4 g_vecScreen		: register( c9 );	// 1/w, 1/h (full res), uv scale, frame
-const float4 g_vecCloud3		: register( c10 );	// x altocumulus amount, y altocumulus altitude (m)
+const float4 g_vecCloud3		: register( c10 );	// x altocumulus amount, y altocumulus altitude (m), z cloud space meters per unit, w debug view
 const float4 g_vecLightning		: register( c14 );	// xyz flash dir, w intensity
 
 struct PS_INPUT
@@ -117,7 +117,8 @@ float CloudDensity( float3 pos, float h01, bool bDetail )
 
 	// large scale variation: some areas of the sky are cloudier than others, and the
 	// cloud type changes across the sky (flat patches next to towering cells)
-	float coverage = saturate( g_vecCloud0.x + ( wm.r - 0.5 ) * 0.5 * ( 1.0 - g_vecCloud0.x * 0.6 ) );
+	// (fades out towards full coverage: an overcast deck or fog must not get holes)
+	float coverage = saturate( g_vecCloud0.x + ( wm.r - 0.5 ) * 0.5 * ( 1.0 - g_vecCloud0.x * 0.6 ) * saturate( ( 1.0 - g_vecCloud0.x ) * 6.0 ) );
 	float type = saturate( g_vecCloud0.z + ( wm.g - 0.5 ) * 0.7 );
 
 	float3 shapePos = float3( pos.xy, h01 * g_vecCloud1.y * 1.6 + g_vecCloud1.w * 3.0 ) / SHAPE_PERIOD;
@@ -135,10 +136,20 @@ float CloudDensity( float3 pos, float h01, bool bDetail )
 		float3 detailPos = float3( pos.xy * 1.0, h01 * g_vecCloud1.y + g_vecCloud1.w * 12.0 ) / DETAIL_PERIOD;
 		float4 detailNoise = Noise3D( detailPos );
 		float detail = detailNoise.g * 0.625 + detailNoise.b * 0.25 + detailNoise.a * 0.125;
+		// a finer octave (400 m): small bulges on the cauliflower tops, frayed wisps below
+		float4 detailNoise2 = Noise3D( detailPos * 4.0 + float3( 0.37, 0.61, 0.13 ) );
+		detail = detail * 0.7 + ( detailNoise2.g * 0.6 + detailNoise2.b * 0.4 ) * 0.3;
 		// wispy at the bottom, billowy at the top
 		detail = lerp( detail, 1.0 - detail, saturate( h01 * 4.0 ) );
-		base = saturate( Remap( base, detail * 0.38, 1.0, 0.0, 1.0 ) );
+		// the thin outskirts of a cloud erode most: crisp cores, ragged edges
+		float erosion = lerp( 0.30, 0.55, saturate( 1.0 - base * 1.6 ) );
+		base = saturate( Remap( base, detail * erosion, 1.0, 0.0, 1.0 ) );
 	}
+
+	// an overcast deck has no holes: a thin floor of cloud everywhere inside the layer,
+	// the shape noise only adds thicker lumps on top of it
+	float deck = saturate( ( coverage - 0.93 ) / 0.07 );
+	base = max( base, deck * 0.14 * HeightProfile( h01, type ) );
 
 	return base;
 }
@@ -190,15 +201,27 @@ float4 main( const PS_INPUT In ) : COLOR
 
 	const float flSteps = max( g_vecCloud2.z, 8.0 );
 	const float dt = ( tEnd - tStart ) / flSteps;
-	float jitter = frac( Hash12( In.vScreenPos ) + g_vecScreen.w * 0.61803398 );
+	// interleaved gradient noise: neighbouring pixels get well spread offsets, so the 3x3
+	// filter of the resolve averages 9 different depths (white noise left the thin cloud
+	// edges hit-or-miss from frame to frame - they sparkled); golden ratio steps in time
+	float jitter = frac( frac( 52.9829189 * frac( dot( In.vScreenPos, float2( 0.06711056, 0.00583715 ) ) ) )
+		+ g_vecScreen.w * 0.61803398 );
 
-	float3 camXY = float3( g_vecCamera.xy * UNITS_TO_M + g_vecWind.xy, 0.0 );
+	// cloud space: the camera moves 'parallax' times faster under the clouds than it would
+	// under real ones, so walking across a map visibly moves the sky
+	float cloudScale = ( g_vecCloud3.z > 0.0 ) ? g_vecCloud3.z : UNITS_TO_M;
+	float3 camXY = float3( g_vecCamera.xy * cloudScale + g_vecWind.xy, 0.0 );
 	float3 L = g_vecLightDir.xyz;
 	float cosTheta = dot( rd, L );
 	// dual-lobe phase: strong forward scattering (silver lining) + some back scatter
 	float phase = lerp( HG( cosTheta, 0.72 ), HG( cosTheta, -0.25 ), 0.28 ) * 4.0 * PI;
 
-	float3 lightColor = g_vecLightColor.rgb * g_vecCloud2.x * ( 1.0 - 0.8 * darkness );
+	// debug views (r_weather_cloud_debug): 1 = sun light only, 2 = sky light only, 3 = opacity
+	const float dbg = g_vecCloud3.w;
+	float3 lightColor = g_vecLightColor.rgb * g_vecCloud2.x * ( 1.0 - 0.8 * darkness ) * ( ( dbg > 1.5 && dbg < 2.5 ) ? 0.0 : 1.0 );
+	// sky fill: the shaded sides and bases are lit by the sky dome only (and much of it is
+	// hidden by the cloud itself) - at 1.5 they came out nearly as white as the sunlit tops
+	const float ambScale = g_vecCloud2.x * 0.75 * ( ( dbg > 0.5 && dbg < 1.5 ) ? 0.0 : 1.0 );
 	// lightning lights the clouds around the channel, and faintly the whole deck
 	float3 flashColor = float3( 0.80, 0.86, 1.0 ) * g_vecLightning.w * 3.2;
 	float flashCos = saturate( dot( rd, normalize( g_vecLightning.xyz ) ) );
@@ -226,7 +249,8 @@ float4 main( const PS_INPUT In ) : COLOR
 			continue;
 
 		// light march toward the sun (shape only, growing steps).
-		// A real loop, not unrolled: keeps the shader within the 32 temp registers of ps_3_0.
+		// A real loop, not unrolled: keeps the shader within the 32 temp registers of ps_3_0
+		// (the detail noise does not fit in here).
 		float od = 0.0;
 		float lstep = g_vecCloud1.y * 0.06;
 		float3 lp = worldPos;
@@ -248,7 +272,7 @@ float4 main( const PS_INPUT In ) : COLOR
 		{
 			float ph = lerp( 1.0, phase, c );
 			sun += a * exp( -od * sigmaScale * b ) * ph;
-			a *= 0.5; b *= 0.4; c *= 0.5;
+			a *= 0.5; b *= 0.5; c *= 0.5;
 		}
 		// powder: dark edges facing the light
 		float powder = 1.0 - exp( -sigma * 180.0 );
@@ -260,9 +284,9 @@ float4 main( const PS_INPUT In ) : COLOR
 		float dAbove = CloudDensity( float3( worldPos.xy, baseH + hAbove * g_vecCloud1.y ), hAbove, false );
 		float skyVis = exp( -dAbove * densityScale * g_vecCloud1.y * ( 1.0 - h01 ) * 0.00035 );
 
-		float3 ambient = lerp( g_vecSkyHorizon.rgb * 0.9, g_vecSkyZenith.rgb, saturate( h01 * 1.3 ) ) * ( 0.35 + 0.65 * h01 ) * ( 1.0 - darkness * 0.45 );
-		ambient *= 0.25 + 0.75 * skyVis;
-		float3 S = sun * lightColor + ambient * g_vecCloud2.x * 2.4 + flashColor * flashAim * ( 1.0 - 0.6 * h01 );
+		float3 ambient = lerp( g_vecSkyHorizon.rgb * 0.9, g_vecSkyZenith.rgb, saturate( h01 * 1.3 ) ) * ( 0.22 + 0.78 * h01 ) * ( 1.0 - darkness * 0.45 );
+		ambient *= 0.15 + 0.85 * skyVis;
+		float3 S = sun * lightColor + ambient * ambScale + flashColor * flashAim * ( 1.0 - 0.6 * h01 );
 
 		float stepT = exp( -sigma * dt );
 		scatter += T * S * ( 1.0 - stepT );
@@ -285,17 +309,21 @@ float4 main( const PS_INPUT In ) : COLOR
 			float2 p = rd.xy * tAc + camXY.xy * 1.3;
 			float wmAc = tex2Dlod( sWeather, float4( p / WEATHER_PERIOD + 0.37, 0, 0 ) ).r;
 			float amount = saturate( acAmount * 1.2 + ( wmAc - 0.5 ) * 1.1 );
-			float4 n1 = Noise3D( float3( p / 3200.0, 0.31 + g_vecCloud1.w * 0.0003 ) );
-			float4 n2 = Noise3D( float3( p / 1100.0, 0.73 + g_vecCloud1.w * 0.0008 ) );
+			float4 n1 = Noise3D( float3( p / 4000.0, 0.31 + g_vecCloud1.w * 0.0003 ) );
+			float4 n2 = Noise3D( float3( p / 1300.0, 0.73 + g_vecCloud1.w * 0.0008 ) );
 			float cells = n1.g * 0.55 + n2.g * 0.45;
+			// billow rows (altocumulus undulatus) instead of a field of round dots: a wavy
+			// ripple across the cells (650 m; the direction keeps it periodic over the wrap)
+			float rows = 0.5 + 0.5 * sin( dot( p, float2( 0.8, 0.6 ) ) * ( 6.2831853 / 650.0 ) + n1.b * 7.0 );
+			cells *= 0.82 + 0.3 * rows;
 			float patches = saturate( ( n1.r - 0.45 ) * 3.0 );
-			float dens = saturate( ( cells - ( 1.0 - amount * 0.55 ) ) / 0.12 ) * patches;
+			float dens = saturate( ( cells - ( 1.0 - amount * 0.55 ) ) / 0.2 ) * patches;
 			float acFade = exp( -tAc / 45000.0 ) * saturate( rd.z * 12.0 );
-			float acAlpha = dens * amount * 0.8 * acFade;
+			float acAlpha = dens * amount * 0.7 * acFade;
 
 			float acPhase = HG( cosTheta, 0.6 ) * 4.0 * PI;
-			float3 acSun = lightColor * ( 0.3 + 0.35 * acPhase ) * ( 1.2 - 0.5 * dens );
-			float3 acAmb = g_vecSkyZenith.rgb * g_vecCloud2.x * 1.8 * ( 1.0 - darkness * 0.45 );
+			float3 acSun = lightColor * ( 0.3 + 0.35 * acPhase ) * ( 1.2 - 0.6 * dens );
+			float3 acAmb = g_vecSkyZenith.rgb * ambScale * ( 1.0 - darkness * 0.45 );
 			scatter += T * ( acSun + acAmb ) * acAlpha;
 			T *= 1.0 - acAlpha;
 		}
@@ -305,6 +333,8 @@ float4 main( const PS_INPUT In ) : COLOR
 	scatter *= lerp( 1.0, 0.45, saturate( g_vecLightColor.w ) );
 
 	float4 result = float4( scatter, T );
+	if ( dbg > 2.5 )
+		result = float4( ( 1.0 - T ).xxx * 0.3, 0.0 );
 
 	return result;
 }

@@ -47,6 +47,10 @@ enum GfxSetting_e
 	GFX_RAIN,				// r_weather_rain_density (0.5 / 1 / 1.5)
 	GFX_WETNESS,			// r_weather_wetness 0/1
 	GFX_SSAO,				// r_deferred_ssao 0/1
+	GFX_SOFT_SHADOWS,		// r_csm_pcss 0/1
+	GFX_BOUNCE,				// r_deferred_bounce 0/1
+	GFX_WATER,				// r_deferred_water_views 0/1
+	GFX_FXAA,				// r_deferred_fxaa 0/1
 
 	GFX_SETTING_COUNT
 };
@@ -60,6 +64,10 @@ static const char *s_pszGfxConVars[GFX_SETTING_COUNT] =
 	"r_weather_rain_density",
 	"r_weather_wetness",
 	"r_deferred_ssao",
+	"r_csm_pcss",
+	"r_deferred_bounce",
+	"r_deferred_water_views",
+	"r_deferred_fxaa",
 };
 
 static const char *s_pszGfxLabels[GFX_SETTING_COUNT] =
@@ -71,6 +79,10 @@ static const char *s_pszGfxLabels[GFX_SETTING_COUNT] =
 	"#HL2RPM_Gfx_Rain",
 	"#HL2RPM_Gfx_Wetness",
 	"#HL2RPM_Gfx_SSAO",
+	"#HL2RPM_Gfx_SoftShadows",
+	"#HL2RPM_Gfx_Bounce",
+	"#HL2RPM_Gfx_WaterReflect",
+	"#HL2RPM_Gfx_FXAA",
 };
 
 struct GfxChoice_t
@@ -112,6 +124,10 @@ static const GfxChoiceList_t s_GfxChoices[GFX_SETTING_COUNT] =
 	{ s_RainChoices, ARRAYSIZE( s_RainChoices ) },
 	{ s_OnOffChoices, ARRAYSIZE( s_OnOffChoices ) },
 	{ s_OnOffChoices, ARRAYSIZE( s_OnOffChoices ) },
+	{ s_OnOffChoices, ARRAYSIZE( s_OnOffChoices ) },
+	{ s_OnOffChoices, ARRAYSIZE( s_OnOffChoices ) },
+	{ s_OnOffChoices, ARRAYSIZE( s_OnOffChoices ) },
+	{ s_OnOffChoices, ARRAYSIZE( s_OnOffChoices ) },
 };
 
 // Overall presets. The costs that matter most on the GPU are the sun shadow
@@ -130,12 +146,12 @@ static const char *s_pszPresetLabels[] =
 
 static const float s_flPresets[GFX_PRESET_COUNT][GFX_SETTING_COUNT] =
 {
-	//	sun	lamp clouds shafts rain wet	ssao
-	{	0,	1,	1,	0,	0.5f,	0,	0	},	// very low
-	{	1,	2,	1,	1,	0.5f,	1,	0	},	// low
-	{	2,	3,	2,	1,	1.0f,	1,	1	},	// medium
-	{	3,	4,	2,	2,	1.0f,	1,	1	},	// high
-	{	5,	5,	3,	3,	1.5f,	1,	1	},	// ultra
+	//	sun	lamp clouds shafts rain wet	ssao soft bounce water fxaa
+	{	0,	1,	1,	0,	0.5f,	0,	0,	0,	0,	0,	0	},	// very low
+	{	1,	2,	1,	1,	0.5f,	1,	0,	0,	1,	0,	0	},	// low
+	{	2,	3,	2,	1,	1.0f,	1,	1,	1,	1,	1,	1	},	// medium
+	{	3,	4,	2,	2,	1.0f,	1,	1,	1,	1,	1,	1	},	// high
+	{	5,	5,	3,	3,	1.5f,	1,	1,	1,	1,	1,	1	},	// ultra
 };
 
 static int FindChoice( int iSetting, float flValue )
@@ -168,6 +184,13 @@ public:
 	virtual void OnResetData();
 	virtual void OnApplyChanges();
 	virtual void PerformLayout();
+
+	// GameUI's options sheet fades pages in: it sets the new page's alpha to 0 and
+	// animates it with GameUI's AnimationController, which can't resolve panels of
+	// another module (client.dll) -> our page stayed fully transparent ("empty"
+	// Graphics tab) whenever the tab was clicked instead of opened by our code.
+	virtual void OnPageShow();
+	virtual void OnThink();
 
 	MESSAGE_FUNC_PTR( OnTextChanged, "TextChanged", panel );
 
@@ -242,26 +265,42 @@ void CHL2RPMGraphicsPage::PerformLayout()
 	const int iLabelWide = 230;
 	const int iComboWide = Min( 190, GetWide() - x0 * 2 - iLabelWide );
 	const int x1 = x0 + iLabelWide;
-	const int iRow = 30;
-	int y = 18;
+	// the page is only ~300 px tall: fit all rows plus the three info lines
+	const int iFooter = 3 * 20 + 8;
+	const int iRow = clamp( ( GetTall() - 12 - 34 - iFooter ) / Max( 1, (int)GFX_SETTING_COUNT ), 22, 30 );
+	int y = 12;
 
-	m_pPresetLabel->SetBounds( x0, y, iLabelWide, 24 );
-	m_pPreset->SetBounds( x1, y, iComboWide, 24 );
-	y += iRow + 14;
+	m_pPresetLabel->SetBounds( x0, y, iLabelWide, 22 );
+	m_pPreset->SetBounds( x1, y, iComboWide, 22 );
+	y += 34;
 
 	for ( int s = 0; s < GFX_SETTING_COUNT; s++ )
 	{
-		m_pLabels[s]->SetBounds( x0 + 12, y, iLabelWide - 12, 24 );
-		m_pCombos[s]->SetBounds( x1, y, iComboWide, 24 );
+		m_pLabels[s]->SetBounds( x0 + 12, y, iLabelWide - 12, 22 );
+		m_pCombos[s]->SetBounds( x1, y, iComboWide, 22 );
 		y += iRow;
 	}
 
-	y += 8;
+	y += 6;
 	m_pNoteLabel->SetBounds( x0, y, GetWide() - x0 * 2, 20 );
-	y += 24;
+	y += 20;
 	m_pGPULabel->SetBounds( x0, y, GetWide() - x0 * 2, 20 );
-	y += 22;
+	y += 20;
 	m_pHintLabel->SetBounds( x0, y, GetWide() - x0 * 2, 20 );
+}
+
+void CHL2RPMGraphicsPage::OnPageShow()
+{
+	BaseClass::OnPageShow();
+	SetAlpha( 255 );
+	InvalidateLayout();
+}
+
+void CHL2RPMGraphicsPage::OnThink()
+{
+	BaseClass::OnThink();
+	if ( IsVisible() && GetAlpha() < 255 )
+		SetAlpha( 255 );
 }
 
 void CHL2RPMGraphicsPage::LoadFromConVars()

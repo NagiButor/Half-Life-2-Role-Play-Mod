@@ -544,6 +544,12 @@ namespace DialogDefinitions
         filesystem->FindClose(findHandle);
     }
 
+    void ClearDialogProgress()
+    {
+        g_SpoiledEntities.RemoveAll();
+        g_SpokenEntities.RemoveAll();
+    }
+
     void ReloadDialogs()
     {
         ClearLoadedDialogs();

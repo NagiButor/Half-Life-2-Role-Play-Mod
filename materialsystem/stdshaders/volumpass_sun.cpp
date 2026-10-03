@@ -91,6 +91,8 @@ BEGIN_VS_SHADER( VOLUME_SUN, "" )
 			float flParams[4] = { s_flSteps[iQuality], clamp( r_weather_sunshafts_distance.GetFloat(), 500.0f, 12000.0f ),
 				w.vecScreenParams.w, w.vecSunColor.w };
 			pShaderAPI->SetPixelShaderConstant( 63, flParams, 1, true );
+			float flCloudSpace[4] = { w.vecCloudParams3.z, 0.0f, 0.0f, 0.0f };
+			pShaderAPI->SetPixelShaderConstant( 64, flCloudSpace, 1, true );
 		}
 
 		Draw();

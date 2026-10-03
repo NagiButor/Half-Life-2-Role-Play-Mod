@@ -47,6 +47,7 @@ void WeatherRender_SetSkyLight( const lightData_Global_t &light );
 void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t &light );
 void WeatherRender_Clouds( const CViewSetup &view );
 void WeatherRender_SetCloudTextureValid( bool bValid );
+bool WeatherRender_IsCloudTextureValid();
 void WeatherRender_PostOpaque( const CViewSetup &view );
 void WeatherRender_Rain( const CViewSetup &view );
 void WeatherRender_Lightning( const CViewSetup &view );	// visible channel of a strike

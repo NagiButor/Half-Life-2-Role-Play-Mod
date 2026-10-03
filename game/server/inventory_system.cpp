@@ -11,6 +11,7 @@
 #include "hl2_player.h"
 #include "filesystem.h"
 #include "KeyValues.h"
+#include "isaverestore.h"
 
 extern ConVar quest_reward_debug;
 
@@ -993,6 +994,109 @@ namespace InventorySystem
         engine->ClientCommand(pPlayer->edict(), UTIL_VarArgs("ui_toast \"reward\" \"%s\" \"\"", msg.Get()));
     }
 
+
+    // -----------------------------------------------------------------------
+    // HL2RPM: the inventory is part of the save game; it survives changelevels
+    // and is cleared by a new game (it used to live forever in this process and
+    // was lost on quit)
+    // -----------------------------------------------------------------------
+    void PrintInventory(CBasePlayer *pPlayer)
+    {
+        const int idx = pPlayer->entindex();
+        const char *pszSuit = GetEquippedSuitClass(pPlayer);
+        Msg("[inventory] player %d, suit '%s', weight %.1f kg\n", idx, pszSuit ? pszSuit : "", GetPlayerInventoryWeight(pPlayer));
+        for (int i = 0; i < g_PlayerInventories.Count(); ++i)
+        {
+            if (g_PlayerInventories[i].entIndex != idx)
+                continue;
+            for (int j = 0; j < g_PlayerInventories[i].items.Count(); ++j)
+            {
+                const InvItem &it = g_PlayerInventories[i].items[j];
+                Msg("[inventory]   %s  bullets %d  weapon %d  clip %d/%d\n", it.classname.Get(), it.bullets, it.isWeapon ? 1 : 0, it.weaponClip1, it.weaponClip2);
+            }
+        }
+    }
+
+    void ClearInventoryState()
+    {
+        g_PlayerInventories.RemoveAll();
+        g_EquippedSuitByPlayer.RemoveAll();
+    }
+
+    static const int INVENTORY_SAVE_VERSION = 1;
+
+    void SaveInventoryState(ISave *pSave)
+    {
+        int nVersion = INVENTORY_SAVE_VERSION;
+        pSave->WriteInt(&nVersion);
+        int nInv = g_PlayerInventories.Count();
+        pSave->WriteInt(&nInv);
+        for (int i = 0; i < nInv; ++i)
+        {
+            PlayerInv &inv = g_PlayerInventories[i];
+            pSave->WriteInt(&inv.entIndex);
+            int nItems = inv.items.Count();
+            pSave->WriteInt(&nItems);
+            for (int j = 0; j < nItems; ++j)
+            {
+                InvItem &it = inv.items[j];
+                pSave->WriteString(it.classname.Get() ? it.classname.Get() : "");
+                pSave->WriteInt(&it.bullets);
+                int iWeapon = it.isWeapon ? 1 : 0;
+                pSave->WriteInt(&iWeapon);
+                pSave->WriteInt(&it.weaponClip1);
+                pSave->WriteInt(&it.weaponClip2);
+                pSave->WriteInt(&it.reserveAmmoIndex);
+                pSave->WriteInt(&it.reserveAmmoCount);
+            }
+        }
+        int nSuits = g_EquippedSuitByPlayer.Count();
+        pSave->WriteInt(&nSuits);
+        for (int i = 0; i < nSuits; ++i)
+        {
+            pSave->WriteInt(&g_EquippedSuitByPlayer[i].entIndex);
+            pSave->WriteString(g_EquippedSuitByPlayer[i].suitClass != NULL_STRING ? STRING(g_EquippedSuitByPlayer[i].suitClass) : "");
+        }
+    }
+
+    void RestoreInventoryState(IRestore *pRestore)
+    {
+        ClearInventoryState();
+        if (pRestore->ReadInt() != INVENTORY_SAVE_VERSION)
+            return;
+        const int nInv = pRestore->ReadInt();
+        for (int i = 0; i < nInv; ++i)
+        {
+            int idx = g_PlayerInventories.AddToTail();
+            PlayerInv &inv = g_PlayerInventories[idx];
+            inv.entIndex = pRestore->ReadInt();
+            const int nItems = pRestore->ReadInt();
+            for (int j = 0; j < nItems; ++j)
+            {
+                char szClass[256];
+                pRestore->ReadString(szClass, sizeof(szClass), 0);
+                int k = inv.items.AddToTail();
+                InvItem &it = inv.items[k];
+                it.classname = szClass;
+                it.bullets = pRestore->ReadInt();
+                it.isWeapon = pRestore->ReadInt() != 0;
+                it.weaponClip1 = pRestore->ReadInt();
+                it.weaponClip2 = pRestore->ReadInt();
+                it.reserveAmmoIndex = pRestore->ReadInt();
+                it.reserveAmmoCount = pRestore->ReadInt();
+            }
+        }
+        const int nSuits = pRestore->ReadInt();
+        for (int i = 0; i < nSuits; ++i)
+        {
+            int k = g_EquippedSuitByPlayer.AddToTail();
+            g_EquippedSuitByPlayer[k].entIndex = pRestore->ReadInt();
+            char szSuit[256];
+            pRestore->ReadString(szSuit, sizeof(szSuit), 0);
+            g_EquippedSuitByPlayer[k].suitClass = szSuit[0] ? AllocPooledString(szSuit) : NULL_STRING;
+        }
+    }
+
 }
 
 // Server-side command handlers
@@ -1882,3 +1986,84 @@ public:
 };
 
 static CInventoryMapScanner g_InventoryMapScanner;
+
+// ---------------------------------------------------------------------------
+// HL2RPM: inventory save/restore block and new-game reset
+// ---------------------------------------------------------------------------
+#include "isaverestore.h"
+
+class CInventorySaveRestoreBlockHandler : public CDefSaveRestoreBlockHandler
+{
+public:
+    const char *GetBlockName() { return "HL2RPMInventory"; }
+
+    void Save(ISave *pSave)
+    {
+        pSave->StartBlock("Inventory");
+        InventorySystem::SaveInventoryState(pSave);
+        pSave->EndBlock();
+    }
+
+    void PreRestore()
+    {
+        m_bDoLoad = false;
+        if (gpGlobals->eLoadType == MapLoad_LoadGame)
+            InventorySystem::ClearInventoryState();
+    }
+
+    void WriteSaveHeaders(ISave *pSave)
+    {
+        short nVersion = 1;
+        pSave->WriteShort(&nVersion);
+    }
+
+    void ReadRestoreHeaders(IRestore *pRestore)
+    {
+        short nVersion;
+        pRestore->ReadShort(&nVersion);
+        // a changelevel restores the level's old data: the inventory in memory is newer
+        m_bDoLoad = (nVersion == 1) && (gpGlobals->eLoadType == MapLoad_LoadGame);
+    }
+
+    void Restore(IRestore *pRestore, bool fCreatePlayers)
+    {
+        if (!m_bDoLoad)
+            return;
+        pRestore->StartBlock();
+        InventorySystem::RestoreInventoryState(pRestore);
+        pRestore->EndBlock();
+    }
+
+private:
+    bool m_bDoLoad;
+};
+
+static CInventorySaveRestoreBlockHandler g_InventorySaveRestoreBlockHandler;
+
+ISaveRestoreBlockHandler *GetInventorySaveRestoreBlockHandler()
+{
+    return &g_InventorySaveRestoreBlockHandler;
+}
+
+class CInventoryNewGameReset : public CAutoGameSystem
+{
+public:
+    CInventoryNewGameReset() : CAutoGameSystem("CInventoryNewGameReset") {}
+    virtual void LevelInitPreEntity() OVERRIDE
+    {
+        if (gpGlobals->eLoadType == MapLoad_NewGame || gpGlobals->eLoadType == MapLoad_Background)
+            InventorySystem::ClearInventoryState();
+    }
+};
+static CInventoryNewGameReset g_InventoryNewGameReset;
+
+// HL2RPM: print the local player's inventory (tests, save/load checks)
+static void CC_Inventory_Dump(const CCommand &args)
+{
+    CBasePlayer *pPlayer = UTIL_GetCommandClient();
+    if (!pPlayer)
+        pPlayer = UTIL_PlayerByIndex(1);
+    if (pPlayer)
+        InventorySystem::PrintInventory(pPlayer);
+}
+static ConCommand inventory_dump_cc("inventory_dump", CC_Inventory_Dump, "Print the player's inventory", FCVAR_GAMEDLL);

@@ -44,6 +44,10 @@ public:
 
 	// Renders all translucent detail objects in a particular leaf up to a particular point
 	virtual void RenderTranslucentDetailObjectsInLeaf( const Vector &viewOrigin, const Vector &viewForward, const Vector &viewRight, const Vector &viewUp, int nLeaf, const Vector *pVecClosestPoint ) = 0;
+
+	// HL2RPM: the material of the detail sprites (the deferred view draws them into the
+	// G-buffer when it has a deferred shader)
+	virtual IMaterial *GetDetailSpriteMaterial() = 0;
 };
 
 

@@ -335,6 +335,7 @@ static void ConvertWorldLights( const dworldlight_t *lights, int lightCount, con
 			lightEntity->KeyValue( GetLightParamName( LPARAM_STYLE_SEED ), RandomInt( 0, DEFLIGHT_SEED_MAX ) );
 		}
 		lightEntity->KeyValue( "spawnflags", UTIL_VarArgs( "%d", iFlags ) );
+		lightEntity->KeyValue( "autoshadow", "0" );	// shadows chosen above (CDeferredLight::GetInitialDefFlags)
 
 		DispatchSpawn( lightEntity );
 
@@ -350,9 +351,15 @@ static void ConvertWorldLights( const dworldlight_t *lights, int lightCount, con
 		nPoint + nSpot + nSurface, nPoint, nSpot, nSurface, candidates.Count() );
 }
 
+extern bool g_bHL2RPMRestoringLevel;
+
 void CDeferredManagerServer::LevelInitPreEntity()
 {
 	if ( gpGlobals->eLoadType == MapLoad_LoadGame )
+		return;
+
+	// a revisited map (changelevel back) restores its converted lights from the save
+	if ( g_bHL2RPMRestoringLevel )
 		return;
 
 	if ( !r_deferred.GetBool() )
@@ -424,7 +431,12 @@ void CDeferredManagerServer::LevelInitPreEntity()
 	{
 	*/
 		if ( lightLump.filelen % sizeof( dworldlight_t ) )
+		{
+			// (an older lump layout) - HL2RPM: the map file used to stay open from here on
+			Warning( "CDeferredManagerServer: %s has a world light lump of an unknown layout, classic lights are not converted\n", szBSPPath );
+			g_pFullFileSystem->Close( hFile );
 			return;
+		}
 
 		g_pFullFileSystem->Seek( hFile, lightLump.fileofs, FILESYSTEM_SEEK_HEAD );
 
@@ -723,6 +735,7 @@ void CDeferredManagerServer::LevelInitPreEntity()
 		}
 
 		lightEntity->KeyValue( "spawnflags", UTIL_VarArgs( "%d", iDefFlags ) );
+		lightEntity->KeyValue( "autoshadow", "0" );	// shadows chosen above (CDeferredLight::GetInitialDefFlags)
 		if ( type == 1 || type == 5 )
 		{
 			lightEntity->KeyValue( szParamLightType, "1" );
@@ -807,6 +820,7 @@ void CDeferredManagerServer::LevelInitPreEntity()
 		lightEntity->KeyValue( szParamDiffuse, string );
 
 		lightEntity->KeyValue( "spawnflags", "3" );
+		lightEntity->KeyValue( "autoshadow", "0" );	// shadows chosen here (CDeferredLight::GetInitialDefFlags)
 		if ( light->type == emit_spotlight )
 		{
 			QAngle angle;
