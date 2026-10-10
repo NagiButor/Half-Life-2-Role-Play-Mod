@@ -12,6 +12,7 @@
 sampler sDepth						: register( s0 );
 sampler sShadowDepth				: register( s1 );	// CSM atlas, hardware compare
 sampler sWeatherMap					: register( s2 );
+sampler sRainDepth					: register( s3 );	// HL2RPM: rain map hardware depth (compare)
 
 const float3 g_vecViewOrigin		: register( c0 );
 const float3 g_vecLightDir			: register( c1 );	// direction to the light
@@ -27,6 +28,8 @@ const float4 g_vecCloud1			: register( c61 );	// base (m), thickness, cirrus, ti
 const float4 g_vecWind				: register( c62 );	// xy cloud offset (m)
 const float4 g_vecParams			: register( c63 );	// steps, max distance, frame, night
 const float4 g_vecCloudSpace		: register( c64 );	// x cloud space meters per unit
+const float4 g_matRainMap[3]		: register( c65 );	// HL2RPM: rows of world -> rain map texture (c65 - c67)
+const float4 g_vecDust				: register( c68 );	// x "covered" margin (rain map depth units), y indoor dust (extinction per unit), z rain map valid, w debug
 
 struct PS_INPUT
 {
@@ -62,6 +65,17 @@ float CloudShadow( float3 p )
 	return 1.0 - saturate( ( cov - 0.25 ) * 1.6 ) * saturate( g_vecCloud0.y * 0.7 );
 }
 
+// HL2RPM: whether the point is under a roof (something more than 24 units above it in the
+// top-down rain map; hardware compare: 1 = nothing above)
+float Covered( float3 p )
+{
+	const float4 wp = float4( p, 1.0 );
+	const float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
+	if ( any( uvz.xy < 0.0 ) || any( uvz.xy > 1.0 ) )
+		return 0.0;
+	return 1.0 - tex2Dlod( sRainDepth, float4( uvz.xy, uvz.z - g_vecDust.x, 0 ) ).x;
+}
+
 float Hash12( float2 p )
 {
 	float3 p3 = frac( float3( p.xyx ) * 0.1031 );
@@ -79,8 +93,12 @@ float4 main( const PS_INPUT In ) : COLOR
 	float dist = ( depth < 0.1 ) ? maxDist : min( depth * rayLen, maxDist );
 
 	const float steps = max( g_vecParams.x, 4.0 );
-	float dt = dist / steps;
 	float jitter = frac( Hash12( In.vScreenPos ) + g_vecParams.z * 0.61803398 );
+	// HL2RPM: samples spread over the visible part of the ray, denser near the eye (t = dist * u^2):
+	// a window's beam a few dozen units wide fell between the evenly spaced samples of the whole
+	// distance (100+ units apart) and no beam was ever seen indoors
+	const float invSteps = 1.0 / steps;
+	const bool bDust = g_vecDust.z > 0.5 && g_vecDust.y > 0.0;
 
 	const float k = g_vecFog.y * 0.001;
 	// base haze always present, weather fog on top
@@ -88,6 +106,8 @@ float4 main( const PS_INPUT In ) : COLOR
 
 	float inscatter = 0.0;
 	float T = 1.0;
+	float litSum = 0.0;
+	float coverSum = 0.0;
 
 	[loop]
 	for ( int i = 0; i < 48; i++ )
@@ -95,13 +115,21 @@ float4 main( const PS_INPUT In ) : COLOR
 		if ( i >= (int)steps )
 			break;
 
-		float t = ( i + jitter ) * dt;
+		const float u0 = i * invSteps;
+		const float u1 = ( i + 1.0 ) * invSteps;
+		const float uj = ( i + jitter ) * invSteps;
+		const float t = dist * uj * uj;
+		const float dt = dist * ( u1 * u1 - u0 * u0 );
 		float3 p = g_vecViewOrigin + rd * t;
 
 		float sigma = sigma0 * exp( -k * ( p.z - g_vecFog.z ) );
+		if ( bDust )
+			sigma += g_vecDust.y * Covered( p );
 		float lit = SunShadow( p );
 		if ( lit > 0.0 )
 			lit *= CloudShadow( p );
+		litSum += lit;
+		coverSum += bDust ? Covered( p ) : 0.0;
 
 		inscatter += T * sigma * lit * dt;
 		T *= exp( -sigma * dt );
@@ -112,5 +140,22 @@ float4 main( const PS_INPUT In ) : COLOR
 	float phase = ( 1.0 - g * g ) / pow( max( 1.0 + g * g - 2.0 * g * cosTheta, 1e-3 ), 1.5 ) * ( 1.0 / ( 4.0 * 3.14159265 ) );
 
 	float3 light = g_vecLightColor.rgb * phase * inscatter * 6.5;
+
+	// r_weather_sunshafts_debug
+	if ( g_vecDust.w > 0.5 )
+	{
+		if ( g_vecDust.w < 1.5 )
+			return float4( 0.25, 0, 0, 1 );
+		if ( g_vecDust.w < 2.5 )
+			return float4( 0, coverSum / steps * 0.5, 0, 1 );
+		if ( g_vecDust.w < 3.5 )
+			return float4( 0, 0, litSum / steps * 0.5, 1 );
+		const float3 ps = g_vecViewOrigin + rd * dist * 0.97;
+		if ( g_vecDust.w < 4.5 )
+			return float4( 0, Covered( ps ) * 0.5, 0, 1 );
+		const float4 wp = float4( ps, 1.0 );
+		const float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
+		return float4( saturate( uvz.xy ) * 0.5, saturate( uvz.z ) * 0.5, 1 );
+	}
 	return float4( light, 1.0 );
 }

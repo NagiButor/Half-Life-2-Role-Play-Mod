@@ -15,6 +15,9 @@
 #include "icommandline.h"
 
 #include "deferred/deferred_shared_common.h"
+#include "deferred/deferred_gi.h"
+#include "deferred/deferred_taa.h"
+#include "deferred/deferred_postfx.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -367,6 +370,41 @@ static bool ReplaceMaterialShader( IMaterial *pMat )
 }
 
 //-----------------------------------------------------------------------------
+// HL2RPM: soft particles - the stock SpriteCard fades particles where they cut into the
+// scene ($depthblend), off by default on the PC. With the scene depth the deferred renderer
+// writes for it (viewrender_deferred.cpp, DeferredSoftParticleDepth) it is turned on.
+//-----------------------------------------------------------------------------
+// (the engine's default of 50 units thinned out everything that hugs a floor: a puff 10 units
+// above it, seen at a low angle, was already half gone)
+static ConVar r_deferred_soft_particles_scale( "r_deferred_soft_particles_scale", "24", 0,
+	"Soft particles: distance (units) over which a particle fades toward the surface behind it, for materials that keep the engine's default of 50 (for particle materials loaded afterwards)", true, 4.0f, true, 200.0f );
+
+static void EnableSoftParticles( IMaterial *pMat )
+{
+	static ConVarRef r_deferred_soft_particles( "r_deferred_soft_particles" );
+	if ( !pMat || !r_deferred_soft_particles.IsValid() || !r_deferred_soft_particles.GetBool() )
+		return;
+
+	const char *pszShader = pMat->GetShaderName();
+	if ( !pszShader || V_stricmp( pszShader, "SpriteCard" ) != 0 )
+		return;
+
+	bool bFound = false;
+	IMaterialVar *pVar = pMat->FindVar( "$depthblend", &bFound, false );
+	if ( !bFound || !pVar || pVar->GetIntValue() != 0 )
+		return;
+
+	pVar->SetIntValue( 1 );
+
+	bool bFoundScale = false;
+	IMaterialVar *pScale = pMat->FindVar( "$depthblendscale", &bFoundScale, false );
+	if ( bFoundScale && pScale && fabsf( pScale->GetFloatValue() - 50.0f ) < 0.01f )
+		pScale->SetFloatValue( r_deferred_soft_particles_scale.GetFloat() );
+
+	pMat->RecomputeStateSnapshots();
+}
+
+//-----------------------------------------------------------------------------
 // HL2RPM: a reload of the materials (mat_reloadallmaterials, a changed material config
 // applied on map load) brings them back from their .vmt with the stock shader, and world
 // materials aren't looked up again - they are swept after the material system restored
@@ -383,6 +421,8 @@ static void DeferredMaterials_OnRelease()
 	s_bReplaceSweepPending = true;
 }
 
+extern void DeferredSkyLUT_ForceRebuild();	// viewrender_deferred.cpp
+
 static void DeferredMaterials_OnRestore( int nChangeFlags )
 {
 	DevMsg( 2, "[deferred] material system restores its resources (flags %d)\n", nChangeFlags );
@@ -390,6 +430,14 @@ static void DeferredMaterials_OnRestore( int nChangeFlags )
 	// at the next level init or frame
 	s_bMaterialsRestoring = true;
 	s_bReplaceSweepPending = true;
+
+	// HL2RPM: the render targets come back empty - what is kept in them between frames
+	// starts over: the GI probe atlas is uploaded again, TAA drops its history, the eye
+	// adapts anew
+	DeferredGI_OnRTContentLost();
+	DeferredTAA_Reset();
+	DeferredPostFX_Reset();
+	DeferredSkyLUT_ForceRebuild();
 }
 
 static void DeferredMaterials_ReplaceSweep( const char *pszWhen )
@@ -404,6 +452,8 @@ static void DeferredMaterials_ReplaceSweep( const char *pszWhen )
 		IMaterial *pMat = materials->GetMaterial( h );
 		if ( pMat && pMat->IsPrecached() && ReplaceMaterialShader( pMat ) )
 			nReplaced++;
+		if ( pMat && pMat->IsPrecached() )
+			EnableSoftParticles( pMat );
 	}
 	if ( nReplaced > 0 )
 		DevMsg( "[deferred] %d materials back with a stock shader replaced (%s)\n", nReplaced, pszWhen );
@@ -465,5 +515,6 @@ IMaterial* CDeferredMaterialSystem::ReplaceMaterialInternal( IMaterial* pMat ) c
 	}
 
 	ReplaceMaterialShader( pMat );
+	EnableSoftParticles( pMat );
 	return pMat;
 }

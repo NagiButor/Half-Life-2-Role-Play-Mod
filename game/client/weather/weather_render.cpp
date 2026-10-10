@@ -8,12 +8,17 @@
 #include "weather/weather_render.h"
 #include "weather/c_weather_system.h"
 #include "deferred/deferred_ssao.h"
+#include "deferred/deferred_gi.h"
+#include "deferred/deferred_postfx.h"
+#include "deferred/deferred_taa.h"
 #include "deferred/deferred_shared_common.h"
 
 #include "materialsystem/itexture.h"
 #include "materialsystem/imaterialvar.h"
 #include "materialsystem/imesh.h"
 #include "view_shared.h"
+#include "viewrender.h"
+#include "renderparm.h"
 #include "tier1/KeyValues.h"
 #include "tier1/callqueue.h"
 #include "vstdlib/random.h"
@@ -31,6 +36,8 @@ static ConVar r_weather_sunshafts( "r_weather_sunshafts", "2", FCVAR_ARCHIVE,
 static ConVar r_weather_rain( "r_weather_rain", "1", FCVAR_ARCHIVE, "Draw rain" );
 static ConVar r_weather_rain_density( "r_weather_rain_density", "1.0", FCVAR_ARCHIVE, "Rain drop count multiplier", true, 0.1f, true, 2.0f );
 static ConVar r_weather_wetness( "r_weather_wetness", "1", FCVAR_ARCHIVE, "Wet surfaces and puddles after rain" );
+static ConVar r_weather_motes( "r_weather_motes", "1", FCVAR_ARCHIVE,
+	"Dust motes in the air: specks floating around the camera, lit where the sun reaches them - the beams through the windows of a room" );
 static ConVar r_weather_fog( "r_weather_fog", "1", FCVAR_ARCHIVE, "Weather height fog" );
 static ConVar r_weather_cloud_temporal( "r_weather_cloud_temporal", "1", FCVAR_ARCHIVE, "Temporal accumulation for clouds (less noise)" );
 static ConVar r_weather_cloud_brightness( "r_weather_cloud_brightness", "1.0", FCVAR_ARCHIVE, "Cloud lighting multiplier" );
@@ -38,6 +45,10 @@ static ConVar r_weather_rainmap_size( "r_weather_rainmap_size", "3072", 0, "Worl
 static ConVar r_weather_godrays( "r_weather_godrays", "1", FCVAR_ARCHIVE, "Crepuscular rays through the gaps in the clouds (screen space)" );
 static ConVar r_weather_godrays_strength( "r_weather_godrays_strength", "1.0", FCVAR_ARCHIVE, "Strength of the crepuscular rays" );
 static ConVar r_weather_debug_view( "r_weather_debug_view", "0", FCVAR_CHEAT, "Weather debug view: 1 = rain exposure (red = open sky, blue = covered)" );
+static ConVar r_weather_ssr( "r_weather_ssr", "1", FCVAR_ARCHIVE,
+	"Reflections of the surroundings in puddles and on wet surfaces (screen space): 0 = off, 1 = on, 2 = longer rays", true, 0, true, 2 );
+static ConVar r_weather_ssr_puddles( "r_weather_ssr_puddles", "1.0", 0, "Screen space reflections: strength in puddles", true, 0.0f, true, 1.0f );
+static ConVar r_weather_ssr_wet( "r_weather_ssr_wet", "0", 0, "Screen space reflections: strength on wet surfaces outside puddles (0 = only puddles: the film on rough ground reflects a blurred sky, little to see for ~1 ms)", true, 0.0f, true, 1.0f );
 
 int WeatherRender_GetCloudQuality()
 {
@@ -144,6 +155,7 @@ static IMaterial *g_pMatClouds = NULL;
 static IMaterial *g_pMatCloudResolve = NULL;
 static IMaterial *g_pMatPost = NULL;
 static IMaterial *g_pMatRain = NULL;
+static IMaterial *g_pMatMotes = NULL;
 static IMaterial *g_pMatSunShafts = NULL;
 static IMaterial *g_pMatGodRays = NULL;
 
@@ -168,6 +180,7 @@ static void EnsureWeatherMaterials()
 	g_pMatCloudResolve = CreateWeatherMaterial( "__hl2rpm_weather_cloudresolve", "WEATHER_CLOUDRESOLVE" );
 	g_pMatPost = CreateWeatherMaterial( "__hl2rpm_weather_post", "WEATHER_POST" );
 	g_pMatRain = CreateWeatherMaterial( "__hl2rpm_weather_rain", "WEATHER_RAIN" );
+	g_pMatMotes = CreateWeatherMaterial( "__hl2rpm_weather_motes", "WEATHER_MOTES" );
 	g_pMatSunShafts = CreateWeatherMaterial( "__hl2rpm_volume_sun", "VOLUME_SUN" );
 	g_pMatGodRays = CreateWeatherMaterial( "__hl2rpm_godrays", "WEATHER_GODRAYS" );
 }
@@ -190,8 +203,21 @@ static float g_flRainMapZFar = 16384.0f;
 static float g_flRainMapTime = -100.0f;
 static bool g_bRainMapValid = false;
 
+// where the light of sky and clouds (the sun, or the moon) is in the main view this frame
+static bool s_bSunScreenValid = false;
+static Vector2D s_vecSunScreen( 0.5f, 0.5f );
+static Vector s_vecSunScreenDir( 0, 0, 1 );
+
+bool WeatherRender_GetSunScreenPos( Vector2D &vecScreen, Vector &vecDir )
+{
+	vecScreen = s_vecSunScreen;
+	vecDir = s_vecSunScreenDir;
+	return s_bSunScreenValid;
+}
+
 void WeatherRender_LevelInit()
 {
+	s_bSunScreenValid = false;
 	g_bCloudHistoryValid = false;
 	g_bHavePrevViewProj = false;
 	g_bRainMapValid = false;
@@ -306,6 +332,28 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 	data.vecDebug.Init( (float)r_weather_debug_view.GetInt(), 0.0f, 0.0f, 0.0f );
 	data.vecSkyLightDir = s_vecSkyLightDir;
 	data.vecSkyLightDiff = s_vecSkyLightDiff;
+
+	// --- where the sun (or the moon) is on screen, for the lens flare (deferred_postfx.cpp)
+	s_bSunScreenValid = false;
+	{
+		const Vector vecLightDir = s_vecSkyLightDir.AsVector3D().Normalized();
+		Vector vecForward;
+		AngleVectors( view.angles, &vecForward );
+		if ( DotProduct( vecForward, vecLightDir ) > 0.05f )
+		{
+			VMatrix matWorldToView, matViewToProj, matWorldToProj, matWorldToPixels;
+			render->GetMatricesForView( view, &matWorldToView, &matViewToProj, &matWorldToProj, &matWorldToPixels );
+			Vector4D vecClip;
+			matWorldToProj.V4Mul( Vector4D( view.origin.x + vecLightDir.x * 1000.0f, view.origin.y + vecLightDir.y * 1000.0f,
+				view.origin.z + vecLightDir.z * 1000.0f, 1.0f ), vecClip );
+			if ( vecClip.w > 0.001f )
+			{
+				s_vecSunScreen.Init( vecClip.x / vecClip.w * 0.5f + 0.5f, -vecClip.y / vecClip.w * 0.5f + 0.5f );
+				s_vecSunScreenDir = vecLightDir;
+				s_bSunScreenValid = true;
+			}
+		}
+	}
 
 	// --- crepuscular rays: where the sun (or the moon) is on screen
 	data.vecGodRays0.Init();
@@ -499,7 +547,29 @@ void WeatherRender_PostOpaque( const CViewSetup &view )
 	if ( !bWet && !bFog && r_weather_debug_view.GetInt() == 0 )
 		return;
 
+	// HL2RPM: screen space reflections read the lit opaque scene - only the main view's own
+	// (the water / glass views have other cameras)
+	CMatRenderContextPtr pRenderContext( materials );
+	int iSSRSteps = 0;
+	if ( bWet && r_weather_ssr.GetInt() > 0 && CurrentViewID() == VIEW_MAIN )
+	{
+		ITexture *pFB = materials->FindTexture( "_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET );
+		if ( pFB && !pFB->IsError() )
+		{
+			Rect_t rect;
+			rect.x = view.x;
+			rect.y = view.y;
+			rect.width = view.width;
+			rect.height = view.height;
+			pRenderContext->CopyRenderTargetToTextureEx( pFB, 0, &rect, &rect );
+			iSSRSteps = ( r_weather_ssr.GetInt() >= 2 ) ? 20 : 14;
+		}
+	}
+	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_HL2RPM_SSR, iSSRSteps );
+
 	DrawLightPassFullscreen( g_pMatPost, view.width, view.height );
+
+	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_HL2RPM_SSR, 0 );
 }
 
 // ---------------------------------------------------------------------------
@@ -572,6 +642,87 @@ void WeatherRender_Rain( const CViewSetup &view )
 
 	pRenderContext->Bind( g_pMatRain );
 	g_pRainMesh->Draw();
+
+	pRenderContext->MatrixMode( MATERIAL_MODEL );
+	pRenderContext->PopMatrix();
+}
+
+// ---------------------------------------------------------------------------
+// Dust motes: as the rain, a static mesh of quads placed and moved in the vertex
+// shader (weather_motes_vs30) - specks floating around the camera. The pixel shader
+// lights them with the sun through its cascaded shadows: they show in the beams
+// that come through the windows of a room, hardly outdoors.
+// ---------------------------------------------------------------------------
+#define MOTES_MAX 6000
+
+static IMesh *g_pMotesMesh = NULL;
+
+static void BuildMotesMesh()
+{
+	if ( g_pMotesMesh || !g_pMatMotes )
+		return;
+
+	RPM_CRUMB( "weather: build motes mesh" );
+	CMatRenderContextPtr pRenderContext( materials );
+	const VertexFormat_t fmt = VERTEX_POSITION | VERTEX_TEXCOORD_SIZE( 0, 2 ) | VERTEX_TEXCOORD_SIZE( 1, 4 );
+	g_pMotesMesh = pRenderContext->CreateStaticMesh( fmt, TEXTURE_GROUP_STATIC_VERTEX_BUFFER_OTHER, g_pMatMotes );
+	if ( !g_pMotesMesh )
+		return;
+
+	CMeshBuilder meshBuilder;
+	meshBuilder.Begin( g_pMotesMesh, MATERIAL_QUADS, MOTES_MAX );
+
+	static const float s_flCorners[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+	for ( int i = 0; i < MOTES_MAX; i++ )
+	{
+		// position in the unit box, plus per-mote random values
+		const Vector vecSeed( RandomFloat( 0, 1 ), RandomFloat( 0, 1 ), RandomFloat( 0, 1 ) );
+		const float flOrder = ( i + 0.5f ) / MOTES_MAX;	// motes are enabled in order (density)
+		// a few larger specks among many small ones
+		const float flRnd = RandomFloat( 0, 1 );
+		const float flSize = 0.6f + 1.6f * flRnd * flRnd * flRnd;
+		const float flPhase = RandomFloat( 0, 1 );
+		const float flBright = RandomFloat( 0.35f, 1.0f );
+
+		for ( int c = 0; c < 4; c++ )
+		{
+			meshBuilder.Position3fv( vecSeed.Base() );
+			meshBuilder.TexCoord2f( 0, s_flCorners[c][0], s_flCorners[c][1] );
+			meshBuilder.TexCoord4f( 1, flOrder, flSize, flPhase, flBright );
+			meshBuilder.AdvanceVertex();
+		}
+	}
+
+	meshBuilder.End();
+}
+
+static void DestroyMotesMesh()
+{
+	if ( g_pMotesMesh )
+	{
+		CMatRenderContextPtr pRenderContext( materials );
+		pRenderContext->DestroyStaticMesh( g_pMotesMesh );
+		g_pMotesMesh = NULL;
+	}
+}
+
+void WeatherRender_Motes( const CViewSetup &view )
+{
+	C_WeatherSystem *pSys = GetWeatherSystem();
+	if ( !r_weather_motes.GetBool() || !pSys || !pSys->IsActive() || !g_pMatMotes || g_pMatMotes->IsErrorMaterial() )
+		return;
+
+	BuildMotesMesh();
+	if ( !g_pMotesMesh )
+		return;
+
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->MatrixMode( MATERIAL_MODEL );
+	pRenderContext->PushMatrix();
+	pRenderContext->LoadIdentity();
+
+	pRenderContext->Bind( g_pMatMotes );
+	g_pMotesMesh->Draw();
 
 	pRenderContext->MatrixMode( MATERIAL_MODEL );
 	pRenderContext->PopMatrix();
@@ -1024,6 +1175,8 @@ public:
 	virtual void Shutdown()
 	{
 		DestroyRainMesh();
+		DestroyMotesMesh();
+		if ( g_pMatMotes ) { g_pMatMotes->DecrementReferenceCount(); g_pMatMotes = NULL; }
 		if ( g_pMatClouds ) { g_pMatClouds->DecrementReferenceCount(); g_pMatClouds = NULL; }
 		if ( g_pMatPost ) { g_pMatPost->DecrementReferenceCount(); g_pMatPost = NULL; }
 		if ( g_pMatRain ) { g_pMatRain->DecrementReferenceCount(); g_pMatRain = NULL; }
@@ -1031,6 +1184,9 @@ public:
 		if ( g_pMatGodRays ) { g_pMatGodRays->DecrementReferenceCount(); g_pMatGodRays = NULL; }
 		if ( g_pMatLightning ) { g_pMatLightning->DecrementReferenceCount(); g_pMatLightning = NULL; }
 		ShutdownSSAO();
+		ShutdownGI();
+		DeferredPostFX_Shutdown();
+		DeferredTAA_Shutdown();
 		ShutdownWeatherTextures();
 	}
 };

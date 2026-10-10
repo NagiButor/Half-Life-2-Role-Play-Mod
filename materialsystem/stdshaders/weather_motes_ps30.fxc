@@ -1,0 +1,95 @@
+//========= HL2RPM ============================================================//
+//
+// Dust motes (weather_motes_vs30): a soft round speck, added to the frame with the
+// light the sun gives it - its cascaded shadow at the mote, forward scattering
+// (brightest looking toward the sun) - indoors (something above it in the top-down
+// rain map), and only a trace outdoors, where the bright air hides them.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+#include "common_deferred_fxc.h"
+
+sampler sShadowDepth				: register( s0 );	// CSM atlas, hardware compare
+sampler sRainDepth					: register( s1 );	// rain map hardware depth (compare)
+
+const float3 g_vecViewOrigin		: register( c0 );
+const float3 g_vecLightDir			: register( c1 );	// direction to the light
+
+// same layout as volumpass_sun_ps30 (CommitShadowProjectionConstants_Ortho_Composite at c2)
+const float4x3 g_matOrtho[8]		: register( c2 );
+const float4 g_vecUVTransform[8]	: register( c26 );
+
+const float4 g_vecLightColor		: register( c58 );
+const float4 g_matRainMap[3]		: register( c65 );	// rows of world -> rain map texture (c65 - c67)
+const float4 g_vecMoteLight			: register( c68 );	// x "covered" margin (rain map depth units), y intensity, z rain map valid, w outdoor share
+const float4 g_vecMoteParams		: register( c69 );	// x scattering anisotropy (g), y debug
+
+struct PS_INPUT
+{
+	float2 vCorner				: TEXCOORD0;
+	float3 vWorldPos			: TEXCOORD1;
+	float2 vFade				: TEXCOORD2;
+};
+
+float SunShadow( float3 p )
+{
+	[unroll]
+	for ( int c = 0; c < 4; c++ )
+	{
+		float3 uvz = mul( float4( p, 1 ), g_matOrtho[c] );
+		if ( all( uvz.xy > 0.003 ) && all( uvz.xy < 0.997 ) )
+		{
+			float2 uv = uvz.xy * g_vecUVTransform[c].zw + g_vecUVTransform[c].xy;
+			return tex2Dlod( sShadowDepth, float4( uv, uvz.z - 0.0005, 0 ) ).x;
+		}
+	}
+	return 1.0;
+}
+
+// something more than a margin above the point in the top-down rain map (1 = under a roof)
+float Covered( float3 p )
+{
+	const float4 wp = float4( p, 1.0 );
+	const float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
+	if ( any( uvz.xy < 0.0 ) || any( uvz.xy > 1.0 ) )
+		return 0.0;
+	return 1.0 - tex2Dlod( sRainDepth, float4( uvz.xy, uvz.z - g_vecMoteLight.x, 0 ) ).x;
+}
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	// soft round speck
+	const float2 d = In.vCorner * 2.0 - 1.0;
+	float shape = saturate( 1.0 - dot( d, d ) );
+	shape *= shape;
+	const float alpha = shape * In.vFade.x;
+	clip( alpha - 0.002 );
+
+	const float3 p = In.vWorldPos;
+
+	// indoors in full, outdoors a trace
+	const float covered = ( g_vecMoteLight.z > 0.5 ) ? Covered( p ) : 0.0;
+	const float place = lerp( g_vecMoteLight.w, 1.0, covered );
+
+	float lit = 0.0;
+	[branch]
+	if ( place > 0.001 )
+		lit = SunShadow( p );
+
+	// Henyey-Greenstein toward the camera, 1 at a right angle to the sun
+	const float3 v = normalize( p - g_vecViewOrigin );
+	const float g = g_vecMoteParams.x;
+	const float cosT = dot( v, g_vecLightDir );
+	const float hg = ( 1.0 - g * g ) / pow( max( 1.0 + g * g - 2.0 * g * cosT, 1e-4 ), 1.5 );
+	const float hg90 = ( 1.0 - g * g ) / pow( 1.0 + g * g, 1.5 );
+	const float phase = hg / hg90;
+
+	float3 col = g_vecLightColor.rgb * ( lit * place * phase * g_vecMoteLight.y * In.vFade.y );
+
+	// debug: every mote white (where they are), red = indoors
+	if ( g_vecMoteParams.y > 0.5 )
+		col = float3( 0.5 + 0.5 * covered, 0.5, 0.5 ) * 0.6;
+
+	return float4( col * alpha, 0.0 );
+}

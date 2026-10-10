@@ -39,6 +39,7 @@ BEGIN_VS_SHADER( WEATHER_POST, "" )
 			pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
 			pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
 			pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER4, true );	// HL2RPM: the lit opaque scene (reflections)
 
 			// result = src.rgb + dest * src.a
 			EnableAlphaBlending( SHADER_BLEND_ONE, SHADER_BLEND_SRC_ALPHA );
@@ -96,6 +97,20 @@ BEGIN_VS_SHADER( WEATHER_POST, "" )
 
 			float flFlags[4] = { w.vecFogParams.x > 0.0f ? 1.0f : 0.0f, w.vecRainParams.y > 0.0f ? 1.0f : 0.0f, w.vecSunColor.w, w.vecDebug.x };
 			pShaderAPI->SetPixelShaderConstant( 12, flFlags, 1, true );
+
+			// HL2RPM: screen space reflections in puddles / on wet surfaces - only in the main view,
+			// which copies its scene to _rt_FullFrameFB right before this pass (render parm = steps)
+			const int iSSRSteps = pShaderAPI->GetIntRenderingParameter( INT_RENDERPARM_HL2RPM_SSR );
+			if ( iSSRSteps > 0 )
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER4, TEXTURE_FRAME_BUFFER_FULL_TEXTURE_0 );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER4, TEXTURE_BLACK );
+			pShaderAPI->SetPixelShaderConstant( 13, GetDeferredExt()->GetMainViewToScreenTexBase(), 4, true );
+			static ConVarRef r_weather_ssr_puddles( "r_weather_ssr_puddles" );
+			static ConVarRef r_weather_ssr_wet( "r_weather_ssr_wet" );
+			float flSSR[4] = { (float)iSSRSteps, r_weather_ssr_puddles.IsValid() ? r_weather_ssr_puddles.GetFloat() : 1.0f,
+				r_weather_ssr_wet.IsValid() ? r_weather_ssr_wet.GetFloat() : 0.6f, 1.0f };
+			pShaderAPI->SetPixelShaderConstant( 17, flSSR, 1, true );
 		}
 
 		Draw();

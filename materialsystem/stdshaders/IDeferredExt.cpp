@@ -50,6 +50,10 @@ CDeferredExtension::CDeferredExtension()
 	m_pTexSSAO = NULL;
 	m_pTexSSAOBlur = NULL;
 
+	m_pTexGIProbes = NULL;
+	m_pTexGI = NULL;
+	m_pTexGIBlur = NULL;
+
 	m_pflCommonLightData = NULL;
 	m_iCommon_NumRows = 0;
 	m_iNumCommon_ShadowedCookied = 0;
@@ -280,4 +284,26 @@ void CDeferredExtension::CommitTexture_SSAO( ITexture *pAO, ITexture *pBlur )
 {
 	m_pTexSSAO = pAO;
 	m_pTexSSAOBlur = pBlur;
+}
+
+void CDeferredExtension::CommitGIData( const giData_t &data )
+{
+	m_dataGI = data;
+}
+
+void CDeferredExtension::CommitTexture_GI( ITexture *pProbes, ITexture *pGI, ITexture *pBlur )
+{
+	m_pTexGIProbes = pProbes;
+	m_pTexGI = pGI;
+	m_pTexGIBlur = pBlur;
+}
+
+void CDeferredExtension::CommitPostFXData( const postfxData_t &data )
+{
+	m_dataPostFX = data;
+}
+
+void CDeferredExtension::CommitTAAData( const taaData_t &data )
+{
+	m_dataTAA = data;
 }

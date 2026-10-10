@@ -65,6 +65,9 @@ enum RenderParamInt_t
 	// HL2RPM: 1 while the local player's first person body is drawn (G-buffer marker: the
 	// sun pass ignores the body's own casters there). Slot 17: unused by the engine.
 	INT_RENDERPARM_DEFERRED_LOCAL_BODY = INT_FLASHLIGHT_DEPTHTEXTURE_FALLBACK_FIRST + 5,
+	// HL2RPM: the screen space reflection steps of the weather post pass; non-zero only while the
+	// main view draws it right after copying its lit opaque scene to _rt_FullFrameFB. Slot 18.
+	INT_RENDERPARM_HL2RPM_SSR = INT_FLASHLIGHT_DEPTHTEXTURE_FALLBACK_FIRST + 6,
 
 	MAX_INT_RENDER_PARMS = 20
 };

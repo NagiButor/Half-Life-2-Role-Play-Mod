@@ -50,6 +50,10 @@ void WeatherRender_SetCloudTextureValid( bool bValid );
 bool WeatherRender_IsCloudTextureValid();
 void WeatherRender_PostOpaque( const CViewSetup &view );
 void WeatherRender_Rain( const CViewSetup &view );
+void WeatherRender_Motes( const CViewSetup &view );		// dust motes in the sun's beams
+// where the sun (or the moon) is in the main view this frame (screen uv, y down) and its
+// direction; false when it is behind the camera or there is no weather
+bool WeatherRender_GetSunScreenPos( Vector2D &vecScreen, Vector &vecDir );
 void WeatherRender_Lightning( const CViewSetup &view );	// visible channel of a strike
 void WeatherRender_SunShafts( const CViewSetup &view, ITexture *pTarget );
 

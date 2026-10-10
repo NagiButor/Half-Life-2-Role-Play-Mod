@@ -17,6 +17,7 @@ sampler sNormals		: register( s0 );
 sampler sDepth			: register( s1 );
 sampler sRainMap		: register( s2 );	// hardware depth compare
 sampler sWeatherMap		: register( s3 );
+sampler sScene			: register( s4 );	// HL2RPM: the lit opaque scene (copied before this pass), screen space reflections
 
 const float3 g_vecViewOrigin	: register( c0 );
 const float4 g_vecRain			: register( c1 );	// rain, wetness, puddles, time
@@ -29,12 +30,77 @@ const float4 g_vecLightColor	: register( c7 );
 const float4 g_matRainMap[3]	: register( c8 );	// rows of world -> rain map texture
 const float4 g_vecRainMap		: register( c11 );	// depth bias, size, texel size, valid
 const float4 g_vecFlags			: register( c12 );	// x fog on, y wet on, z night, w debug view
+const float4 g_matWorldToScreen[4]	: register( c13 );	// HL2RPM: world -> screen texture coords of this view (rows, c13 - c16)
+const float4 g_vecSSR			: register( c17 );	// x steps (0 = off), y strength on puddles, z strength on wet surfaces, w thickness scale
 
 struct PS_INPUT
 {
 	float2 vTexCoord			: TEXCOORD0;
 	float3 vecWorldRay			: TEXCOORD1;
 };
+
+// HL2RPM: screen space reflection. March along R in world space (steps growing with the
+// distance), compare each sample with the depth buffer along the same view ray (linear in screen
+// space), refine the first hit by bisection and take the scene's color there. conf fades out
+// toward the screen's edges, with the length of the ray, and is 0 for a miss (the sky stays).
+float3 TraceSSR( float3 P, float3 R, float3 rayP, float2 uvP, float3 dRdu, float3 dRdv, out float conf )
+{
+	conf = 0.0;
+	float tPrev = 0.0;
+	float t = 3.0;
+	const int steps = (int)g_vecSSR.x;
+	[loop]
+	for ( int i = 0; i < 24; i++ )
+	{
+		if ( i >= steps )
+			break;
+		const float4 q = float4( P + R * t, 1.0 );
+		const float w = dot( g_matWorldToScreen[3], q );
+		if ( w < 1.0 )
+			break;
+		const float2 uv = float2( dot( g_matWorldToScreen[0], q ), dot( g_matWorldToScreen[1], q ) ) / w;
+		if ( any( uv < 0.0 ) || any( uv > 1.0 ) )
+			break;
+		const float d = tex2Dlod( sDepth, float4( uv, 0, 0 ) ).x;
+		if ( d > 0.1 )
+		{
+			const float3 rayQ = rayP + dRdu * ( uv.x - uvP.x ) + dRdv * ( uv.y - uvP.y );
+			const float behind = length( q.xyz - g_vecViewOrigin ) - d * length( rayQ );
+			// (behind the visible surface by less than the last step: the ray went through it here,
+			// not behind a thing far in front of it - the steps grow, so must the tolerance)
+			if ( behind > 0.0 && behind < ( 6.0 + ( t - tPrev ) * 1.5 ) * g_vecSSR.w )
+			{
+				// bisection between the last sample in front and this one
+				float a = tPrev, b = t;
+				float2 uvHit = uv;
+				[unroll]
+				for ( int k = 0; k < 4; k++ )
+				{
+					const float m = ( a + b ) * 0.5;
+					const float4 qm = float4( P + R * m, 1.0 );
+					const float wm = dot( g_matWorldToScreen[3], qm );
+					const float2 uvm = float2( dot( g_matWorldToScreen[0], qm ), dot( g_matWorldToScreen[1], qm ) ) / max( wm, 1.0 );
+					const float dm = tex2Dlod( sDepth, float4( uvm, 0, 0 ) ).x;
+					const float3 rayM = rayP + dRdu * ( uvm.x - uvP.x ) + dRdv * ( uvm.y - uvP.y );
+					const float bm = length( qm.xyz - g_vecViewOrigin ) - dm * length( rayM );
+					if ( bm > 0.0 )
+					{
+						b = m;
+						uvHit = uvm;
+					}
+					else
+						a = m;
+				}
+				const float2 edge = min( uvHit, 1.0 - uvHit );
+				conf = saturate( min( edge.x, edge.y ) * 12.0 ) * saturate( 1.0 - i / max( (float)steps, 1.0 ) * 0.8 );
+				return tex2Dlod( sScene, float4( uvHit, 0, 0 ) ).rgb;
+			}
+		}
+		tPrev = t;
+		t = t * 1.4 + 4.0;
+	}
+	return 0.0;
+}
 
 float RainExposure( float3 worldPos, float3 normal )
 {
@@ -97,6 +163,11 @@ float4 main( const PS_INPUT In ) : COLOR
 		return float4( h, h, h, 0.0 );
 	}
 
+	// HL2RPM: screen space steps of the view ray (the ray is linear in screen space), ahead of
+	// any branch
+	const float3 dRdu = ddx( In.vecWorldRay ) / ddx( In.vTexCoord.x );
+	const float3 dRdv = ddy( In.vecWorldRay ) / ddy( In.vTexCoord.y );
+
 	float depth = tex2D( sDepth, In.vTexCoord ).x;
 	if ( depth < 0.1 )
 		return float4( 0, 0, 0, 1 );	// sky: handled by the sky shader
@@ -151,6 +222,15 @@ float4 main( const PS_INPUT In ) : COLOR
 
 		// standing water is a mirror: the sharp sky, the sun's glint, Fresnel up to 1
 		float3 skySharp = lerp( g_vecSkyHorizon.rgb, g_vecSkyZenith.rgb, saturate( R.z * 1.2 ) );
+
+		// HL2RPM: what is really around - buildings, lamps, the street - from the screen, where
+		// the reflected ray finds it (the sky only where it misses)
+		float ssrConf = 0.0;
+		float3 ssrColor = 0.0;
+		[branch]
+		if ( g_vecSSR.x > 0.5 && ( puddle > 0.05 || ( g_vecSSR.z > 0.0 && wet > 0.35 && fresnel > 0.15 ) ) && !bSkybox )
+			ssrColor = TraceSSR( worldPos + Nw * 1.5, R, In.vecWorldRay, In.vTexCoord, dRdu, dRdv, ssrConf );
+		skySharp = lerp( skySharp, ssrColor, ssrConf * g_vecSSR.y );
 		float sunSpec = pow( saturate( dot( R, g_vecLightDir.xyz ) ), 220.0 ) * saturate( g_vecLightDir.z * 5.0 );
 		float3 reflPuddle = ( skySharp + g_vecLightColor.rgb * sunSpec * 0.5 ) * ( 0.02 + 0.98 * fresnel );
 
@@ -159,6 +239,7 @@ float4 main( const PS_INPUT In ) : COLOR
 		// and went with the pitch of the view and travelled with the player; the darkening
 		// below is what reads as "wet" and doesn't depend on the view.)
 		float3 skyRough = lerp( g_vecSkyHorizon.rgb, g_vecSkyZenith.rgb, 0.45 + 0.25 * saturate( R.z ) );
+		skyRough = lerp( skyRough, ssrColor, ssrConf * g_vecSSR.z );
 		float3 reflWet = skyRough * ( 0.02 + 0.13 * fresnel );
 
 		result.rgb += reflWet * wet * ( 1.0 - puddle ) + reflPuddle * puddle;

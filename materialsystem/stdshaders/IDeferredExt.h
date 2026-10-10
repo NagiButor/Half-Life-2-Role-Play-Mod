@@ -199,6 +199,117 @@ struct ssaoData_t
 	Vector4D vecApply;		// x sky visibility on, y indoor ambient, z sky visibility radius (units), w AO uv scale (0 = no AO)
 };
 
+// HL2RPM: world-space indirect light of the global light (GI probes, deferred_gi.cpp in the client)
+struct giData_t
+{
+	giData_t()
+	{
+		bEnabled = false;
+		vecGrid.Init();
+		vecDims.Init();
+		vecAtlas.Init();
+		vecParams0.Init();
+		vecParams1.Init();
+		vecBlurH.Init();
+		vecBlurV.Init();
+		vecApply.Init();
+	}
+
+	bool bEnabled;
+	Vector4D vecGrid;		// xyz world cell index of the grid's first probe, w 1 / probe spacing
+	Vector4D vecDims;		// xyz probes per axis, w probe spacing (units)
+	Vector4D vecAtlas;		// x 1 / atlas width, y 1 / atlas height, z lookup offset along the normal (units), w debug
+	Vector4D vecParams0;	// x sun bounce scale, y sky bounce scale, z multiple bounce fill, w sky light left without sky in sight
+	Vector4D vecParams1;	// x leak tolerance (units), y probe offset in its cell, z sky light boost (daylight), w unused
+	Vector4D vecBlurH;		// xy step (screen uv), z depth tolerance, w GI uv scale
+	Vector4D vecBlurV;
+	Vector4D vecApply;		// x on, y debug, z unused, w GI uv scale (lighting pass)
+};
+
+// HL2RPM: with the GI probes the sky light is occluded where it should be (a room gets it only
+// through its openings), so it can be as strong as a real sky: the maps' ambient was tuned for
+// the flat sky light of before (a few % of the sun - the shade outdoors was nearly black).
+// Daylight only: the night keeps its sky.
+inline float GetGISkyBoost( const giData_t &gi, const weatherData_t &w )
+{
+	if ( !gi.bEnabled || gi.vecParams1.z <= 1.0f )
+		return 1.0f;
+	// world brightness compared to the day (1 by day, a few % at night)
+	const float flWorld = w.bEnabled ? w.vecSkyZenith.w : 1.0f;
+	float flDay = ( flWorld - 0.05f ) / 0.45f;
+	flDay = ( flDay < 0.0f ) ? 0.0f : ( ( flDay > 1.0f ) ? 1.0f : flDay );
+	return 1.0f + ( gi.vecParams1.z - 1.0f ) * flDay;
+}
+
+// HL2RPM: post-processing of the final frame (deferred_postfx.cpp in the client): eye
+// adaptation, bloom on mip levels packed in two targets (level 0 = the frame), grading, lens
+#define POSTFX_LEVELS 6
+
+struct postfxData_t
+{
+	postfxData_t()
+	{
+		vecExposure.Init( 0.18f, 0.0f, 1.0f, 1.0f );
+		vecAdapt.Init( 1.0f, 1.0f, 1.0f, 0.0f );
+		vecBloom.Init();
+		vecGrade.Init( 0.0f, 1.0f, 0.8f, 0.0f );
+		vecLens.Init();
+		vecTint.Init( 1.0f, 1.0f, 1.0f, 1.0f );
+		vecFlare.Init();
+		vecDoF.Init();
+		vecLumBlocks.Init();
+		vecFrameToBloom.Init();
+		vecFrameTexel.Init();
+		for ( int i = 0; i < POSTFX_LEVELS; i++ )
+		{
+			vecLevelTexel[i].Init();
+			vecLevelRect[i].Init();
+		}
+	}
+
+	Vector4D vecExposure;		// x average luminance that keeps exposure 1, y adaptation (0..1), z min, w max exposure
+	Vector4D vecAdapt;			// x rate toward a brighter scene, y toward a darker one, z reset
+	Vector4D vecBloom;			// x strength, y lens dirt, z threshold, w knee
+	Vector4D vecGrade;			// x contrast, y saturation, z shoulder start, w sharpening
+	Vector4D vecLens;			// x vignette, y grain, z chromatic aberration (pixels), w frame
+	Vector4D vecTint;			// rgb color balance, w aspect ratio
+	Vector4D vecFlare;			// lens flare of the sun: xy its place on screen (uv), z strength (0 = off), w bloom brightness there it starts at
+	Vector4D vecDoF;			// depth of field: x circle of confusion scale (pixels x units), y 1 / focus distance, z largest radius (pixels), w debug
+	Vector4D vecLumBlocks;		// xy one block of the frame (uv) / texel size of the block target, zw blocks in x / y
+	Vector4D vecFrameToBloom;	// xy frame uv -> bloom uv scale, zw offset
+	Vector4D vecFrameTexel;		// xy 1 / frame texture size, zw frame texture size
+	Vector4D vecLevelTexel[ POSTFX_LEVELS ];	// xy texel size of the level's target, z upsample radius, w weight when added
+	Vector4D vecLevelRect[ POSTFX_LEVELS ];		// uv rectangle of the level in its target (xy min, zw max)
+};
+
+// HL2RPM: temporal anti-aliasing (deferred_taa.cpp in the client): the rows x, y, w of the
+// unjittered view-projection of the last and of this frame, both for positions relative to
+// this frame's camera (the camera's move is applied separately: no big world coordinates)
+struct taaData_t
+{
+	taaData_t()
+	{
+		for ( int i = 0; i < 3; i++ )
+		{
+			vecPrev[i].Init();
+			vecCur[i].Init();
+		}
+		vecCamDelta.Init();
+		vecParams.Init();
+		vecParams2.Init();
+		vecParams3.Init();
+		vecTexel.Init();
+	}
+
+	Vector4D vecPrev[3];		// last frame: clip x, y, w
+	Vector4D vecCur[3];			// this frame: clip x, y, w
+	Vector4D vecCamDelta;		// xyz last camera position - this one
+	Vector4D vecParams;			// x history weight (history like the frame), y (history unlike it), z clip box size (deviations), w reset
+	Vector4D vecParams2;		// x debug mode, y motion (pixels) at which less history is kept, zw view size / texture size
+	Vector4D vecParams3;		// x frame number (dither of the 8 bit history), y mip bias of the albedo in the composite (this frame jittered)
+	Vector4D vecTexel;			// xy 1 / texture size, zw texture size
+};
+
 #include "tier0/memdbgon.h"
 
 struct lightDataCommon_t
@@ -286,9 +397,19 @@ public:
 
 	// HL2RPM: the sun shadow atlas' caster depth as a readable R32F texture (PCSS blocker search)
 	virtual void CommitTexture_CascadedDepthRaw( const int &index, ITexture *pTexDepthRaw ) = 0;
+
+	// HL2RPM: GI probes (atlas), the half resolution indirect light and its blur target
+	virtual void CommitGIData( const giData_t &data ) = 0;
+	virtual void CommitTexture_GI( ITexture *pProbes, ITexture *pGI, ITexture *pBlur ) = 0;
+
+	// HL2RPM: post-processing of the final frame
+	virtual void CommitPostFXData( const postfxData_t &data ) = 0;
+
+	// HL2RPM: temporal anti-aliasing
+	virtual void CommitTAAData( const taaData_t &data ) = 0;
 };
 
-#define DEFERRED_EXTENSION_VERSION "DeferredExtensionVersion006"
+#define DEFERRED_EXTENSION_VERSION "DeferredExtensionVersion008"
 
 #ifdef STDSHADER_DX9_DLL_EXPORT
 
@@ -356,6 +477,20 @@ public:
 	inline bool IsReflectionView() const { return m_bReflectionView; }
 
 	virtual void CommitTexture_CascadedDepthRaw( const int &index, ITexture *pTexDepthRaw );
+
+	virtual void CommitGIData( const giData_t &data );
+	virtual void CommitTexture_GI( ITexture *pProbes, ITexture *pGI, ITexture *pBlur );
+	inline const giData_t &GetGIData() { return m_dataGI; }
+	inline ITexture *GetTexture_GIProbes() { return m_pTexGIProbes; }
+	inline ITexture *GetTexture_GI() { return m_pTexGI; }
+	inline ITexture *GetTexture_GIBlur() { return m_pTexGIBlur; }
+
+	virtual void CommitPostFXData( const postfxData_t &data );
+	inline const postfxData_t &GetPostFXData() { return m_dataPostFX; }
+
+	virtual void CommitTAAData( const taaData_t &data );
+	inline const taaData_t &GetTAAData() { return m_dataTAA; }
+
 	inline ITexture *GetTexture_ShadowDepthRaw_Ortho( const int &index ) { return m_pTexShadowDepthRaw_Ortho[ index ]; }
 	inline ITexture *GetTexture_SSAO() { return m_pTexSSAO; }
 	inline ITexture *GetTexture_SSAOBlur() { return m_pTexSSAOBlur; }
@@ -473,6 +608,15 @@ private:
 	ssaoData_t m_dataSSAO;
 	ITexture *m_pTexSSAO;
 	ITexture *m_pTexSSAOBlur;
+
+	giData_t m_dataGI;
+	ITexture *m_pTexGIProbes;
+	ITexture *m_pTexGI;
+	ITexture *m_pTexGIBlur;
+
+	postfxData_t m_dataPostFX;
+
+	taaData_t m_dataTAA;
 };
 
 float *CDeferredExtension::GetOriginBase()

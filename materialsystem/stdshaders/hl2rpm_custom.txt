@@ -44,3 +44,15 @@ deferred_skyvis_ps30.fxc
 weather_godrays_ps30.fxc
 hl2rpm_fxaa_ps30.fxc
 SDK_water_ps2x.fxc
+deferred_gi_ps30.fxc
+deferred_giblur_ps30.fxc
+deferred_gi_upload_vs30.fxc
+deferred_gi_upload_ps30.fxc
+hl2rpm_lum_ps30.fxc
+hl2rpm_bloom_ps30.fxc
+hl2rpm_postfx_ps30.fxc
+hl2rpm_dof_ps30.fxc
+hl2rpm_taa_ps30.fxc
+hl2rpm_depthalpha_ps30.fxc
+weather_motes_vs30.fxc
+weather_motes_ps30.fxc

@@ -95,15 +95,19 @@ if ($CaptureAfter -gt 0) {
 if (-not $p.HasExited) {
     if ($p.WaitForExit($TimeoutSec * 1000)) { } else { Write-Warning "TIMEOUT - killing hl2.exe"; $p.Kill(); Start-Sleep -Seconds 2 }
 }
-"exit code: 0x{0:X8}" -f $p.ExitCode
-
-# --- cleanup
+# --- cleanup. BEFORE anything is written to the pipeline: a caller that pipes this script into
+# "Select-Object -First N" stops it at its N-th output line, and the user's config.cfg must be
+# back by then (it once stayed with the test's r_hl2rpm_lens 0 / r_weather_motes 0).
 if ($stepsName -ne "") { Remove-Item "$mod\cfg\$stepsName" -ErrorAction SilentlyContinue }
+$cfgRestored = $false
 if (-not $KeepConfig -and (Test-Path $cfgBackup)) {
     Copy-Item $cfgBackup $cfg -Force
     Remove-Item $cfgBackup
-    "config.cfg restored"
+    $cfgRestored = $true
 }
+
+"exit code: 0x{0:X8}" -f $p.ExitCode
+if ($cfgRestored) { "config.cfg restored" }
 
 Get-ChildItem $shots -Filter *.jpg | ForEach-Object { "{0}  {1,8}" -f $_.FullName, $_.Length }
 

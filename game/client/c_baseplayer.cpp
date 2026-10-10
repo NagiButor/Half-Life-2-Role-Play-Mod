@@ -61,6 +61,7 @@
 
 #ifdef MAPBASE
 #include "viewrender.h"
+#include "deferred/deferred_taa.h"
 #endif
 
 // NVNT haptics system interface
@@ -1794,7 +1795,13 @@ int C_BasePlayer::DrawModel( int flags )
 		// hidden head and shoulders shadowed the visible torso and legs (defpass_gbuffer)
 		CMatRenderContextPtr pRenderContext( materials );
 		pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_LOCAL_BODY, 1 );
+		// HL2RPM: TAA - the body moves with the camera: not reprojected (stencil)
+		const bool bMarkTAA = ( CurrentViewID() == VIEW_MAIN );
+		if ( bMarkTAA )
+			DeferredTAA_MarkCameraAttached( true );
 		const int nDrawn = BaseClass::DrawModel( flags );
+		if ( bMarkTAA )
+			DeferredTAA_MarkCameraAttached( false );
 		pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_LOCAL_BODY, 0 );
 		return nDrawn;
 	}

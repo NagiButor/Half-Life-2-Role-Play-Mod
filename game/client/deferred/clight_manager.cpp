@@ -17,6 +17,9 @@
 
 #include "deferred/deferred_dlight_bridge.h"
 #include "deferred/deferred_bounce.h"
+#include "deferred/deferred_gi.h"
+#include "deferred/deferred_postfx.h"
+#include "deferred/deferred_taa.h"
 
 #include "tier0/memdbgon.h"
 
@@ -114,6 +117,9 @@ void CLightingManager::LevelShutdownPostEntity()
 	// HL2RPM: mirrored engine dynamic lights and the bounce lights belong to the level
 	DeferredDLights_Clear();
 	DeferredBounce_Clear();
+	DeferredGI_Reset();
+	DeferredPostFX_Reset();
+	DeferredTAA_Reset();
 
 	m_hRenderLights.Purge();
 

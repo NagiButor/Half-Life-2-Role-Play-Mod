@@ -37,6 +37,15 @@ static ConVar r_csm_shadow_normal( "r_csm_shadow_normal", "2", 0,
 // shadows of thin things smaller than a pixel don't flicker from texel to texel while walking
 static ConVar r_csm_footprint( "r_csm_footprint", "0.5", 0,
 	"Sun shadows: filter scale per shadow map texel a pixel covers (0 = off; the B-spline of scale s averages ~2s texels)", true, 0.0f, true, 2.0f );
+// HL2RPM: contact shadows (see lightingpass_global_ps30)
+static ConVar r_deferred_contact_shadows( "r_deferred_contact_shadows", "1", FCVAR_ARCHIVE,
+	"Contact shadows: the small shadows right at the foot of things the sun cascades are too coarse for (screen space)" );
+static ConVar r_deferred_contact_shadows_length( "r_deferred_contact_shadows_length", "24", 0, "Contact shadows: how far toward the sun (units)", true, 2.0f, true, 256.0f );
+static ConVar r_deferred_contact_shadows_thickness( "r_deferred_contact_shadows_thickness", "12", 0, "Contact shadows: how thick an occluder is assumed (units)", true, 1.0f, true, 128.0f );
+static ConVar r_deferred_contact_shadows_distance( "r_deferred_contact_shadows_distance", "1500", 0, "Contact shadows: up to this distance from the eye (units)", true, 0.0f, true, 20000.0f );
+static ConVar r_deferred_contact_shadows_strength( "r_deferred_contact_shadows_strength", "0.85", 0, "Contact shadows: strength (0..1)", true, 0.0f, true, 1.0f );
+static ConVar r_deferred_contact_shadows_debug( "r_deferred_contact_shadows_debug", "0", FCVAR_CHEAT, "Contact shadows debug: red = occlusion, green = strength, blue = lit (march skipped)" );
+
 static ConVar r_csm_body_bias( "r_csm_body_bias", "36", 0,
 	"Sun shadows on the local player's first person body ignore casters closer than this (units) - the body's own", true, 0.0f, true, 128.0f );
 
@@ -76,6 +85,7 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 			pShaderShadow->EnableTexture( SHADER_SAMPLER4, true );	// HL2RPM weather map
 			pShaderShadow->EnableTexture( SHADER_SAMPLER5, true );	// HL2RPM cloud noise
 			pShaderShadow->EnableTexture( SHADER_SAMPLER6, true );	// HL2RPM ambient occlusion + sky visibility
+			pShaderShadow->EnableTexture( SHADER_SAMPLER7, true );	// HL2RPM GI probes' indirect light
 			pShaderShadow->EnableTexture( SHADER_SAMPLER8, true );	// HL2RPM sun caster depth (PCSS)
 
 			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION, 1, NULL, 0 );
@@ -145,8 +155,16 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 			CommitBaseDeferredConstants_Origin( pShaderAPI, 0 );
 
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA, data.diff.Base(), 1, true );
-			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 1, data.ambh.Base(), 1, true );
-			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 2, MakeHalfAmbient( data.ambl, data.ambh ).Base(), 1, true );
+			// HL2RPM: the sky light as strong as a real sky's while the GI probes occlude it
+			const float flSkyBoost = GetGISkyBoost( GetDeferredExt()->GetGIData(), GetDeferredExt()->GetWeatherData() );
+			Vector4D ambh = data.ambh, ambl = data.ambl;
+			for ( int i = 0; i < 3; i++ )
+			{
+				ambh[i] *= flSkyBoost;
+				ambl[i] *= flSkyBoost;
+			}
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 1, ambh.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 2, MakeHalfAmbient( ambl, ambh ).Base(), 1, true );
 
 			float flCSMColorize[4] = { r_csm_color.GetBool() ? 1.0f : 0.0f, 0, 0, 0 };
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 3, flCSMColorize, 1, true );
@@ -185,6 +203,24 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 			// (x, z: the receiver bias of the sun shadows - see r_csm_bias_normal)
 			float flAmbientCtrl[4] = { r_csm_bias_normal.GetFloat(), ao.vecApply.y, r_csm_bias_slope.GetFloat(), bAO ? ao.vecApply.w : 0.0f };
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 12, flAmbientCtrl, 1, true );
+
+			// HL2RPM: indirect light of the GI probes (half resolution, blurred) - see deferred_gi_ps30
+			const giData_t &gi = GetDeferredExt()->GetGIData();
+			ITexture *pGI = GetDeferredExt()->GetTexture_GI();
+			const bool bGI = gi.bEnabled && pGI != NULL && gi.vecApply.w > 0.0f;
+			if ( bGI )
+				BindTexture( SHADER_SAMPLER7, pGI );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER7, TEXTURE_BLACK );
+			float flGIApply[4] = { bGI ? 1.0f : 0.0f, gi.vecApply.y, r_deferred_contact_shadows_debug.GetBool() ? 1.0f : 0.0f, bGI ? gi.vecApply.w : 0.0f };
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 14, flGIApply, 1, true );
+
+			// HL2RPM: contact shadows - this view's world -> screen texture coords (c73 - c76)
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 15, GetDeferredExt()->GetMainViewToScreenTexBase(), 4, true );
+			const bool bContact = r_deferred_contact_shadows.GetBool() && !GetDeferredExt()->IsReflectionView();
+			float flContact[4] = { r_deferred_contact_shadows_length.GetFloat(), r_deferred_contact_shadows_thickness.GetFloat(),
+				r_deferred_contact_shadows_distance.GetFloat(), bContact ? r_deferred_contact_shadows_strength.GetFloat() : 0.0f };
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 19, flContact, 1, true );
 		}
 
 		Draw();

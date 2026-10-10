@@ -26,6 +26,9 @@
 
 #include "proxyentity.h"
 
+// HL2RPM: the deferred renderer's own eye adaptation and bloom
+#include "deferred/deferred_postfx.h"
+
 //-----------------------------------------------------------------------------
 // Globals
 //-----------------------------------------------------------------------------
@@ -847,6 +850,14 @@ static void GetExposureRange( float *flAutoExposureMin, float *flAutoExposureMax
 		*flAutoExposureMin = 0.0f;
 	}
 
+	// HL2RPM: the deferred post-processing adapts the whole frame (deferred_postfx.cpp); the
+	// engine's tone map scale only reached the forward materials
+	if ( DeferredPostFX_OwnsExposure() )
+	{
+		*flAutoExposureMax = 1.0f;
+		*flAutoExposureMin = 1.0f;
+	}
+
 	// Make sure min <= max
 	if ( *flAutoExposureMin > *flAutoExposureMax )
 	{
@@ -1592,6 +1603,10 @@ static float GetBloomAmount( void )
 {
 	// return bloom amount ( 0.0 if disabled or otherwise turned off )
 	if ( engine->GetDXSupportLevel() < 80 )
+		return 0.0;
+
+	// HL2RPM: the deferred post-processing has its own bloom (deferred_postfx.cpp)
+	if ( DeferredPostFX_OwnsBloom() )
 		return 0.0;
 
 	HDRType_t hdrType = g_pMaterialSystemHardwareConfig->GetHDRType();

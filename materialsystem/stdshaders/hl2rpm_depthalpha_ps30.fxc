@@ -1,0 +1,43 @@
+//========= HL2RPM ============================================================//
+//
+// Soft particles for the deferred renderer: the depth of the opaque scene into the
+// frame's alpha, the way the stock shaders write it (WRITE_DEPTH_TO_DESTALPHA:
+// SoftParticleDepth of the projected z). The engine copies the frame into
+// _rt_FullFrameDepth right before the translucent pass, and SpriteCard with
+// $depthblend reads that alpha to fade particles where they cut into the scene.
+// The deferred composite left 1 there: every smoke puff and dust cloud ended in a
+// hard line on the floor and the walls.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+sampler sDepth				: register( s0 );	// G-buffer linear depth (distance along the view direction)
+
+const float4 g_vecProj		: register( c0 );	// x zFar / ( zFar - zNear ), y zNear of the view, z debug
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+};
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	const float d = tex2D( sDepth, In.vTexCoord ).x;
+
+	// the projected z of the engine's perspective: zFar * ( d - zNear ) / ( zFar - zNear );
+	// nothing drawn (sky): far
+	const float flProjZ = ( d > 0.1 ) ? ( d - g_vecProj.y ) * g_vecProj.x : 1e6;
+
+	const float flAlpha = saturate( SoftParticleDepth( flProjZ ) );
+
+	// debug (color writes on): 1 the depth written, 2 the linear fog color constant (rgb) and
+	// its w (the dest alpha depth scale) x 192 in the lower half
+	if ( g_vecProj.z > 1.5 )
+		return ( In.vTexCoord.y > 0.5 ) ? float4( OO_DESTALPHA_DEPTH_RANGE * 192.0, OO_DESTALPHA_DEPTH_RANGE * 1920.0, OO_DESTALPHA_DEPTH_RANGE * 19.2, 1 ) : float4( g_LinearFogColor.rgb, 1 );
+	if ( g_vecProj.z > 0.5 )
+		return float4( flAlpha, flAlpha, flAlpha, flAlpha );
+
+	return float4( 0, 0, 0, flAlpha );
+}

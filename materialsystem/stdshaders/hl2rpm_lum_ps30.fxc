@@ -1,0 +1,71 @@
+//========= HL2RPM ============================================================//
+//
+// Eye adaptation metering (deferred_postfx.cpp in the client):
+//   PASS 0: mean log luminance of blocks of the frame -> 32x18 target
+//   PASS 1: center weighted mean of the blocks -> 1x1
+//   PASS 2: the adapted value -> 1x1 (faster toward a brighter scene, slower
+//           into the dark like the eye; the client copies it back for the next frame)
+//
+//=============================================================================//
+
+// STATIC: "PASS" "0..2"
+
+#include "common_ps_fxc.h"
+#include "hl2rpm_post_common.h"
+
+sampler sSrc			: register( s0 );
+sampler sPrev			: register( s1 );	// PASS 2: the adapted value of the last frame
+
+// PASS 0: xy one block of the frame (uv); PASS 1: xy texel size, zw blocks in x / y;
+// PASS 2: x rate toward brighter, y toward darker, z reset (take the current value)
+const float4 g_vecLum	: register( c0 );
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+};
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+#if PASS == 0
+	float s = 0.0;
+	[unroll]
+	for ( int y = 0; y < 5; y++ )
+	{
+		[unroll]
+		for ( int x = 0; x < 5; x++ )
+		{
+			const float2 uv = In.vTexCoord + ( float2( x, y ) - 2.0 ) * 0.2 * g_vecLum.xy;
+			const float l = dot( PostToLinear( tex2D( sSrc, uv ).rgb ), g_vecLumWeights );
+			// (near black counts as dark grey: a few black pixels must not decide the average)
+			s += log( max( l, 1e-3 ) );
+		}
+	}
+	return float4( s / 25.0, 0, 0, 1 );
+#elif PASS == 1
+	float s = 0.0;
+	float ws = 0.0;
+	[loop]
+	for ( float y = 0.5; y < g_vecLum.w; y += 1.0 )
+	{
+		[loop]
+		for ( float x = 0.5; x < g_vecLum.z; x += 1.0 )
+		{
+			const float2 uv = float2( x, y ) * g_vecLum.xy;
+			// what is in the middle of the view counts most
+			const float2 d = ( uv - 0.5 ) * float2( 1.6, 2.0 );
+			const float w = exp( -dot( d, d ) * 2.0 ) + 0.15;
+			s += tex2Dlod( sSrc, float4( uv, 0, 0 ) ).r * w;
+			ws += w;
+		}
+	}
+	return float4( s / max( ws, 1e-4 ), 0, 0, 1 );
+#else
+	const float cur = tex2D( sSrc, float2( 0.5, 0.5 ) ).r;
+	const float prev = tex2D( sPrev, float2( 0.5, 0.5 ) ).r;
+	const float rate = ( cur > prev ) ? g_vecLum.x : g_vecLum.y;
+	const float v = ( g_vecLum.z > 0.5 ) ? cur : lerp( prev, cur, rate );
+	return float4( v, cur, 0, 1 );
+#endif
+}

@@ -1,0 +1,195 @@
+//========= HL2RPM ============================================================//
+//
+// Temporal anti-aliasing (deferred_taa.cpp in the client). Each frame is drawn with
+// a sub-pixel shift of the projection (Halton 2, 3): over a few frames every pixel
+// sees several points of itself. This pass blends the frame into the result of the
+// earlier frames, taken from where the surface was in the last frame - the camera's
+// move and turn applied to the G-buffer depth (the first person weapon and body move
+// with the camera: they are marked in the stencil and drawn with $viewmodel, no
+// reprojection). History that doesn't fit any more (things moved, appeared from
+// behind something) is clipped toward the colors around the pixel in this frame
+// (YCoCg box of the mean +- deviation of the 3x3 neighbourhood).
+//
+// It draws straight into the frame (its stencil holds the weapon's marks - with MSAA
+// on, the frame's depth-stencil is not the one render targets get), the client copies
+// the result into the history: 8 bits per channel, so the output is dithered - plain
+// rounding couldn't take the small steps of a ~10 % blend and the history stuck short
+// of the value.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+sampler sFrame				: register( s0 );	// this frame (gamma space)
+sampler sHistory			: register( s1 );	// the result of the last frame
+sampler sDepth				: register( s2 );	// G-buffer linear depth
+
+const float4 g_vecTexel		: register( c0 );	// xy 1 / texture size, zw texture size
+const float4 g_vecPrevX		: register( c1 );	// position relative to this frame's camera -> last frame's clip
+const float4 g_vecPrevY		: register( c2 );	// space (unjittered): rows x, y, w
+const float4 g_vecPrevW		: register( c3 );
+const float4 g_vecCurX		: register( c4 );	// ... -> this frame's clip space (unjittered)
+const float4 g_vecCurY		: register( c5 );
+const float4 g_vecCurW		: register( c6 );
+const float4 g_vecCamDelta	: register( c7 );	// xyz last camera position - this one, w 1 = no reprojection (weapon, body)
+const float4 g_vecTAA		: register( c8 );	// x history weight (history like the frame), y (unlike it), z clip box size, w reset
+const float4 g_vecTAA2		: register( c9 );	// x debug mode (0 = the real pass), y motion (pixels) at which less history is kept, zw view size / texture size
+const float4 g_vecTAA3		: register( c10 );	// x frame number
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+	float2 vScreenPos			: VPOS;
+};
+
+float3 RGBToYCoCg( float3 c )
+{
+	return float3( dot( c, float3( 0.25, 0.5, 0.25 ) ), dot( c, float3( 0.5, 0.0, -0.5 ) ), dot( c, float3( -0.25, 0.5, -0.25 ) ) );
+}
+
+float3 YCoCgToRGB( float3 c )
+{
+	return float3( c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z );
+}
+
+// the history: Catmull-Rom from 5 bilinear taps (corners left out) - a camera that keeps
+// moving resamples the history every frame, bilinear would blur it a little each time
+float3 SampleHistory( float2 uv )
+{
+	const float2 pos = uv * g_vecTexel.zw;
+	const float2 center = floor( pos - 0.5 ) + 0.5;
+	const float2 f = pos - center;
+	const float2 f2 = f * f;
+	const float2 f3 = f2 * f;
+	const float2 w0 = -0.5 * f3 + f2 - 0.5 * f;
+	const float2 w1 = 1.5 * f3 - 2.5 * f2 + 1.0;
+	const float2 w2 = -1.5 * f3 + 2.0 * f2 + 0.5 * f;
+	const float2 w3 = 0.5 * f3 - 0.5 * f2;
+	const float2 w12 = w1 + w2;
+	const float2 tc0 = ( center - 1.0 ) * g_vecTexel.xy;
+	const float2 tc3 = ( center + 2.0 ) * g_vecTexel.xy;
+	const float2 tc12 = ( center + w2 / w12 ) * g_vecTexel.xy;
+
+	const float wa = w12.x * w0.y;
+	const float wb = w0.x * w12.y;
+	const float wc = w12.x * w12.y;
+	const float wd = w3.x * w12.y;
+	const float we = w12.x * w3.y;
+
+	float3 c = tex2Dlod( sHistory, float4( tc12.x, tc0.y, 0, 0 ) ).rgb * wa
+		+ tex2Dlod( sHistory, float4( tc0.x, tc12.y, 0, 0 ) ).rgb * wb
+		+ tex2Dlod( sHistory, float4( tc12.x, tc12.y, 0, 0 ) ).rgb * wc
+		+ tex2Dlod( sHistory, float4( tc3.x, tc12.y, 0, 0 ) ).rgb * wd
+		+ tex2Dlod( sHistory, float4( tc12.x, tc3.y, 0, 0 ) ).rgb * we;
+	return max( c / ( wa + wb + wc + wd + we ), 0.0 );
+}
+
+// pulls q toward the center of the box until it is inside (keeps its hue better than a clamp)
+float3 ClipToBox( float3 boxMin, float3 boxMax, float3 q )
+{
+	const float3 center = 0.5 * ( boxMax + boxMin );
+	const float3 extents = 0.5 * ( boxMax - boxMin ) + 1e-4;
+	const float3 v = q - center;
+	const float3 a = abs( v / extents );
+	const float ma = max( a.x, max( a.y, a.z ) );
+	return ( ma > 1.0 ) ? center + v / ma : q;
+}
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	const float2 uv = In.vTexCoord;
+
+	// this frame: the pixel and its neighbours (statistics in YCoCg)
+	float3 cur = 0;
+	float3 m1 = 0;
+	float3 m2 = 0;
+	float3 nmin = 1e3;
+	float3 nmax = -1e3;
+	[unroll]
+	for ( int y = -1; y <= 1; y++ )
+	{
+		[unroll]
+		for ( int x = -1; x <= 1; x++ )
+		{
+			const float3 s = RGBToYCoCg( tex2Dlod( sFrame, float4( uv + float2( x, y ) * g_vecTexel.xy, 0, 0 ) ).rgb );
+			if ( x == 0 && y == 0 )
+				cur = s;
+			m1 += s;
+			m2 += s * s;
+			nmin = min( nmin, s );
+			nmax = max( nmax, s );
+		}
+	}
+	const float3 mean = m1 * ( 1.0 / 9.0 );
+	const float3 sigma = sqrt( max( m2 * ( 1.0 / 9.0 ) - mean * mean, 0.0 ) );
+
+	// where this surface was in the last frame: the difference of its unjittered projections
+	// (any error of the reconstructed position cancels out; the sky is a direction)
+	float2 velocity = 0;
+	if ( g_vecCamDelta.w < 0.5 )
+	{
+		const float depth = tex2Dlod( sDepth, float4( uv, 0, 0 ) ).x;
+		const float4 P = ( depth > 0.1 ) ? float4( In.vecWorldRay * depth, 1.0 ) : float4( In.vecWorldRay, 0.0 );
+		const float4 Pprev = float4( P.xyz - g_vecCamDelta.xyz * P.w, P.w );
+		const float3 clipPrev = float3( dot( g_vecPrevX, Pprev ), dot( g_vecPrevY, Pprev ), dot( g_vecPrevW, Pprev ) );
+		const float3 clipCur = float3( dot( g_vecCurX, P ), dot( g_vecCurY, P ), dot( g_vecCurW, P ) );
+		const float2 ndcPrev = clipPrev.xy / ( abs( clipPrev.z ) > 1e-6 ? clipPrev.z : 1e-6 );
+		const float2 ndcCur = clipCur.xy / ( abs( clipCur.z ) > 1e-6 ? clipCur.z : 1e-6 );
+		velocity = ( ndcPrev - ndcCur ) * float2( 0.5, -0.5 ) * g_vecTAA2.zw;
+		// behind the last camera: no history
+		velocity = ( clipPrev.z > 0.0 ) ? velocity : float2( 2.0, 2.0 );
+	}
+	const float2 uvHist = uv + velocity;
+	const bool bOutside = any( uvHist < 0.0 ) || any( uvHist > g_vecTAA2.zw );
+
+	// (a still camera reads its own texel: no filter needed)
+	float3 histRGB;
+	[branch]
+	if ( dot( velocity, velocity ) < 1e-14 )
+		histRGB = tex2Dlod( sHistory, float4( uvHist, 0, 0 ) ).rgb;
+	else
+		histRGB = SampleHistory( uvHist );
+	const float3 hist = RGBToYCoCg( histRGB );
+
+	// clip the history into what this pixel's neighbourhood allows
+	const float3 boxMin = max( nmin, mean - g_vecTAA.z * sigma );
+	const float3 boxMax = min( nmax, mean + g_vecTAA.z * sigma );
+	const float3 histClipped = ClipToBox( boxMin, boxMax, hist );
+
+	// more history where it matches (stable), less where it had to be pulled far
+	const float flDiff = abs( cur.x - histClipped.x ) / max( max( cur.x, histClipped.x ), 0.2 );
+	const float flMatch = ( 1.0 - flDiff ) * ( 1.0 - flDiff );
+	float flHistory = lerp( g_vecTAA.y, g_vecTAA.x, flMatch );
+
+	// fast motion: a little less history (every resampling softens it)
+	const float flSpeed = length( velocity * g_vecTexel.zw );
+	flHistory *= lerp( 1.0, 0.8, saturate( flSpeed / max( g_vecTAA2.y, 1.0 ) ) );
+	flHistory = ( bOutside || g_vecTAA.w > 0.5 ) ? 0.0 : flHistory;
+
+	float3 result = YCoCgToRGB( lerp( cur, histClipped, flHistory ) );
+
+	// debug pass (drawn over the frame after the history was saved), in red over the grey
+	// frame: 1 motion (16 pixels per frame = full; no history = full), 2 how far the
+	// history was pulled toward the frame, 3 the weapon / body mask, 4 the history weight
+	if ( g_vecTAA2.x > 0.5 )
+	{
+		float flDebug;
+		if ( g_vecTAA2.x < 1.5 )
+			flDebug = bOutside ? 1.0 : saturate( flSpeed / 16.0 );
+		else if ( g_vecTAA2.x < 2.5 )
+			flDebug = saturate( length( hist - histClipped ) * 8.0 );
+		else if ( g_vecTAA2.x < 3.5 )
+			flDebug = g_vecCamDelta.w;
+		else
+			flDebug = flHistory;
+		const float g = dot( saturate( result ), float3( 0.299, 0.587, 0.114 ) ) * 0.7;
+		return float4( lerp( g, 1.0, flDebug ), g * ( 1.0 - flDebug ), g * ( 1.0 - flDebug ), 1.0 );
+	}
+
+	// dither to the 8 bits of the history: rounding is right on average, not stuck
+	const float flNoise = frac( 52.9829189 * frac( dot( In.vScreenPos + g_vecTAA3.x * 5.588238, float2( 0.06711056, 0.00583715 ) ) ) );
+	result += ( flNoise - 0.5 ) * ( 1.0 / 255.0 );
+
+	return float4( saturate( result ), 1.0 );
+}

@@ -35,6 +35,9 @@
 #include "weather/weather_render.h"
 #include "weather/c_weather_system.h"
 #include "deferred/deferred_ssao.h"
+#include "deferred/deferred_gi.h"
+#include "deferred/deferred_postfx.h"
+#include "deferred/deferred_taa.h"
 #include "detailobjectsystem.h"
 #include "c_func_reflective_glass.h"
 
@@ -98,6 +101,12 @@ static void DrawSkyLUTPass( IMaterial *pMat, ITexture *pLut )
 //   sky-view                         -> sun direction, light color, haze
 static bool s_bForceSkyAtmoLUT = false;
 CON_COMMAND( r_deferred_skyatmo_lut_rebuild, "Rebuild all atmosphere LUTs" )
+{
+	s_bForceSkyAtmoLUT = true;
+}
+
+// (the LUT targets lost their content: a device reset, mat_reloadallmaterials)
+void DeferredSkyLUT_ForceRebuild()
 {
 	s_bForceSkyAtmoLUT = true;
 }
@@ -499,6 +508,9 @@ protected:
 	bool m_bRenderablesListBuilt;
 };
 
+// HL2RPM: soft particles - the scene depth into the frame's alpha before the translucent pass
+static void DeferredSoftParticleDepth( const CViewSetup &view );
+
 //-----------------------------------------------------------------------------
 // Draws the scene when there's no water or only cheap water
 //-----------------------------------------------------------------------------
@@ -513,8 +525,8 @@ public:
 
 	virtual bool	ShouldCacheLists() { return true; }
 
-	// HL2RPM: wet surfaces + weather fog on the lit opaque scene
-	virtual void	OnPostOpaque() { WeatherRender_PostOpaque( *this ); }
+	// HL2RPM: wet surfaces + weather fog on the lit opaque scene, the depth for soft particles
+	virtual void	OnPostOpaque() { WeatherRender_PostOpaque( *this ); DeferredSoftParticleDepth( *this ); }
 
 private:
 	VisibleFogVolumeInfo_t m_fogInfo;
@@ -955,7 +967,7 @@ public:
 	// With water in sight the main view is drawn by this class, which had none: the wet
 	// look and the height fog vanished whenever water came into view. (Only this view's own
 	// pass - the reflection/refraction views below keep the empty one.)
-	virtual void	OnPostOpaque() { WeatherRender_PostOpaque( *this ); }
+	virtual void	OnPostOpaque() { WeatherRender_PostOpaque( *this ); DeferredSoftParticleDepth( *this ); }
 
 	class CReflectionView : public CBaseWorldViewDeferred
 	{
@@ -2774,6 +2786,8 @@ void CDeferredViewRender::ViewDrawSceneDeferred( const CViewSetup &view, int nCl
 	// HL2RPM: lightning channel in the sky, then the dynamic weather rain in front of it
 	WeatherRender_Lightning( view );
 	WeatherRender_Rain( view );
+	// HL2RPM: dust motes floating in the sun's beams
+	WeatherRender_Motes( view );
 
 	// Make sure sound doesn't stutter
 	engine->Sound_ExtraUpdate();
@@ -3025,13 +3039,51 @@ static void SetUnderwaterOverlay( CViewRender *pMainView, IMaterial *pWaterMater
 }
 static ConVar r_deferred_glass_views( "r_deferred_glass_views", "1", FCVAR_ARCHIVE, "Render the reflection/refraction views of func_reflective_glass (mirrors; 0 = black glass)" );
 
+// HL2RPM: soft particles. The stock SpriteCard with $depthblend fades particles where they cut
+// into the scene, reading the frame's alpha the engine copies into _rt_FullFrameDepth right
+// before the translucent pass - the stock shaders write their depth there. The deferred
+// composite wrote 1: every smoke puff ended in a hard line on the floor and the walls. The
+// scene depth from the G-buffer goes there instead (hl2rpm_depthalpha.cpp), and the particle
+// materials get $depthblend (materialsystem_passthru.cpp).
+ConVar r_deferred_soft_particles( "r_deferred_soft_particles", "1", FCVAR_ARCHIVE,
+	"Soft particles: smoke, dust and sparks fade where they cut into walls and the floor (takes effect for particle materials loaded after it is turned on)" );
+
+static void DeferredSoftParticleDepth( const CViewSetup &view )
+{
+	if ( !r_deferred_soft_particles.GetBool() || CurrentViewID() != VIEW_MAIN )
+		return;
+
+	// [1]: the debug variant (r_deferred_soft_particles_debug, shown in color)
+	static IMaterial *s_pMatDepthAlpha[2] = { NULL, NULL };
+	static ConVarRef r_deferred_soft_particles_debug( "r_deferred_soft_particles_debug" );
+	const int iMat = ( r_deferred_soft_particles_debug.IsValid() && r_deferred_soft_particles_debug.GetInt() > 0 ) ? 1 : 0;
+	if ( !s_pMatDepthAlpha[ iMat ] )
+	{
+		KeyValues *pKV = new KeyValues( "HL2RPM_DEPTHALPHA" );
+		pKV->SetInt( "$debugview", iMat );
+		s_pMatDepthAlpha[ iMat ] = materials->CreateMaterial( iMat ? "__hl2rpm_depthalpha_dbg" : "__hl2rpm_depthalpha", pKV );
+		if ( !s_pMatDepthAlpha[ iMat ] )
+			return;
+		s_pMatDepthAlpha[ iMat ]->IncrementReferenceCount();
+	}
+	if ( s_pMatDepthAlpha[ iMat ]->IsErrorMaterial() )
+		return;
+
+	ITexture *pDepth = GetDefRT_Depth();
+	if ( !pDepth )
+		return;
+
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->DrawScreenSpaceRectangle( s_pMatDepthAlpha[ iMat ], view.x, view.y, view.width, view.height,
+		view.x, view.y, view.x + view.width - 1, view.y + view.height - 1,
+		pDepth->GetActualWidth(), pDepth->GetActualHeight() );
+}
+
 // HL2RPM: the deferred renderer has no working MSAA - the composite reads one lit surface
 // per pixel, whatever mat_antialias says. Thin geometry (the ribs of corrugated metal, roof
 // trims, railings, wires) became dotted lines that crawled while the player walked (turning
-// hides it: the engine's motion blur). FXAA on the final frame instead.
-static ConVar r_deferred_fxaa( "r_deferred_fxaa", "1", FCVAR_ARCHIVE,
-	"Anti-aliasing of the final frame (FXAA) - the deferred renderer has no working MSAA" );
-
+// hides it: the engine's motion blur). FXAA on the final frame instead, or TAA
+// (r_deferred_aa, deferred_taa.cpp).
 static void DrawDeferredFXAA( const CViewSetup &view )
 {
 	static IMaterial *s_pMatFXAA = NULL;
@@ -3192,6 +3244,8 @@ void CDeferredViewRender::DrawWorldComposite( const CViewSetup &view, int nClear
 void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 {
 	bool bResetLightAccum = false;
+	// HL2RPM: the global light of this frame for the GI probes (sun direction for the bounce)
+	lightData_Global_t giLightState;
 	const bool bRadiosityEnabled = DEFCFG_ENABLE_RADIOSITY != 0 && r_deferred_radiosity.GetBool() && AreRadiosityRTsAvailable();
 	bool bDrawDebugShadow = false;
 
@@ -3284,6 +3338,7 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 			GetWeatherSystem()->ApplyLightningFlash( lightDataState, GetGlobalLight()->HasShadow() );
 
 		QUEUE_FIRE( CommitLightData_Global, lightDataState );
+		giLightState = lightDataState;
 
 		// HL2RPM: top-down depth map that tells where rain can fall. Before the weather
 		// constants of the frame, which carry its matrix: the other way round the frame that
@@ -3331,7 +3386,9 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 	if ( building_cubemaps.GetBool() )
 		engine->GetScreenSize( lightingView.width, lightingView.height );
 
-	// HL2RPM: ambient occlusion of the sky light (SSAO + sky visibility), read by the global light pass
+	// HL2RPM: world-space indirect light (GI probes) and ambient occlusion of the sky light (SSAO +
+	// sky visibility), read by the global light pass
+	DeferredGI_Render( lightingView, giLightState );
 	DeferredSSAO_Render( lightingView );
 
 	CMatRenderContextPtr pRenderContext( materials );
@@ -3959,9 +4016,17 @@ void CDeferredViewRender::DrawViewModels( const CViewSetup &view, bool drawViewm
 			UpdateRefractIfNeededByList( translucentViewModelList );
 		}
 
+		// HL2RPM: TAA - the weapon moves with the camera: its pixels are marked in the stencil
+		// and not reprojected (in the composite, the pass that ends up in the frame)
+		if ( !bGBuffer )
+			DeferredTAA_MarkCameraAttached( true );
+
 		DrawRenderablesInList( opaqueViewModelList );
 		if (!bGBuffer)
+		{
 			DrawRenderablesInList( translucentViewModelList, STUDIO_TRANSPARENCY );
+			DeferredTAA_MarkCameraAttached( false );
+		}
 		else
 			pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_RENDER_STAGE,
 			                                          DEFERRED_RENDER_STAGE_INVALID );
@@ -3995,6 +4060,10 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 		pLightEditor->GetEditorView( &worldView.origin, &worldView.angles );
 	else
 		pLightEditor->SetEditorView( &worldView.origin, &worldView.angles );
+
+	// HL2RPM: TAA - this frame's sub-pixel shift of the projection (every view copied from
+	// this one, the 3D skybox and the weapon included, gets it; deferred_taa.cpp)
+	DeferredTAA_JitterView( worldView, worldView.m_bDoBloomAndToneMapping && !building_cubemaps.GetBool() );
 
 	m_CurrentView = worldView;
 
@@ -4137,9 +4206,22 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	g_ShaderEditorSystem->CustomPostRender();
 	#endif
 
-	// HL2RPM: anti-aliasing of the final frame (the viewmodel included, the HUD not)
-	if ( r_deferred_fxaa.GetBool() && !building_cubemaps.GetBool() )
-		DrawDeferredFXAA( worldView );
+	// HL2RPM: anti-aliasing of the final frame (the viewmodel included, the HUD not):
+	// TAA when this frame was drawn jittered for it, else FXAA if asked for
+	if ( !building_cubemaps.GetBool() )
+	{
+		// (the depth of field first: TAA evens out the noise of its gather)
+		DeferredPostFX_DrawDoF( worldView );
+
+		if ( DeferredTAA_IsFrameActive() )
+			DeferredTAA_Draw( worldView );
+		else if ( DeferredAA_GetMode() >= 1 )
+			DrawDeferredFXAA( worldView );
+	}
+
+	// HL2RPM: eye adaptation, bloom, grading, lens effects (the HUD comes after)
+	if ( !building_cubemaps.GetBool() )
+		DeferredPostFX_Draw( worldView );
 
 	// And here are the screen-space effects
 
@@ -4398,8 +4480,19 @@ void CDeferredViewRender::ProcessDeferredGlobals( const CViewSetup &view )
 
 	Vector3DMultiply( matView, view.origin, viewPosition );
 	matView.SetTranslation( -viewPosition );
-	MatrixBuildPerspectiveX( matPerspective, view.fov, view.m_flAspectRatio,
-		view.zNear, view.zFar );
+	// HL2RPM: the projection the engine builds for the view - off-center while TAA jitters it
+	// (the deferred passes' rays and the main view's world -> screen matrix must follow)
+	if ( view.m_bOffCenter )
+	{
+		MatrixBuildPerspectiveOffCenterX( matPerspective, view.fov, view.m_flAspectRatio,
+			view.zNear, view.zFar, view.m_flOffCenterBottom, view.m_flOffCenterTop,
+			view.m_flOffCenterLeft, view.m_flOffCenterRight );
+	}
+	else
+	{
+		MatrixBuildPerspectiveX( matPerspective, view.fov, view.m_flAspectRatio,
+			view.zNear, view.zFar );
+	}
 	MatrixMultiply( matPerspective, matView, matViewProj );
 
 	MatrixInverseGeneral( matViewProj, screen2world );

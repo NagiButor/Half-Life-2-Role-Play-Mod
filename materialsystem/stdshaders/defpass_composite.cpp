@@ -20,6 +20,8 @@ static ConVar r_deferred_msaa_light( "r_deferred_msaa_light", "0", 0,
 	"Deferred composite: with MSAA, edge fragments take the light of a neighbour pixel of their own surface (less crawling on thin geometry)" );
 
 static ConVar r_deferred_debug_lighting_only( "r_deferred_debug_lighting_only", "0", FCVAR_CHEAT, "Dev: draw the deferred composite with a white albedo (lighting only)" );
+// HL2RPM: caustics on what lies under the water (the refraction views, composite_ps30)
+static ConVar r_deferred_water_caustics( "r_deferred_water_caustics", "0.9", FCVAR_ARCHIVE, "Caustics under the water: strength (0 = off)", true, 0.0f, true, 4.0f );
 
 void InitParmsComposite( const defParms_composite &info, CBaseVSShader *pShader, IMaterialVar **params )
 {
@@ -478,6 +480,15 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 			pShaderAPI->GetWorldSpaceCameraPosition( vCameraPos );
 			vCameraPos[3] = 1.0f;
 			pShaderAPI->SetPixelShaderConstant( 3, vCameraPos, 1, true );
+		}
+
+		// HL2RPM: caustics under the water (refraction view, see composite_ps30)
+		{
+			const float flStrength = r_deferred_water_caustics.GetFloat();
+			// (w: the albedo's mip bias while TAA jitters the frame - textures stay crisp)
+			float flCaustics[4] = { flStrength, pShaderAPI->CurrentTime() * 0.6f, 1.0f / 48.0f,
+				GetDeferredExt()->GetTAAData().vecParams3.y };
+			pShaderAPI->SetPixelShaderConstant( 23, flCaustics, 1, true );
 		}
 
 		if ( bWorldEyeVec )

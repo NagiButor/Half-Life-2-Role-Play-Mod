@@ -1,0 +1,164 @@
+//========= HL2RPM ============================================================//
+//
+// Final post-processing of the frame (deferred_postfx.cpp in the client), after
+// FXAA, before the HUD:
+//   chromatic aberration toward the edges, contrast adaptive sharpening,
+//   eye adaptation (exposure from the adapted average luminance), bloom and lens
+//   dirt, a soft shoulder (the highlights an exposure above 1 pushes past white
+//   roll off instead of clipping flat), saturation / color balance, vignette,
+//   an S-curve of contrast, film grain.
+// Every effect at 0 leaves the frame as it was.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+#include "hl2rpm_post_common.h"
+
+sampler sFrame			: register( s0 );	// the frame (after FXAA), gamma space
+sampler sBloom			: register( s1 );	// bloom, half resolution (top left of its target)
+sampler sLum			: register( s2 );	// adapted log luminance (1x1)
+sampler sDirt			: register( s3 );	// lens dirt (r)
+
+const float4 g_vecTexel		: register( c0 );	// xy 1 / frame texture size, zw frame uv -> bloom uv scale
+const float4 g_vecExposure	: register( c1 );	// see PostExposure
+const float4 g_vecBloom		: register( c2 );	// x bloom strength, y lens dirt strength, zw bloom uv max
+const float4 g_vecGrade		: register( c3 );	// x contrast (S-curve 0..1), y saturation, z shoulder start, w sharpening
+const float4 g_vecLens		: register( c4 );	// x vignette, y grain, z chromatic aberration (pixels at the corners), w frame
+const float4 g_vecTint		: register( c5 );	// rgb color balance, w aspect ratio
+const float4 g_vecUV		: register( c6 );	// xy bloom uv offset, zw frame texture size (pixels)
+const float4 g_vecFlare		: register( c7 );	// lens flare of the sun: xy its place (uv), z strength (0 = off), w bloom brightness it starts at
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+};
+
+// white noise hash (Hoskins), stable in float32 for screen coordinates
+float Hash12( float2 p )
+{
+	float3 p3 = frac( float3( p.xyx ) * 0.1031 );
+	p3 += dot( p3, p3.yzx + 33.33 );
+	return frac( ( p3.x + p3.y ) * p3.z );
+}
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	const float2 uv = In.vTexCoord;
+	const float2 t = g_vecTexel.xy;
+	const float2 dc = uv - 0.5;
+
+	// chromatic aberration: red and blue drift apart toward the corners
+	const float2 ca = dc * dot( dc, dc ) * ( 4.0 * g_vecLens.z ) * t;
+	const float3 center = tex2D( sFrame, uv ).rgb;
+	float3 c = center;
+	if ( g_vecLens.z > 0.0 )
+	{
+		c.r = tex2D( sFrame, uv - ca ).r;
+		c.b = tex2D( sFrame, uv + ca ).b;
+	}
+
+	// contrast adaptive sharpening (AMD CAS, the cross): FXAA and the bilinear stretch of
+	// the GPU soften the image a little
+	if ( g_vecGrade.w > 0.0 )
+	{
+		const float3 n = tex2D( sFrame, uv + float2( 0, -t.y ) ).rgb;
+		const float3 s = tex2D( sFrame, uv + float2( 0, t.y ) ).rgb;
+		const float3 e = tex2D( sFrame, uv + float2( t.x, 0 ) ).rgb;
+		const float3 w = tex2D( sFrame, uv + float2( -t.x, 0 ) ).rgb;
+		const float3 mn = min( center, min( min( n, s ), min( e, w ) ) );
+		const float3 mx = max( center, max( max( n, s ), max( e, w ) ) );
+		const float3 amp = sqrt( saturate( min( mn, 2.0 - mx ) / max( mx, 1e-4 ) ) );
+		const float3 wgt = -amp * ( g_vecGrade.w * 0.2 );
+		c = saturate( ( c + ( n + s + e + w ) * wgt ) / ( 1.0 + 4.0 * wgt ) );
+	}
+
+	// eye adaptation
+	float3 lin = PostToLinear( c );
+	const float exposure = PostExposure( tex2D( sLum, float2( 0.5, 0.5 ) ).r, g_vecExposure );
+	lin *= exposure;
+
+	// bloom, and the lens dirt it lights up
+	const float3 bloom = tex2D( sBloom, min( uv * g_vecTexel.zw + g_vecUV.xy, g_vecBloom.zw ) ).rgb;
+	const float dirt = tex2D( sDirt, uv ).r;
+	lin += bloom * ( g_vecBloom.x + dirt * g_vecBloom.y );
+
+	// lens flare of the sun: what the bloom holds at its place (bright only while its disk
+	// is in sight: clouds, the exposure and anything in front of it decide; the client adds
+	// a trace against walls) comes back as ghosts along the line through the center of the
+	// frame and as a ring around the sun - reflections between the elements of a lens
+	[branch]
+	if ( g_vecFlare.z > 0.0 )
+	{
+		const float2 sunUV = g_vecFlare.xy;
+		const float3 sunBloom = tex2Dlod( sBloom, float4( min( sunUV * g_vecTexel.zw + g_vecUV.xy, g_vecBloom.zw ), 0, 0 ) ).rgb;
+		const float3 src = max( sunBloom - g_vecFlare.w, 0.0 ) * g_vecFlare.z;
+		[branch]
+		if ( dot( src, 1.0 ) > 0.0005 )
+		{
+			const float2 asp = float2( g_vecTint.w, 1.0 );
+			const float2 axis = 0.5 - sunUV;
+
+			// soft disks at fixed places along the axis (place, radius, tint, weight)
+			static const float4 ghosts[5] =
+			{
+				float4( 0.42, 0.030, 0.9, 0.0 ),
+				float4( 0.80, 0.075, 0.35, 1.0 ),
+				float4( 1.30, 0.022, 1.0, 2.0 ),
+				float4( 1.72, 0.120, 0.22, 3.0 ),
+				float4( 2.10, 0.055, 0.5, 4.0 ),
+			};
+			static const float3 tints[5] =
+			{
+				float3( 1.0, 0.72, 0.45 ), float3( 0.5, 0.85, 1.0 ), float3( 0.7, 1.0, 0.6 ),
+				float3( 1.0, 0.6, 0.8 ), float3( 0.6, 0.72, 1.0 ),
+			};
+			float3 f = 0;
+			[unroll]
+			for ( int i = 0; i < 5; i++ )
+			{
+				const float d = length( ( uv - ( sunUV + axis * ghosts[i].x ) ) * asp ) / ghosts[i].y;
+				const float disk = saturate( 1.0 - d );
+				// (a brighter rim: the image of the aperture)
+				f += tints[i] * ( ghosts[i].z * disk * ( 0.45 + 0.55 * d * d ) * smoothstep( 0.0, 0.25, disk ) );
+			}
+
+			// the ring around the sun
+			const float dh = length( ( uv - sunUV ) * asp );
+			const float ring = ( dh - 0.33 ) / 0.025;
+			f += float3( 1.0, 0.85, 0.7 ) * ( 0.22 * exp( -ring * ring ) );
+
+			lin += src * f * ( 0.7 + 0.9 * dirt );
+		}
+	}
+
+	// soft shoulder: [ start, exposure ] -> [ start, 1 ] (identity at exposure 1)
+	{
+		const float s0 = g_vecGrade.z;
+		const float top = max( exposure, 1.0 );
+		const float k = ( top - 1.0 ) / max( 1.0 - s0, 1e-3 );
+		const float3 tt = saturate( ( lin - s0 ) / max( top - s0, 1e-3 ) );
+		const float3 g = tt * ( 1.0 + k ) / ( 1.0 + k * tt );
+		lin = ( lin > s0 ) ? ( s0 + ( 1.0 - s0 ) * g ) : lin;
+	}
+
+	// saturation and color balance
+	const float L = dot( lin, g_vecLumWeights );
+	lin = max( lerp( L.xxx, lin, g_vecGrade.y ), 0.0 ) * g_vecTint.rgb;
+
+	// vignette
+	const float2 dv = dc * float2( g_vecTint.w, 1.0 );
+	lin *= 1.0 - g_vecLens.x * smoothstep( 0.35, 1.05, length( dv ) * 1.15 );
+
+	float3 o = PostToGamma( saturate( lin ) );
+
+	// contrast: an S-curve in gamma space (keeps black and white)
+	o = lerp( o, o * o * ( 3.0 - 2.0 * o ), g_vecGrade.x );
+
+	// film grain: luminance noise, mostly in the mid tones
+	const float n = Hash12( floor( uv * g_vecUV.zw ) + g_vecLens.w * float2( 37.0, 17.0 ) );
+	const float lum = dot( o, g_vecLumWeights );
+	o += ( n - 0.5 ) * g_vecLens.y * ( 0.35 + 2.6 * lum * ( 1.0 - lum ) );
+
+	return float4( o, 1.0 );
+}

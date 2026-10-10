@@ -10,6 +10,7 @@
 
 #include "vgui_controls/MessageBox.h"
 
+#include "deferred/deferred_taa.h"
 #include "tier0/memdbgon.h"
 
 static ConVar r_deferred( "r_deferred", "1", FCVAR_ARCHIVE, "Enable deferred renderer (requires SM3)." );
@@ -123,6 +124,9 @@ bool CDeferredManagerClient::Init()
 	}
 
 	view = g_pCurrentViewRender;
+
+	// HL2RPM: the engine's MSAA smooths nothing here and costs frame time (deferred_taa.cpp)
+	DeferredAA_DisableMSAA();
 
 	Msg("Deferred lighting enabled (use -nodeferred in the command line to disable if necessary)\n");
 	return true;

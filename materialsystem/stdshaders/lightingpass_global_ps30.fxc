@@ -52,6 +52,15 @@ sampler sCloudNoise							: register( s5 );
 sampler sSSAO								: register( s6 );
 const float4 g_vecAmbientCtrl				: register( c70 );	// y indoor ambient, w AO uv scale (0 = off)
 
+// ---- HL2RPM: world-space indirect light (GI probes, deferred_gi_ps30) ----
+// half resolution, blurred: rgb indirect light / Shape( n ), a coverage (0 = the sky light above)
+sampler sGI									: register( s7 );
+const float4 g_vecGIApply					: register( c72 );	// x on, y debug (ambient only), z contact shadows debug, w GI uv scale
+
+// ---- HL2RPM: contact shadows - a short march toward the sun through the depth buffer ----
+const float4 g_matWorldToScreen[4]			: register( c73 );	// world -> screen texture coords of this view (rows, c73 - c76)
+const float4 g_vecContact					: register( c77 );	// x length (units), y thickness (units), z max distance from the eye (units), w strength (0 = off)
+
 // Density of the cloud column above a point, looking toward the light.
 // Uses the same weather map / shape noise as the volumetric clouds so the
 // shadows on the ground match the clouds in the sky.
@@ -353,6 +362,8 @@ struct PS_INPUT
 	float2 vTexCoord				: TEXCOORD0;
 
 	float3 vecWorldRay				: TEXCOORD1;
+
+	float2 vScreenPos				: VPOS;		// HL2RPM: dither of the contact shadow march
 };
 
 struct PS_OUTPUT
@@ -365,6 +376,11 @@ PS_OUTPUT main( const PS_INPUT In )
 	PS_OUTPUT Out = (PS_OUTPUT)0;
 
 	float flDepth = tex2D( sDepth, In.vTexCoord ).x;
+
+	// HL2RPM: the half resolution buffers (AO, GI) fill the top left of full size targets: at the
+	// right and bottom edge the bilinear lookup reached the texel next to the drawn area (a ragged
+	// dark border) - kept half a texel inside (a full resolution pixel from the edge)
+	const float2 uvHalfRes = min( In.vTexCoord, 1.0f - float2( abs( ddx( In.vTexCoord.x ) ), abs( ddy( In.vTexCoord.y ) ) ) );
 
 #if HAS_SHADOW
 	// HL2RPM: the geometric normal of the surface for the sun shadow lookups, from the depth
@@ -453,13 +469,14 @@ PS_OUTPUT main( const PS_INPUT In )
 
 	// HL2RPM: the sky light is occluded - by the geometry right around the point (SSAO)
 	// and by roofs (indoors it drops to a dim bounce level)
+	float2 aoSky = float2( 1.0, 1.0 );
 	if ( g_vecAmbientCtrl.w > 0.0 )
 	{
-		float2 aoSky = tex2D( sSSAO, In.vTexCoord * g_vecAmbientCtrl.w ).rg;
+		aoSky = tex2D( sSSAO, uvHalfRes * g_vecAmbientCtrl.w ).rg;
 		// (the rain map behind the sky visibility holds the map's roofs, not the skybox's)
 		if ( bSkybox )
 			aoSky.y = 1.0;
-		ambient *= aoSky.x * lerp( g_vecAmbientCtrl.y, 1.0, aoSky.y );
+		ambient *= lerp( g_vecAmbientCtrl.y, 1.0, aoSky.y );
 
 #if HAS_SHADOW
 		// r_csm_pcss 6 / 7: the sky visibility / the SSAO alone
@@ -469,6 +486,23 @@ PS_OUTPUT main( const PS_INPUT In )
 			return Out;
 		}
 #endif
+	}
+
+	// HL2RPM: the GI probes know where the sky really is in sight (windows, doors) and the sun
+	// light bounced off lit surfaces: their indirect light replaces the sky light wherever the
+	// grid around the camera covers the point (bumps keep their shading through Shape( n ))
+	if ( g_vecGIApply.x > 0.5 && !bSkybox )
+	{
+		const float4 gi = tex2D( sGI, uvHalfRes * g_vecGIApply.w );
+		ambient = lerp( ambient, gi.rgb * ( 0.6 + 0.4 * flNormal.z ), gi.a );
+	}
+	ambient *= aoSky.x;
+
+	// r_deferred_gi_debug 1..5: the ambient light alone (with r_deferred_debug_lighting_only 1)
+	if ( g_vecGIApply.y > 0.5 )
+	{
+		Out.vColor_0 = WriteLighting( float4( ambient, 0 ) );
+		return Out;
 	}
 
 	if ( g_vecWeatherFlags.x > 0.0 && lightAmount > 0.0 && flDepth < DEPTH_RECONSTRUCTION_LIMIT )
@@ -556,6 +590,52 @@ PS_OUTPUT main( const PS_INPUT In )
 		lightAmount *= max( shadowMult, (1.0f - saturate( viewFwdDot )) * half_lambert );
 #else
 		lightAmount *= shadowMult;
+
+		// HL2RPM: contact shadows. The cascades miss what is smaller than a few texels: the
+		// shadow a foot, a can, a pipe or the lip of a step throws right next to itself. A short
+		// march toward the sun through the depth buffer: a sample that lands behind the visible
+		// surface (and not far behind - a thin object, not a wall far in front) shadows the point.
+		[branch]
+		if ( g_vecContact.w > 0.0f && lightAmount > 0.001f && flDepth * length( In.vecWorldRay ) < g_vecContact.z )
+		{
+			const float3 p0 = worldPos + shadowNormal * 1.0f;
+			const float dither = frac( 52.9829189f * frac( dot( In.vScreenPos, float2( 0.06711056f, 0.00583715f ) ) ) );
+			float occ = 0.0f;
+			[loop]
+			for ( int i = 0; i < 10; i++ )
+			{
+				const float t = g_vecContact.x * ( ( i + dither ) * 0.1f ) + 1.0f;
+				const float4 q = float4( p0 + g_vecLightVec_Forward * t, 1.0f );
+				const float w = dot( g_matWorldToScreen[3], q );
+				if ( w <= 1.0f )
+					break;
+				const float2 uvq = float2( dot( g_matWorldToScreen[0], q ), dot( g_matWorldToScreen[1], q ) ) / w;
+				if ( any( uvq < 0.0f ) || any( uvq > 1.0f ) )
+					break;
+				const float dScene = tex2Dlod( sDepth, float4( uvq, 0, 0 ) ).x;
+				if ( dScene < 0.1f )
+					continue;
+				// distances from the eye along the same view ray (the ray is linear in screen space)
+				const float3 rayQ = In.vecWorldRay + vecRayDx * ( ( uvq.x - In.vTexCoord.x ) / vecTexelUV.x ) + vecRayDy * ( ( uvq.y - In.vTexCoord.y ) / vecTexelUV.y );
+				const float distScene = dScene * length( rayQ );
+				const float distQ = length( q.xyz - g_vecViewOrigin );
+				const float behind = distQ - distScene;
+				occ = max( occ, saturate( ( behind - 0.5f ) * 0.5f ) * saturate( ( g_vecContact.y - behind ) / 4.0f ) );
+			}
+			lightAmount *= 1.0f - occ * g_vecContact.w;
+
+			// r_deferred_contact_shadows_debug: red = occlusion found, green = strength
+			if ( g_vecGIApply.z > 0.5f )
+			{
+				Out.vColor_0 = WriteLighting( float4( occ, g_vecContact.w, 0.25f, 0 ) );
+				return Out;
+			}
+		}
+		else if ( g_vecGIApply.z > 0.5f )
+		{
+			Out.vColor_0 = WriteLighting( float4( 0, g_vecContact.w, ( lightAmount > 0.001f ) ? 1.0f : 0.0f, 0 ) );
+			return Out;
+		}
 
 		// r_csm_pcss 5: the sun shadow term alone (white lit, black shadowed)
 		if ( g_vecPCSS.w > 4.5f )

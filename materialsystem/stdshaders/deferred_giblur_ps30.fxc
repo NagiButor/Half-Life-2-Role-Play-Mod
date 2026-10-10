@@ -1,0 +1,56 @@
+//========= HL2RPM ============================================================//
+//
+// Depth-aware (bilateral) separable blur of the half resolution indirect light
+// (deferred_gi_ps30): rgb light, a coverage. Like deferred_ssaoblur_ps30, all
+// four channels.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+sampler sGI				: register( s0 );	// half resolution GI (top left of a full size RT)
+sampler sDepth			: register( s1 );	// G-buffer linear depth
+
+const float4 g_vecBlur	: register( c0 );	// xy step (screen uv), z depth tolerance (fraction), w GI uv scale
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+};
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	float2 uv = In.vTexCoord;
+	// (reads of the half resolution source stay half a texel inside its drawn area)
+	const float2 uvMax = 1.0 - 0.5 * float2( abs( ddx( uv.x ) ), abs( ddy( uv.y ) ) );
+	float d0 = tex2D( sDepth, uv ).x;
+	if ( d0 < 0.1 )
+		return float4( 0, 0, 0, 0 );
+
+	static const float w[5] = { 0.2270270, 0.1945946, 0.1216216, 0.0540541, 0.0162162 };
+
+	float4 sum = tex2D( sGI, min( uv, uvMax ) * g_vecBlur.w ) * w[0];
+	float wsum = w[0];
+	float invTol = 1.0 / max( d0 * g_vecBlur.z, 1.0 );
+
+	[unroll]
+	for ( int i = 1; i < 5; i++ )
+	{
+		float2 off = g_vecBlur.xy * i;
+
+		float2 uvA = uv + off;
+		float dA = tex2D( sDepth, uvA ).x;
+		float wA = w[i] * saturate( 1.0 - abs( dA - d0 ) * invTol ) * ( dA > 0.1 ? 1.0 : 0.0 );
+		sum += tex2D( sGI, min( uvA, uvMax ) * g_vecBlur.w ) * wA;
+		wsum += wA;
+
+		float2 uvB = uv - off;
+		float dB = tex2D( sDepth, uvB ).x;
+		float wB = w[i] * saturate( 1.0 - abs( dB - d0 ) * invTol ) * ( dB > 0.1 ? 1.0 : 0.0 );
+		sum += tex2D( sGI, min( uvB, uvMax ) * g_vecBlur.w ) * wB;
+		wsum += wB;
+	}
+
+	return sum / max( wsum, 1e-4 );
+}

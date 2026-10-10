@@ -1,0 +1,17 @@
+//========= HL2RPM ============================================================//
+//
+// GI probe upload (see deferred_gi_upload_vs30): the texel gets the data as is.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+struct PS_INPUT
+{
+	float4 vData			: TEXCOORD0;
+};
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	return In.vData;
+}

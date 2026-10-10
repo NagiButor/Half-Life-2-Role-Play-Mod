@@ -1,0 +1,163 @@
+//========= HL2RPM ============================================================//
+//
+// Indirect light of the global light from the GI probes (deferred_gi.cpp in the
+// client), at half resolution; blurred by deferred_giblur_ps30 and used by
+// lightingpass_global_ps30 instead of its flat sky light.
+//
+// Every probe holds (atlas planes, see the client):
+//   0: sky visibility as L1 spherical harmonics, scaled so that
+//      vis( n ) = a0 + dot( a1, n ) is the cosine weighted part of the sky the
+//      directions around n see (1 = open sky above a horizontal surface)
+//   1: the same for the sun light bounced off lit surfaces around it (albedo x
+//      cos x lit), in units of the sun's light
+//   2: rgb color of that bounce (luminance 1), a validity (0 = in a wall / not
+//      traced yet)
+//   3: free distance from the probe along +x -x, +y -y, +z -z (5 bits each,
+//      packed in pairs), 31 = a whole probe spacing
+//
+// The 8 probes around the point are blended with trilinear weights, except
+// probes that can't see it: a wall between them (free distance along an axis
+// shorter than the way to the point) or the probe behind the surface. A probe
+// outside a room must not light it - that is what made interiors as bright as
+// the street.
+//
+// Output: rgb indirect light / Shape( n ) (the full resolution pass multiplies by
+// Shape of its own normal: bumps keep their shading in the shade), a coverage
+// (0 = outside the grid / no probe: the old sky light).
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+sampler sDepth			: register( s0 );	// G-buffer linear depth (0 = sky)
+sampler sNormals		: register( s1 );	// G-buffer normals
+sampler sProbes			: register( s2 );	// probe atlas (point sampled)
+
+const float3 g_vecViewOrigin	: register( c0 );
+const float4 g_vecGrid			: register( c1 );	// xyz world cell index of the first probe, w 1 / spacing
+const float4 g_vecDims			: register( c2 );	// xyz probes per axis, w spacing
+const float4 g_vecAtlas			: register( c3 );	// x 1 / atlas width, y 1 / atlas height, z normal offset (units), w debug
+const float4 g_vecAmbHigh		: register( c4 );	// rgb sky light, w sky light left without sky in sight
+const float4 g_vecAmbLow		: register( c5 );	// rgb sky light bounced off the ground (ambient low), w its scale
+const float4 g_vecSun			: register( c6 );	// rgb sun light x bounce scale, w multiple bounce fill
+const float4 g_vecGI2			: register( c7 );	// x leak tolerance (units), y probe offset in its cell (probe i sits at ( i + y ) * spacing), z unused, w bounce boost indoors
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+};
+
+static const float3 g_vecCorner[8] =
+{
+	float3( 0, 0, 0 ), float3( 1, 0, 0 ), float3( 0, 1, 0 ), float3( 1, 1, 0 ),
+	float3( 0, 0, 1 ), float3( 1, 0, 1 ), float3( 0, 1, 1 ), float3( 1, 1, 1 )
+};
+
+float Shape( float3 n )
+{
+	return 0.6 + 0.4 * n.z;
+}
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	const float depth = tex2D( sDepth, In.vTexCoord ).x;
+	if ( depth < 0.1 )
+		return float4( 0, 0, 0, 0 );
+
+	const float3 P = g_vecViewOrigin + In.vecWorldRay * depth;
+	const float3 N = normalize( tex2D( sNormals, In.vTexCoord ).xyz * 2.0 - 1.0 );
+
+	// (off the surface along its normal: a floor looks up between the probes over it, a
+	// wall looks into the room in front of it)
+	const float3 Ps = P + N * g_vecAtlas.z;
+	const float3 g = Ps * g_vecGrid.w - g_vecGI2.y;
+	const float3 base = floor( g );
+	const float3 f = g - base;
+
+	// inside the grid, fading out over the outermost cell
+	const float3 rel = g - g_vecGrid.xyz;
+	const float3 margin = min( rel, ( g_vecDims.xyz - 1.0 ) - rel );
+	const float coverage = saturate( min( min( margin.x, margin.y ), margin.z ) );
+	if ( coverage <= 0.0 )
+		return float4( 0, 0, 0, 0 );
+
+	const float planeStep = g_vecDims.y * g_vecAtlas.y;
+
+	float wsum = 0.0;
+	float sky = 0.0;
+	float skyBounce = 0.0;
+	float3 sun = 0.0;
+	float fill = 0.0;
+
+	[unroll]
+	for ( int c = 0; c < 8; c++ )
+	{
+		const float3 idx = base + g_vecCorner[c];
+		// (the grid is toroidal: a probe lives at its world cell modulo the grid size)
+		const float3 slot = idx - g_vecDims.xyz * floor( idx / g_vecDims.xyz );
+		const float2 uv = float2( ( slot.x + slot.z * g_vecDims.x + 0.5 ) * g_vecAtlas.x, ( slot.y + 0.5 ) * g_vecAtlas.y );
+
+		const float4 dVis = tex2Dlod( sProbes, float4( uv, 0, 0 ) );
+		const float4 dBnc = tex2Dlod( sProbes, float4( uv.x, uv.y + planeStep, 0, 0 ) );
+		const float4 dAux = tex2Dlod( sProbes, float4( uv.x, uv.y + 2.0 * planeStep, 0, 0 ) );
+		const float4 dFree = tex2Dlod( sProbes, float4( uv.x, uv.y + 3.0 * planeStep, 0, 0 ) );
+
+		const float3 tw = lerp( 1.0 - f, f, g_vecCorner[c] );
+		float w = tw.x * tw.y * tw.z * dAux.w;
+
+		// a wall between the probe and the point: the free distance along an axis is shorter
+		// than the way to the point along it
+		const float3 probePos = ( idx + g_vecGI2.y ) * g_vecDims.w;
+		const float3 d = Ps - probePos;
+		const float3 qHi = floor( dFree.xyz * ( 1.0 / 32.0 ) + 0.01 );
+		const float3 qLo = dFree.xyz - qHi * 32.0;
+		const float3 freeD = ( d >= 0.0 ? qHi : qLo ) * ( g_vecDims.w / 31.0 );
+		const float3 over = abs( d ) - freeD - g_vecGI2.x;
+		w *= ( max( max( over.x, over.y ), over.z ) > 0.0 ) ? 0.0 : 1.0;
+
+		// the probe behind the surface (under the floor, inside the wall)
+		const float3 toProbe = probePos - P;
+		const float facing = saturate( dot( toProbe, N ) * rsqrt( max( dot( toProbe, toProbe ), 1.0 ) ) * 0.5 + 0.5 );
+		w *= facing * facing + 0.02;
+
+		const float vis = saturate( dVis.x + dot( dVis.yzw, N ) );
+		const float bnc = max( dBnc.x + dot( dBnc.yzw, N ), 0.0 );
+		sky += w * vis;
+		// the sky light the surroundings throw back: only as far as they see the sky themselves
+		// (the average sky visibility of the probe: 0.5 in the open, 0 in a closed room)
+		skyBounce += w * ( 1.0 - vis ) * saturate( dVis.x * 2.0 );
+		// (indoors the eye would adapt far more than the exposure does: the light a sunlit patch on
+		// the floor throws around a dark room is boosted, outdoors it stays as it is)
+		const float indoor = lerp( g_vecGI2.w, 1.0, saturate( dVis.x * 2.0 ) );
+		sun += w * dAux.rgb * bnc * indoor;
+		fill += w * dBnc.x * indoor;
+		wsum += w;
+	}
+
+	if ( wsum < 1e-5 )
+		return float4( 0, 0, 0, 0 );
+
+	const float inv = 1.0 / wsum;
+	sky *= inv;
+	skyBounce *= inv;
+	sun *= inv;
+	fill *= inv;
+
+	float3 light = g_vecAmbHigh.rgb * lerp( g_vecAmbHigh.w, 1.0, sky )
+		+ g_vecAmbLow.rgb * ( skyBounce * g_vecAmbLow.w )
+		+ g_vecSun.rgb * ( sun + fill * g_vecSun.w );
+
+	// r_deferred_gi_debug 3..5: the sky visibility / the sun bounce / the weights alone
+	if ( g_vecAtlas.w > 2.5 )
+	{
+		if ( g_vecAtlas.w < 3.5 )
+			light = sky.xxx;
+		else if ( g_vecAtlas.w < 4.5 )
+			light = sun + fill;
+		else
+			light = float3( saturate( wsum * 4.0 ), coverage, 0 );
+	}
+
+	return float4( light / Shape( N ), coverage * saturate( wsum * 16.0 ) );
+}

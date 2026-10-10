@@ -1,0 +1,103 @@
+//========= HL2RPM ============================================================//
+//
+// Bloom chain (deferred_postfx.cpp in the client), on mip levels packed in two
+// render targets:
+//   PASS 0: the frame -> half resolution: linear, x exposure, the bright part
+//           (soft threshold), 13 tap downsample with a Karis average (no fireflies)
+//   PASS 1: 13 tap downsample of the level above (Jimenez 2014)
+//   PASS 2: 9 tap tent upsample of a smaller level, added (blending) onto the
+//           level above it
+// Reads are clamped to the source level's rectangle (the levels share targets).
+//
+//=============================================================================//
+
+// STATIC: "PASS" "0..2"
+
+#include "common_ps_fxc.h"
+#include "hl2rpm_post_common.h"
+
+sampler sSrc			: register( s0 );
+sampler sLum			: register( s1 );	// PASS 0: adapted log luminance (1x1)
+
+const float4 g_vecTexel		: register( c0 );	// xy texel size of the source, z upsample radius (texels)
+const float4 g_vecClamp		: register( c1 );	// source rectangle (uv): xy min, zw max
+const float4 g_vecBloom		: register( c2 );	// x threshold, y knee (PASS 0), z weight of this level (PASS 2)
+const float4 g_vecExposure	: register( c3 );	// see PostExposure
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+};
+
+float3 Tap( float2 uv )
+{
+	return tex2Dlod( sSrc, float4( clamp( uv, g_vecClamp.xy, g_vecClamp.zw ), 0, 0 ) ).rgb;
+}
+
+#if PASS == 0
+float3 Bright( float3 c, float exposure )
+{
+	const float3 lin = PostToLinear( c ) * exposure;
+	const float br = max( lin.r, max( lin.g, lin.b ) );
+	const float knee = g_vecBloom.y;
+	float soft = clamp( br - g_vecBloom.x + knee, 0.0, 2.0 * knee );
+	soft = soft * soft / ( 4.0 * knee + 1e-5 );
+	const float contrib = max( soft, br - g_vecBloom.x ) / max( br, 1e-5 );
+	return lin * contrib;
+}
+
+// a group of 4 taps, each weighted down by its brightness (Karis)
+float3 Group( float3 a, float3 b, float3 c, float3 d )
+{
+	const float wa = 1.0 / ( 1.0 + dot( a, g_vecLumWeights ) );
+	const float wb = 1.0 / ( 1.0 + dot( b, g_vecLumWeights ) );
+	const float wc = 1.0 / ( 1.0 + dot( c, g_vecLumWeights ) );
+	const float wd = 1.0 / ( 1.0 + dot( d, g_vecLumWeights ) );
+	return ( a * wa + b * wb + c * wc + d * wd ) / ( wa + wb + wc + wd );
+}
+#endif
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	const float2 uv = In.vTexCoord;
+	const float2 t = g_vecTexel.xy;
+
+#if PASS <= 1
+	float3 a = Tap( uv + t * float2( -2, -2 ) );
+	float3 b = Tap( uv + t * float2(  0, -2 ) );
+	float3 c = Tap( uv + t * float2(  2, -2 ) );
+	float3 d = Tap( uv + t * float2( -1, -1 ) );
+	float3 e = Tap( uv + t * float2(  1, -1 ) );
+	float3 f = Tap( uv + t * float2( -2,  0 ) );
+	float3 g = Tap( uv );
+	float3 h = Tap( uv + t * float2(  2,  0 ) );
+	float3 i = Tap( uv + t * float2( -1,  1 ) );
+	float3 j = Tap( uv + t * float2(  1,  1 ) );
+	float3 k = Tap( uv + t * float2( -2,  2 ) );
+	float3 l = Tap( uv + t * float2(  0,  2 ) );
+	float3 m = Tap( uv + t * float2(  2,  2 ) );
+
+#	if PASS == 0
+	const float exposure = PostExposure( tex2D( sLum, float2( 0.5, 0.5 ) ).r, g_vecExposure );
+	a = Bright( a, exposure ); b = Bright( b, exposure ); c = Bright( c, exposure );
+	d = Bright( d, exposure ); e = Bright( e, exposure ); f = Bright( f, exposure );
+	g = Bright( g, exposure ); h = Bright( h, exposure ); i = Bright( i, exposure );
+	j = Bright( j, exposure ); k = Bright( k, exposure ); l = Bright( l, exposure );
+	m = Bright( m, exposure );
+	const float3 sum = Group( d, e, i, j ) * 0.5
+		+ ( Group( a, b, f, g ) + Group( b, c, g, h ) + Group( f, g, k, l ) + Group( g, h, l, m ) ) * 0.125;
+#	else
+	const float3 sum = ( d + e + i + j ) * 0.125
+		+ ( a + b + f + g ) * 0.03125 + ( b + c + g + h ) * 0.03125
+		+ ( f + g + k + l ) * 0.03125 + ( g + h + l + m ) * 0.03125;
+#	endif
+	return float4( sum, 1 );
+#else
+	const float2 r = t * g_vecTexel.z;
+	float3 s = Tap( uv ) * 4.0;
+	s += ( Tap( uv + float2( -r.x, 0 ) ) + Tap( uv + float2( r.x, 0 ) ) + Tap( uv + float2( 0, -r.y ) ) + Tap( uv + float2( 0, r.y ) ) ) * 2.0;
+	s += Tap( uv - r ) + Tap( uv + r ) + Tap( uv + float2( r.x, -r.y ) ) + Tap( uv + float2( -r.x, r.y ) );
+	return float4( s * ( g_vecBloom.z / 16.0 ), 1 );
+#endif
+}

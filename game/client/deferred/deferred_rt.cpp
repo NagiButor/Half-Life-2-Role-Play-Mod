@@ -5,6 +5,9 @@
 #include "materialsystem/itexture.h"
 #include "weather/weather_render.h"
 #include "deferred/deferred_ssao.h"
+#include "deferred/deferred_gi.h"
+#include "deferred/deferred_postfx.h"
+#include "deferred/deferred_taa.h"
 
 #include "tier0/memdbgon.h"
 
@@ -403,6 +406,9 @@ const ImageFormat fmt_gbuffer0 =
 		// HL2RPM: clouds, rain occlusion map, ambient occlusion
 		InitWeatherRTs();
 		InitSSAORTs();
+		InitGIRTs();
+		InitPostFXRTs();
+		InitTAARTs();
 
 #if DEFCFG_ENABLE_RADIOSITY
 		for ( int i = 0; i < 2; i++ )

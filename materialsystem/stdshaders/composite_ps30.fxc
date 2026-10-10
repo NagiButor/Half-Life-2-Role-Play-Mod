@@ -83,6 +83,7 @@ const float4 g_vecFallbackLight			: register( c22 );	// lighting of points the m
 
 const float2 g_vecFullScreenTexel		: register( c1 );
 const float4 g_vecFogParams				: register( c2 );
+const float4 g_vecCaustics				: register( c23 );	// HL2RPM: x strength (0 = off), y time, z 1 / pattern size (units), w mip bias of the albedo (TAA)
 const float3 g_vecOrigin				: register( c3 );
 
 const float g_flPhongScale				: register( c4 );
@@ -186,14 +187,22 @@ struct PS_OUTPUT
 };
 
 
+// HL2RPM: with TAA the frame is the average of jittered frames - a box filter of a pixel on
+// top of the texture filtering: textures looked soft. They are sampled a little sharper then
+// (negative mip bias, c23.w); TAA resolves what that would alias.
+float4 SampleAlbedo( sampler s, float2 uv )
+{
+	return tex2Dbias( s, float4( uv, 0.0f, g_vecCaustics.w ) );
+}
+
 PS_OUTPUT main( const PS_INPUT In )
 {
 	PS_OUTPUT Out;
 
-	float4 flAlbedoSample = tex2D( sAlbedo, In.vTexCoord.xy );
+	float4 flAlbedoSample = SampleAlbedo( sAlbedo, In.vTexCoord.xy );
 
 #if BASETEXTURE2
-	float4 flAlbedoSample2 = tex2D( sAlbedo2, In.vTexCoord.xy );
+	float4 flAlbedoSample2 = SampleAlbedo( sAlbedo2, In.vTexCoord.xy );
 	float flBlendfactor = In.vColor_0.w;
 #if BLENDMODULATE
 	flBlendfactor = GetModulatedBlend( flBlendfactor, tex2D( sBlendmodulate, In.vTexCoord.zw ).rg );
@@ -217,9 +226,9 @@ PS_OUTPUT main( const PS_INPUT In )
 	flBlendFactors.w = remaining;
 
 	flAlbedoSample = flAlbedoSample * flBlendFactors.x
-		+ tex2D( sAlbedo2, In.vTexCoord.xy ) * flBlendFactors.y
-		+ tex2D( sAlbedo3, In.vTexCoord.xy ) * flBlendFactors.z
-		+ tex2D( sAlbedo4, In.vTexCoord.xy ) * flBlendFactors.w;
+		+ SampleAlbedo( sAlbedo2, In.vTexCoord.xy ) * flBlendFactors.y
+		+ SampleAlbedo( sAlbedo3, In.vTexCoord.xy ) * flBlendFactors.z
+		+ SampleAlbedo( sAlbedo4, In.vTexCoord.xy ) * flBlendFactors.w;
 
 	flAlbedoSample.rgb *= In.vColorBlend1.rgb * flBlendFactors.x
 		+ In.vColorBlend2.rgb * flBlendFactors.y
@@ -228,7 +237,8 @@ PS_OUTPUT main( const PS_INPUT In )
 #endif
 
 #if ALPHATEST
-	clip( flAlbedoSample.a - g_flAlphaRef );
+	// (the coverage exactly as the G-buffer pass tests it: the base texture, no mip bias)
+	clip( tex2D( sAlbedo, In.vTexCoord.xy ).a - g_flAlphaRef );
 #endif
 
 #if TRANSLUCENT
@@ -425,6 +435,40 @@ PS_OUTPUT main( const PS_INPUT In )
 #if !TRANSLUCENT
 	Out.vColor_0.w = sqrt( flDepthUnder );
 #endif
+
+	// HL2RPM: caustics - the sun light the waves focus into moving bright lines on what lies under
+	// the water, only where it is sunlit (bright light buffer), fading in below the surface and
+	// out with depth (iterated warp, after Dave Hoskins' tileable water caustic). There the
+	// position itself (~ -250) scaled the line terms; here that magnitude is a constant: the
+	// pattern tiles without seams and looks the same everywhere (with the world position it
+	// blew up into white near the map origin). The light is redistributed - the mean stays.
+	[branch]
+	if ( g_vecCaustics.x > 0.0f )
+	{
+		const float flUnder = g_vecFogParams.y - In.vWorldPos.z;
+		const float flFade = saturate( flUnder / 6.0f ) * saturate( 1.0f - flUnder / 320.0f );
+		const float flSunlit = saturate( ( dot( flLighting.xyz, float3( 0.3f, 0.59f, 0.11f ) ) - 0.25f ) * 1.5f );
+		[branch]
+		if ( flFade * flSunlit > 0.001f )
+		{
+			const float2 p = frac( In.vWorldPos.xy * g_vecCaustics.z ) * 6.2831853f;
+			float2 w = p;
+			float c = 1.0f;
+			[unroll]
+			for ( int n = 0; n < 4; n++ )
+			{
+				const float tt = g_vecCaustics.y * ( 1.0f - 3.5f / ( n + 1.0f ) );
+				w = p + float2( cos( tt - w.x ) + sin( tt + w.y ), sin( tt - w.y ) + cos( tt + w.x ) );
+				const float s = sin( w.x + tt );
+				const float k = cos( w.y + tt );
+				// 1 / length( 1.25 / s, 1.25 / k )
+				c += abs( s * k ) * rsqrt( s * s + k * k + 1e-6f ) * 0.8f;
+			}
+			c = 1.17f - pow( c * 0.25f, 1.4f );
+			const float flCaustic = pow( c, 8.0f );	// mean ~0.13, lines up to ~1.1
+			Out.vColor_0.xyz *= max( 1.0f + ( flCaustic * 2.0f - 0.26f ) * ( g_vecCaustics.x * flFade * flSunlit ), 0.0f );
+		}
+	}
 #endif
 
 	return Out;

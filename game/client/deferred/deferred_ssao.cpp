@@ -214,3 +214,34 @@ void DeferredSSAO_Render( const CViewSetup &view )
 	pRenderContext->DrawScreenSpaceRectangle( g_pMatSSAOBlurV, 0, 0, w, h, 0, 0, w - 1, h - 1, w, h );
 	pRenderContext->PopRenderTargetAndViewport();
 }
+
+// HL2RPM debug: what the raw rain map depth holds (a stall - only when asked)
+CON_COMMAND_F( r_deferred_rainraw_dump, "Debug: min / max / mean of the raw rain map depth (R32F)", FCVAR_CHEAT )
+{
+	ITexture *pRaw = materials->FindTexture( ( args.ArgC() > 1 ) ? args[1] : "_rt_hl2rpm_rainmap_raw", TEXTURE_GROUP_RENDER_TARGET, false );
+	if ( !pRaw || pRaw->IsError() || pRaw->GetImageFormat() != IMAGE_FORMAT_R32F )
+	{
+		Msg( "[rainraw] no texture\n" );
+		return;
+	}
+	const int w = pRaw->GetActualWidth();
+	const int h = pRaw->GetActualHeight();
+	CUtlVector< float > buf;
+	buf.SetCount( w * h );
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->PushRenderTargetAndViewport( pRaw, 0, 0, w, h );
+	pRenderContext->ReadPixels( 0, 0, w, h, (unsigned char *)buf.Base(), IMAGE_FORMAT_R32F );
+	pRenderContext->PopRenderTargetAndViewport();
+	float flMin = FLT_MAX, flMax = -FLT_MAX;
+	double flSum = 0.0;
+	int nOne = 0;
+	for ( int i = 0; i < w * h; i++ )
+	{
+		flMin = Min( flMin, buf[i] );
+		flMax = Max( flMax, buf[i] );
+		flSum += buf[i];
+		nOne += ( buf[i] > 0.9999f ) ? 1 : 0;
+	}
+	Msg( "[rainraw] %dx%d: min %.5f max %.5f mean %.5f, %d%% at 1.0; center %.5f\n", w, h, flMin, flMax, flSum / ( w * h ),
+		nOne * 100 / ( w * h ), buf[ ( h / 2 ) * w + w / 2 ] );
+}

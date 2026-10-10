@@ -74,7 +74,8 @@ void DrawWater( in DrawWater_params_t i,
 	float2 unwarpedRefractTexCoord = i.vReflectXY_vRefractYX.wz * ooW;
 
 #if ABOVEWATER
-	float waterFogDepthValue = DecodeRefractFog( tex2D( RefractSampler, unwarpedRefractTexCoord ).a, i );
+	const float flRefractAlpha = tex2D( RefractSampler, unwarpedRefractTexCoord ).a;
+	float waterFogDepthValue = DecodeRefractFog( flRefractAlpha, i );
 #else
 	// We don't actually have valid depth values in alpha when we are underwater looking out, so 
 	// just set to farthest value.
@@ -242,6 +243,20 @@ void DrawWater( in DrawWater_params_t i,
 	{
 		result = float4( 0.0f, 0.0f, 0.0f, 0.0f );
 	}
+
+#if ABOVEWATER
+	// HL2RPM: foam where the water is shallow - along the shore and around whatever stands in it
+	// (with the deferred renderer the refraction alpha is the depth under the surface), broken up
+	// by the waves (the slopes of the normal map, which scrolls with the water)
+	if ( i.fRefractDepthEncoded > 0.5f )
+	{
+		const float flDepthUnits = flRefractAlpha * flRefractAlpha * 1024.0f;
+		const float flShore = saturate( 1.0f - flDepthUnits / 8.0f );
+		const float flTurb = saturate( length( vNormal.xy ) * 4.0f );
+		const float flFoam = flShore * saturate( flTurb + flShore * 0.5f - 0.3f );
+		result.rgb = lerp( result.rgb, i.vReflectTint.rgb * 0.8f, flFoam * 0.7f );
+	}
+#endif
 
 #if (PIXELFOGTYPE == PIXEL_FOG_TYPE_RANGE)
 	fogFactor = CalcRangeFogFactorNonFixedFunction( i.vWorldPos, i.vEyePos, i.pixelFogParams.z, i.pixelFogParams.x, i.pixelFogParams.w );

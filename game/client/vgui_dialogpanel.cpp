@@ -1176,3 +1176,10 @@ static void __Cmd_Dialog_Set_Option_Delay(const CCommand &args)
     }
 }
 static ConCommand dialog_set_option_delay("dialog_set_option_delay", __Cmd_Dialog_Set_Option_Delay, "Set delay (seconds) before dialog options appear (client)", FCVAR_CLIENTDLL);
+
+// HL2RPM: whether a dialog with an NPC is on screen (the depth of field focuses on the NPC
+// then: deferred_postfx.cpp)
+bool HL2RPM_IsDialogOpen()
+{
+    return s_pDialogPanel != nullptr && s_pDialogPanel->IsVisible();
+}

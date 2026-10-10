@@ -63,6 +63,8 @@ public:
 	float GetParticleLightScale() const { return m_flParticleLightScale; }
 	// brightness of the world now relative to the daylight the cubemaps were baked in
 	float GetEnvLightScale() const { return m_flEnvLightScale; }
+	// HL2RPM dev: how wet the ground is right now (tests without waiting for the rain)
+	void SetWetness( float flWetness, float flPuddles ) { m_flWetness = clamp( flWetness, 0.0f, 1.0f ); m_flPuddles = clamp( flPuddles, 0.0f, m_flWetness ); }
 	const Vector &GetMoonDir() const { return m_vecMoonDir; }
 	const Vector &GetSunDir() const { return m_vecSunDir; }
 	Vector2D GetWindDir() const { return m_vecWindDir; }

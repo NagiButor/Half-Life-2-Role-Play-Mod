@@ -1,0 +1,30 @@
+//========= HL2RPM ============================================================//
+//
+// Writes GI probe data (deferred_gi.cpp in the client) into the probe atlas:
+// tiny quads already in clip space, one texel each, the data in TEXCOORD0.
+// Drawing them goes through the render thread like any draw - locking the
+// texture from the main thread would stall it.
+//
+//=============================================================================//
+
+#include "common_vs_fxc.h"
+
+struct VS_INPUT
+{
+	float4 vPos				: POSITION;
+	float4 vData			: TEXCOORD0;
+};
+
+struct VS_OUTPUT
+{
+	float4 vProjPos			: POSITION;
+	float4 vData			: TEXCOORD0;
+};
+
+VS_OUTPUT main( const VS_INPUT v )
+{
+	VS_OUTPUT o;
+	o.vProjPos = float4( v.vPos.xy, 0.5, 1.0 );
+	o.vData = v.vData;
+	return o;
+}

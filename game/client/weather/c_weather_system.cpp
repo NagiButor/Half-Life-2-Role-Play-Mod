@@ -18,6 +18,17 @@
 #include "tier0/memdbgon.h"
 
 static C_WeatherSystem g_WeatherSystem;
+
+CON_COMMAND_F( cl_weather_set_wetness, "Dev: set the ground's wetness and puddles now: cl_weather_set_wetness <0..1> [puddles 0..1]", FCVAR_CHEAT )
+{
+	if ( args.ArgC() < 2 )
+	{
+		Msg( "wetness %.2f puddles %.2f\n", g_WeatherSystem.GetWetness(), g_WeatherSystem.GetPuddles() );
+		return;
+	}
+	const float flWet = atof( args[1] );
+	g_WeatherSystem.SetWetness( flWet, ( args.ArgC() > 2 ) ? atof( args[2] ) : flWet );
+}
 C_WeatherSystem *GetWeatherSystem()
 {
 	return &g_WeatherSystem;

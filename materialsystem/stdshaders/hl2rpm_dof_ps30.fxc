@@ -1,0 +1,77 @@
+//========= HL2RPM ============================================================//
+//
+// Depth of field (deferred_postfx.cpp in the client): what lies beyond the plane
+// the camera is focused on goes out of focus by the thin lens' circle of confusion,
+// coc = C * ( 1 / focus - 1 / depth ) pixels, C from the focal length of the current
+// field of view - a zoomed view is a long lens with a shallow field.
+//
+// One gather pass: a disk of the pixel's own circle; a tap counts if its circle
+// reaches the pixel - so sharp things in front (the weapon, the character in focus)
+// don't bleed into the blur behind them. Nothing closer than the focus is blurred.
+// The disk is turned per pixel and frame; TAA, which runs after it, evens that out.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+sampler sFrame				: register( s0 );	// the frame (gamma space)
+sampler sDepth				: register( s1 );	// G-buffer linear depth
+
+const float4 g_vecTexel		: register( c0 );	// xy 1 / texture size, zw texture size
+const float4 g_vecDoF		: register( c1 );	// x circle scale C (pixels x units), y 1 / focus distance, z largest radius (pixels), w debug
+const float4 g_vecDoF2		: register( c2 );	// x frame number (turn of the disk)
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+	float2 vScreenPos			: VPOS;
+};
+
+#define DOF_TAPS 16
+
+float CircleOfConfusion( float depth )
+{
+	// nothing drawn (the sky): infinitely far
+	const float invDepth = ( depth > 0.1 ) ? 1.0 / depth : 0.0;
+	return min( g_vecDoF.x * max( g_vecDoF.y - invDepth, 0.0 ), g_vecDoF.z );
+}
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	const float2 uv = In.vTexCoord;
+	const float3 center = tex2Dlod( sFrame, float4( uv, 0, 0 ) ).rgb;
+	const float coc = CircleOfConfusion( tex2Dlod( sDepth, float4( uv, 0, 0 ) ).x );
+
+	if ( g_vecDoF.w > 0.5 )
+		return float4( lerp( dot( center, float3( 0.299, 0.587, 0.114 ) ).xxx * 0.6, float3( 1.0, 0.3, 0.1 ), saturate( coc / max( g_vecDoF.z, 1.0 ) ) ), 1.0 );
+
+	[branch]
+	if ( coc < 0.6 )
+		return float4( center, 1.0 );
+
+	// interleaved gradient noise: the turn of the disk
+	const float noise = frac( 52.9829189 * frac( dot( In.vScreenPos + g_vecDoF2.x * 5.588238, float2( 0.06711056, 0.00583715 ) ) ) );
+	const float angle0 = noise * 6.28318531;
+
+	float3 sum = center;
+	float wsum = 1.0;
+	[unroll]
+	for ( int i = 0; i < DOF_TAPS; i++ )
+	{
+		// Vogel disk
+		const float r = sqrt( ( i + 0.5 ) / DOF_TAPS ) * coc;
+		const float a = i * 2.39996323 + angle0;
+		const float2 tuv = uv + float2( cos( a ), sin( a ) ) * r * g_vecTexel.xy;
+
+		const float3 s = tex2Dlod( sFrame, float4( tuv, 0, 0 ) ).rgb;
+		const float tcoc = CircleOfConfusion( tex2Dlod( sDepth, float4( tuv, 0, 0 ) ).x );
+
+		// the tap's own circle must reach this pixel
+		const float w = saturate( tcoc - r + 1.0 );
+		sum += s * w;
+		wsum += w;
+	}
+
+	return float4( sum / wsum, 1.0 );
+}
