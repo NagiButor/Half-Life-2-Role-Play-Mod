@@ -102,7 +102,8 @@ python check_shader_combos.py   # .vcs и C++ должны совпадать: 0
 
 1. Steam: **Source SDK Base 2013 Singleplayer** (appid 243730), Half-Life 2, Episode One, Episode Two.
 2. В `steamapps\sourcemods` — папки Mapbase (`mapbase_shared`, `mapbase_hl2`, `mapbase_episodic`).
-3. Распаковать архив `hl2rpm-vX.Y.zip` из Releases в `steamapps\sourcemods\hl2rpm`, перезапустить Steam.
+3. Распаковать архив `hl2rpm-vX.Y.zip` из Releases в `steamapps\sourcemods` (в архиве уже лежит
+   папка `hl2rpm`), перезапустить Steam.
 
 Исходники карт (`.vmf`) и FGD для Hammer++ — архивы `hl2rpm-mapsrc-*.zip` и `hl2rpm-fgds-*.zip`
 там же; порядок загрузки FGD описан в `CLAUDE.md`.
