@@ -122,6 +122,10 @@ float CloudDensity( float3 pos, float h01, bool bDetail )
 	float type = saturate( g_vecCloud0.z + ( wm.g - 0.5 ) * 0.7 );
 
 	float3 shapePos = float3( pos.xy, h01 * g_vecCloud1.y * 1.6 + g_vecCloud1.w * 3.0 ) / SHAPE_PERIOD;
+	// HL2RPM: the shape noise repeats every 8 km: with few clouds the same ones stood in every
+	// tile, row behind row toward the horizon. Shifted by the weather map's medium scale noise
+	// (up to +-0.3 of a tile, changing over kilometers) no two tiles look alike.
+	shapePos.xy += ( wm.ba - 0.5 ) * 0.6;
 	float4 shapeNoise = Noise3D( shapePos );
 	float shape = StretchShape( Remap( shapeNoise.r, ( shapeNoise.g * 0.625 + shapeNoise.b * 0.25 + shapeNoise.a * 0.125 ) - 1.0, 1.0, 0.0, 1.0 ) );
 

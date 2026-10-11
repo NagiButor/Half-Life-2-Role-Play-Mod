@@ -44,6 +44,15 @@ struct defParms_composite
 	int iPhongScale;
 	int iPhongFresnel;
 
+	// HL2RPM (PBR, hl2rpm_pbr.h)
+	int iMetalness;
+	int iSpecular;
+	// HL2RPM: the relief of a brush material, the wind in a tree, the light through a leaf
+	int iPomHeightmap;
+	int iPomScale;
+	int iTreeSway;
+	int iTransmission;
+
 	// self illum
 	int iSelfIllumTint;
 	int iSelfIllumMaskInEnvmapAlpha;

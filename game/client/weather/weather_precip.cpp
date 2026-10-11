@@ -765,8 +765,48 @@ void C_INIT_HL2RPM_PrecipSplashPosition::InitNewParticlesScalar( CParticleCollec
 	}
 }
 
+// ---------------------------------------------------------------------------
+// "Set Control Point to Impact Point" (operator) and "Color Lit Per Particle" (initializer):
+// functions of later branches of the engine that particle files mounted with the mod use. This
+// engine has none of them: every load of the particle files printed "Didn't find particle
+// function ..." for each use. Registered as functions that do nothing - the systems run as
+// they did (without them), quietly.
+// ---------------------------------------------------------------------------
+class C_OP_HL2RPM_Missing : public CParticleOperatorInstance
+{
+	DECLARE_PARTICLE_OPERATOR( C_OP_HL2RPM_Missing );
+
+public:
+	uint32 GetWrittenAttributes( void ) const { return 0; }
+	uint32 GetReadAttributes( void ) const { return 0; }
+	virtual void Operate( CParticleCollection *pParticles, float flStrength, void *pContext ) const {}
+};
+
+DEFINE_PARTICLE_OPERATOR( C_OP_HL2RPM_Missing, "Set Control Point to Impact Point", OPERATOR_GENERIC );
+
+BEGIN_PARTICLE_OPERATOR_UNPACK( C_OP_HL2RPM_Missing )
+END_PARTICLE_OPERATOR_UNPACK( C_OP_HL2RPM_Missing )
+
+class C_INIT_HL2RPM_Missing : public CParticleOperatorInstance
+{
+	DECLARE_PARTICLE_OPERATOR( C_INIT_HL2RPM_Missing );
+
+public:
+	uint32 GetWrittenAttributes( void ) const { return 0; }
+	uint32 GetReadAttributes( void ) const { return 0; }
+	virtual void InitNewParticlesScalar( CParticleCollection *pParticles, int start_p,
+		int nParticleCount, int nAttributeWriteMask, void *pContext ) const {}
+};
+
+DEFINE_PARTICLE_OPERATOR( C_INIT_HL2RPM_Missing, "Color Lit Per Particle", OPERATOR_GENERIC );
+
+BEGIN_PARTICLE_OPERATOR_UNPACK( C_INIT_HL2RPM_Missing )
+END_PARTICLE_OPERATOR_UNPACK( C_INIT_HL2RPM_Missing )
+
 void WeatherPrecip_AddParticleOperators()
 {
+	REGISTER_PARTICLE_OPERATOR( FUNCTION_OPERATOR, C_OP_HL2RPM_Missing );
+	REGISTER_PARTICLE_OPERATOR( FUNCTION_INITIALIZER, C_INIT_HL2RPM_Missing );
 	REGISTER_PARTICLE_OPERATOR( FUNCTION_INITIALIZER, C_INIT_HL2RPM_PrecipCull );
 	REGISTER_PARTICLE_OPERATOR( FUNCTION_INITIALIZER, C_INIT_HL2RPM_PrecipSpawn );
 	REGISTER_PARTICLE_OPERATOR( FUNCTION_INITIALIZER, C_INIT_HL2RPM_PrecipCover );

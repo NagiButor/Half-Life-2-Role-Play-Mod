@@ -34,6 +34,8 @@ sampler ReflectSampler			: register( s2 );
 sampler LightmapSampler			: register( s3 );
 #endif
 sampler NormalSampler			: register( s4 );
+sampler LightSampler			: register( s6 );	// HL2RPM: the light buffer of the deferred renderer (water.cpp)
+sampler SkySampler				: register( s7 );	// HL2RPM: its SSAO target (g: the sky visibility)
 
 const HALF4 vRefractTint			: register( c1 );
 const HALF4 vReflectTint			: register( c4 );
@@ -44,6 +46,9 @@ const HALF4 g_WaterFogParams		: register( c7 );
 const float4 g_PixelFogParams		: register( c8 );
 
 const float3 g_EyePos				: register( c9 );
+const float4 g_FoamColor			: register( c10 );	// HL2RPM (water.cpp)
+const float4 g_BodyLight			: register( c11 );	// HL2RPM (water.cpp, water_ps2x_helper.h)
+const float4 g_BodyAmbient			: register( c12 );
 
 #define g_WaterFogStart			g_WaterFogParams.x
 #define g_WaterFogEndMinusStart	g_WaterFogParams.y
@@ -95,6 +100,9 @@ float4 main( PS_INPUT i ) : COLOR
 	params.fWaterFogStart = g_WaterFogStart;
 	params.fWaterFogEndMinusStart = g_WaterFogEndMinusStart;
 	params.fRefractDepthEncoded = g_WaterFogParams.w;	// HL2RPM (water.cpp)
+	params.vFoamColor = g_FoamColor;
+	params.vBodyLight = g_BodyLight;
+	params.vBodyAmbient = g_BodyAmbient;
 	params.vEyePos = g_EyePos;
 	params.vWorldPos = i.vWorldPos_projPosW.xyz;
 
@@ -106,7 +114,7 @@ float4 main( PS_INPUT i ) : COLOR
 			   BaseTextureSampler, 
 			   LightmapSampler, 
 #endif
-			   NormalSampler, RefractSampler, ReflectSampler,
+			   NormalSampler, RefractSampler, ReflectSampler, LightSampler, SkySampler,
 			   result, fogFactor );
 
 	return FinalOutput( float4( result.rgb, 1.0f ), fogFactor, PIXELFOGTYPE, TONEMAP_SCALE_NONE, (WRITE_DEPTH_TO_DESTALPHA != 0), i.vProjPos.z );

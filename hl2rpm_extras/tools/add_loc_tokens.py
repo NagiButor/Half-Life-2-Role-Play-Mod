@@ -50,6 +50,7 @@ TOKENS = [
     ("HL2RPM_Gfx_SoftShadows", "Мягкие тени солнца", "Soft sun shadows"),
     ("HL2RPM_Gfx_Bounce", "Отражённый свет ламп", "Bounced lamp light"),
     ("HL2RPM_Gfx_WaterReflect", "Отражения в воде", "Water reflections"),
+    ("HL2RPM_Gfx_PBR", "Блики и отражения (PBR)", "Highlights and reflections (PBR)"),
     ("HL2RPM_Gfx_Q_VeryLow", "Очень низкое", "Very low"),
     ("HL2RPM_Gfx_Q_Low", "Низкое", "Low"),
     ("HL2RPM_Gfx_Q_Medium", "Среднее", "Medium"),

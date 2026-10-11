@@ -67,4 +67,8 @@ void WeatherRender_LevelInit();
 // fog (gamma space) when the dynamic weather runs; false otherwise
 bool WeatherRender_GetSkyboxFogColor( float *pColor );
 
+// The weather's height fog as the engine's linear fog (start / end / max density) for what is
+// drawn after the weather pass - water, particles, glass, translucent models. false = no fog.
+bool WeatherRender_GetForwardFog( float &flStart, float &flEnd, float &flMaxDensity );
+
 #endif // WEATHER_RENDER_H

@@ -68,6 +68,8 @@ public:
 	const Vector &GetMoonDir() const { return m_vecMoonDir; }
 	const Vector &GetSunDir() const { return m_vecSunDir; }
 	Vector2D GetWindDir() const { return m_vecWindDir; }
+	// how far the wind carries the rain sideways per unit fallen (trees and grass lean by it)
+	Vector2D GetRainSlant() const;
 
 	// called by CDeferredLightGlobal::GetState (sun/moon + weather lighting)
 	void ModifyGlobalLight( lightData_Global_t &data, const Vector &vecBaseDiffuse, const Vector &vecBaseAmbHigh ) const;
@@ -92,7 +94,6 @@ private:
 	void UpdateSkyExposure( float dt );
 	void UpdateAudio( float dt );
 	void UpdatePrecipitation();
-	Vector2D GetRainSlant() const;
 	void StopAudio();
 
 	void TriggerLightning( int iForceClass );

@@ -22,6 +22,39 @@
 static ConVar r_waterforceexpensive( "r_waterforceexpensive", "0", FCVAR_ARCHIVE );
 #endif
 
+// HL2RPM: the water's own color with the deferred renderer (water_ps2x_helper.h)
+static ConVar r_deferred_water_density( "r_deferred_water_density", "1.0", FCVAR_ARCHIVE,
+	"Water: density of its fog compared to what the material says ($fogstart / $fogend)", true, 0.1f, true, 4.0f );
+static ConVar r_deferred_water_viewangle( "r_deferred_water_viewangle", "1", 0,
+	"Water: its fog goes by the path of the view ray through the water (clearer from above, murkier from the bank); 0 = by the depth alone, like the stock shader" );
+static ConVar r_deferred_water_lit( "r_deferred_water_lit", "1", 0,
+	"Water: its own color is lit by the light at the place (sun, shadow, lamps); 0 = by the time of day alone" );
+// HL2RPM: the waters that only refract (the low dirty water of the canals, the sewers) take
+// their reflection from a cubemap in a second, cheap pass: baked once - the map's noon sky at
+// night, nothing of what stands at the water - or never built at all (the default cubemap: white
+// streaks on black water). With the deferred renderer they get the real-time reflection the
+// other waters have (decided when the material loads: the water materials are loaded anew when
+// this changes).
+static void WaterReflectAllChanged( IConVar *pVar, const char *pszOldValue, float flOldValue )
+{
+	ConVarRef var( pVar );
+	if ( ( var.GetFloat() != 0.0f ) == ( flOldValue != 0.0f ) || !g_pCVar )
+		return;
+	ConCommand *pReload = g_pCVar->FindCommand( "mat_reloadmaterial" );
+	if ( pReload )
+	{
+		const char *ppArgs[2] = { "mat_reloadmaterial", "water" };
+		pReload->Dispatch( CCommand( 2, ppArgs ) );
+	}
+}
+static ConVar r_deferred_water_reflect_all( "r_deferred_water_reflect_all", "1", FCVAR_ARCHIVE,
+	"Water: the waters that only refract get the real-time reflection too (instead of their baked cubemap)", WaterReflectAllChanged );
+
+static ConVar r_deferred_water_debugview( "r_deferred_water_debugview", "0", FCVAR_CHEAT,
+	"Water: 1 = the reflection's share (fresnel), 2 = N.V / normal z / eye z, 3 = the light of the water's own color (x 0.5), 4 = its fog" );
+static ConVar r_deferred_water_scatter( "r_deferred_water_scatter", "0.25", FCVAR_ARCHIVE,
+	"Water: how much of the open daylight its own color keeps in a shadow under the open sky (the light a murky water passes on inside itself)", true, 0.0f, true, 1.0f );
+
 DEFINE_FALLBACK_SHADER( SDK_Water, SDK_Water_DX9_HDR )
 
 BEGIN_VS_SHADER( SDK_Water_DX90, 
@@ -63,7 +96,8 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 	{
 		if( !params[ABOVEWATER]->IsDefined() )
 		{
-			Warning( "***need to set $abovewater for material %s\n", pMaterialName );
+			// (HL2RPM: a developer message, not a warning at every load of such a material)
+			DevMsg( 2, "$abovewater not set for material %s: taken as seen from above\n", pMaterialName );
 			params[ABOVEWATER]->SetIntValue( 1 );
 		}
 		SET_FLAGS2( MATERIAL_VAR2_NEEDS_TANGENT_SPACES );
@@ -113,6 +147,18 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 		if( params[FORCEEXPENSIVE]->GetIntValue() && params[FORCECHEAP]->GetIntValue() )
 		{
 			params[FORCEEXPENSIVE]->SetIntValue( 0 );
+		}
+
+		// HL2RPM: see r_deferred_water_reflect_all (the surface seen from above only: the
+		// materials of the underside have no reflection)
+		if ( r_deferred_water_reflect_all.GetBool() && GetDeferredExt()->IsDeferredLightingEnabled()
+			&& !params[REFLECTTEXTURE]->IsDefined() && params[REFRACTTEXTURE]->IsDefined()
+			&& params[FORCEEXPENSIVE]->GetIntValue() != 0 && params[FORCECHEAP]->GetIntValue() == 0
+			&& params[ABOVEWATER]->GetIntValue() != 0 )
+		{
+			params[REFLECTTEXTURE]->SetStringValue( "_rt_WaterReflection" );
+			if ( !params[REFLECTAMOUNT]->IsDefined() )
+				params[REFLECTAMOUNT]->SetFloatValue( 0.2f );
 		}
 
 		// Fallbacks for water need lightmaps usually
@@ -223,6 +269,10 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 			pShaderShadow->EnableTexture( SHADER_SAMPLER4, true );
 			// Normalizing cube map
 			pShaderShadow->EnableTexture( SHADER_SAMPLER5, true );
+			// HL2RPM: the light buffer of the deferred renderer and its sky visibility (the light the
+			// water's color is seen in)
+			pShaderShadow->EnableTexture( SHADER_SAMPLER6, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER7, true );
 
 			int fmt = VERTEX_POSITION | VERTEX_NORMAL | VERTEX_TANGENT_S | VERTEX_TANGENT_T;
 
@@ -382,6 +432,89 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 			// alpha, not the fog of one water (composite_ps30, water_ps2x_helper.h)
 			c7[3] = GetDeferredExt()->IsDeferredLightingEnabled() ? 1.0f : 0.0f;
 			pShaderAPI->SetPixelShaderConstant( 7, c7, 1 );
+
+			// HL2RPM: the foam along the shore, in the light of the moment (sky + sun)
+			float c10[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			if ( GetDeferredExt()->IsDeferredLightingEnabled() )
+			{
+				const weatherData_t &weather = GetDeferredExt()->GetWeatherData();
+				const lightData_Global_t &light = GetDeferredExt()->GetLightData_Global();
+				Vector vecFoam( 0.55f, 0.6f, 0.65f );
+				if ( weather.bEnabled )
+				{
+					const float flSun = clamp( light.vecLight.z, 0.0f, 1.0f ) * 0.3f;
+					vecFoam = weather.vecSkyHorizon.AsVector3D() * 0.85f + light.diff.AsVector3D() * flSun;
+				}
+				const float flMax = MAX( vecFoam.x, MAX( vecFoam.y, vecFoam.z ) );
+				if ( flMax > 0.9f )
+					vecFoam *= 0.9f / flMax;
+				c10[0] = vecFoam.x;
+				c10[1] = vecFoam.y;
+				c10[2] = vecFoam.z;
+				c10[3] = 0.7f;
+			}
+			pShaderAPI->SetPixelShaderConstant( 10, c10, 1 );
+
+			// HL2RPM: the water's own color ($fogcolor - what the water scatters back) in the light
+			// at the place: the deferred light buffer under the pixel, and no less than the light of
+			// the sky where the sky is in sight (the sky visibility of the SSAO target), compared to
+			// the light of the open sky and sun on level ground at the moment (without a lightning
+			// flash: the water lights up with it). $fogcolor itself follows the time of day
+			// (weather_render.cpp), so that light is "1"; a lamp at night can light the water up to
+			// its daylight color.
+			float c11[4] = { 1.0f, 1.0f, 1.0f, 0.0f };
+			float c12[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+			ITexture *pLightAccum = NULL;
+			ITexture *pSkyVis = NULL;
+			if ( GetDeferredExt()->IsDeferredLightingEnabled() )
+			{
+				c11[2] = r_deferred_water_density.GetFloat();
+				c11[3] = r_deferred_water_viewangle.GetBool() ? 1.0f : 0.0f;
+				if ( r_deferred_water_debugview.GetInt() > 0 )
+					c11[3] = 1.0f + r_deferred_water_debugview.GetInt();
+				pLightAccum = r_deferred_water_lit.GetBool() ? GetDeferredExt()->GetTexture_LightAccum() : NULL;
+				if ( pLightAccum )
+				{
+					const weatherData_t &weather = GetDeferredExt()->GetWeatherData();
+					const lightData_Global_t &light = GetDeferredExt()->GetLightData_Global();
+					Vector vecSun = light.diff.AsVector3D();
+					float flUp = light.vecLight.z;
+					float flWorld = 1.0f;
+					if ( weather.bEnabled )
+					{
+						vecSun = weather.vecSkyLightDiff.AsVector3D();
+						flUp = weather.vecSkyLightDir.z;
+						flWorld = clamp( weather.vecSkyZenith.w, 0.03f, 1.2f );
+					}
+					const Vector vecSky = light.ambh.AsVector3D() * GetGISkyBoost( GetDeferredExt()->GetGIData(), weather );
+					const Vector vecOpen = vecSun * clamp( flUp, 0.0f, 1.0f ) + vecSky;
+					const float flOpen = MAX( vecOpen.x * 0.3f + vecOpen.y * 0.59f + vecOpen.z * 0.11f, 0.002f );
+					c11[0] = 1.0f / flOpen;
+					c11[1] = 1.5f / flWorld;
+					// (the least where the sky is in sight: the sky's light and a part of all of it)
+					const float flScatter = r_deferred_water_scatter.GetFloat();
+					c12[0] = ( vecSky.x + vecOpen.x * flScatter ) / flOpen;
+					c12[1] = ( vecSky.y + vecOpen.y * flScatter ) / flOpen;
+					c12[2] = ( vecSky.z + vecOpen.z * flScatter ) / flOpen;
+
+					const ssaoData_t &ao = GetDeferredExt()->GetSSAOData();
+					if ( ao.bEnabled && ao.vecApply.x > 0.0f && ao.vecApply.w > 0.0f )
+					{
+						pSkyVis = GetDeferredExt()->GetTexture_SSAO();
+						c12[3] = ao.vecApply.w;
+					}
+				}
+			}
+			if ( pLightAccum )
+				BindTexture( SHADER_SAMPLER6, pLightAccum );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER6, TEXTURE_WHITE );
+			if ( pSkyVis )
+				BindTexture( SHADER_SAMPLER7, pSkyVis );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER7, TEXTURE_WHITE );
+			pShaderAPI->SetPixelShaderConstant( 11, c11, 1 );
+			pShaderAPI->SetPixelShaderConstant( 12, c12, 1 );
 
 			pShaderAPI->SetPixelShaderFogParams( 8 );
 

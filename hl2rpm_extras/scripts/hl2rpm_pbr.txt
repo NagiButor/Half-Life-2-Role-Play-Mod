@@ -1,0 +1,42 @@
+// HL2RPM: what single materials are made of (physically based materials of the deferred renderer).
+//
+// Every opaque material gets a roughness, a metalness and a specular level by itself - from its
+// $surfaceprop, its folder and its name (r_deferred_pbr_list <text> prints what a material got
+// while it loads). The lines below correct that guess where it is wrong or too coarse:
+//
+//		"<text in the material's name>"		"<roughness> <metalness> <specular>"
+//
+// roughness	0 (a mirror) .. 1 (matte)
+// metalness	0 .. 1 (stock "metal" is painted and rusty: 0.3 - 0.75)
+// specular		the mirror reflection of a non-metal, 1 = the usual 4 %
+// -1			leave that value to the guess
+//
+// The first line that fits a material wins. A material that sets $pbr_roughness, $pbr_metalness or
+// $pbr_specular in its own .vmt keeps its own. After a change: r_deferred_pbr_reload in the console.
+"hl2rpm_pbr"
+{
+	// polished stone and glazed surfaces (their $surfaceprop says "concrete" or "tile")
+	"marble"				"0.22 0 1.3"
+	"tileroof"				"0.60 0 1.0"
+	"tilebreak"				"0.50 0 1.1"
+
+	// floors people walk on are worn smoother than walls
+	"woodfloor"				"0.50 0 1.1"
+	"concretefloor"			"0.74 0 1.0"
+	"cobble"				"0.70 0 1.0"
+	"brickfloor"			"0.72 0 1.0"
+	"stonefloor"			"0.70 0 1.0"
+
+	// walls: raw, matte
+	"plasterwall"			"0.88 0 0.9"
+	"plasterceiling"		"0.90 0 0.9"
+	"brickwall"				"0.86 0 0.9"
+	"stonewall"				"0.84 0 0.9"
+
+	// metals
+	"citadel_metal"			"0.35 0.70 1.0"
+	"metalgrate"			"0.40 0.75 1.0"
+	"metalroof"				"0.55 0.40 1.0"
+	"metalpipe"				"0.40 0.65 1.0"
+	"metaldoor"				"0.48 0.45 1.0"
+}

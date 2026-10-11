@@ -243,19 +243,25 @@ bool DeferredTAA_JitterView( CViewSetup &view, bool bMainView )
 	{
 		// TAA isn't drawn this frame: the history goes stale
 		s_bReset = true;
-		if ( bMainView && s_TAAData.vecParams3.y != 0.0f )
+		if ( bMainView && ( s_TAAData.vecParams3.y != 0.0f || s_TAAData.vecParams3.z != 0.0f ) )
 		{
 			s_TAAData.vecParams3.y = 0.0f;
+			s_TAAData.vecParams3.z = 0.0f;
 			QUEUE_FIRE( CommitTAAData, s_TAAData );
 		}
 		return false;
 	}
 
+	s_iJitterIndex = ( s_iJitterIndex % TAA_JITTER_SAMPLES ) + 1;
+
 	// the composite samples the textures sharper while the frame is jittered
 	s_TAAData.vecParams3.y = r_deferred_taa_mipbias.GetFloat();
+	// (z, w: the frame is accumulated - passes that dither per pixel move their pattern with
+	// the phase w each frame, and the history averages the noise away: contact shadows)
+	s_TAAData.vecParams3.z = 1.0f;
+	s_TAAData.vecParams3.w = fmodf( s_iJitterIndex * 0.61803399f, 1.0f );
 	QUEUE_FIRE( CommitTAAData, s_TAAData );
 
-	s_iJitterIndex = ( s_iJitterIndex % TAA_JITTER_SAMPLES ) + 1;
 	const float flScale = r_deferred_taa_jitter.GetFloat();
 	const float jx = ( Halton( s_iJitterIndex, 2 ) - 0.5f ) * flScale;
 	const float jy = ( Halton( s_iJitterIndex, 3 ) - 0.5f ) * flScale;

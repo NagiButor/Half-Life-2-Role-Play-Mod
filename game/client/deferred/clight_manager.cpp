@@ -20,6 +20,7 @@
 #include "deferred/deferred_gi.h"
 #include "deferred/deferred_postfx.h"
 #include "deferred/deferred_taa.h"
+#include "deferred/deferred_occlusion.h"
 
 #include "tier0/memdbgon.h"
 
@@ -504,6 +505,15 @@ void CLightingManager::PrepareLights()
 	FOR_EACH_VEC_FAST_END
 }
 
+static ConVar r_deferred_light_dark_cull( "r_deferred_light_dark_cull", "0.02", 0,
+	"Lights dimmer than this (brightest color channel) are not drawn and cast no shadows (0 = draw all)", true, 0.0f, true, 1.0f );
+
+static inline bool IsLightDark( const def_light_t *l )
+{
+	const float flDark = r_deferred_light_dark_cull.GetFloat();
+	return l->col_diffuse.x < flDark && l->col_diffuse.y < flDark && l->col_diffuse.z < flDark;
+}
+
 void CLightingManager::UpdateShadowBudget( const Vector &vecViewOrigin )
 {
 	if ( m_iShadowBudgetFrame == gpGlobals->framecount )
@@ -527,6 +537,7 @@ void CLightingManager::UpdateShadowBudget( const Vector &vecViewOrigin )
 	{
 		const bool bEligible = iBudget > 0 &&
 			l->IsPoint() &&
+			!IsLightDark( l ) &&
 			!( l->iFlags & DEFLIGHT_SHADOW_ENABLED ) &&
 			!l->HasVolumetrics() &&		// their volumetrics only render with a shadow: would pop in
 			l->flRadius >= flMinRadius &&
@@ -593,6 +604,12 @@ void CLightingManager::CullLights()
 		if ( !m_bDrawWorldLights && l->bWorldLight )
 			continue;
 
+		// HL2RPM: a light that is all but off - a map's lamps by day are dimmed to a percent or
+		// less - still got its pass and, with the shadow budget, its shadow maps: the 4 nearest
+		// black lamps of demo_map cost 7 ms a frame at noon (27 ms instead of 21)
+		if ( IsLightDark( l ) )
+			continue;
+
 		// FIXME: inaccurate with e.g. angled lights, causes popping - performance impact when disabled
 		if ( !render->AreAnyLeavesVisible( l->iLeaveIDs, l->iNumLeaves ) && r_deferred_light_visleaf_cull.GetBool() )
 			continue;
@@ -604,6 +621,10 @@ void CLightingManager::CullLights()
 
 		if ( engine->CullBox( l->bounds_min_naive, l->bounds_max_naive ) )
 		//if ( engine->CullBox( l->bounds_min, l->bounds_max ) )
+			continue;
+
+		// HL2RPM: all the light reaches is behind walls - no pass and no shadow maps for it
+		if ( DeferredOcclusion_IsBoxHidden( l->bounds_min_naive, l->bounds_max_naive ) )
 			continue;
 
 		if ( l->IsSpot() && l->HasShadow() )

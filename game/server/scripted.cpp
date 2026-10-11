@@ -706,14 +706,15 @@ void CAI_ScriptedSequence::StartScript( void )
 				//
 				// Kicking another script out of the queue.
 				//
-				CAI_ScriptedSequence *pCine = ( CAI_ScriptedSequence * )pTarget->m_hCine->m_hNextCine.Get();
+				// HL2RPM: checked cast (see Activate)
+				CAI_ScriptedSequence *pCine = dynamic_cast< CAI_ScriptedSequence * >( pTarget->m_hCine->m_hNextCine.Get() );
 
-				if (pTarget->m_hCine->m_hNextCine != pTarget->m_hCine)
+				if ( pCine && pTarget->m_hCine->m_hNextCine != pTarget->m_hCine )
 				{
 					// Don't clear the currently playing script's target!
 					pCine->SetTarget( NULL );
 				}
-				ScriptMsg2( 2, "script \"%s\" kicking script \"%s\" out of the queue\n", GetDebugName(), pCine->GetDebugName() );
+				ScriptMsg2( 2, "script \"%s\" kicking script \"%s\" out of the queue\n", GetDebugName(), pCine ? pCine->GetDebugName() : "?" );
 			}
 
 			pTarget->m_hCine->m_hNextCine = this;
@@ -1163,13 +1164,14 @@ void CAI_ScriptedSequence::PostIdleDone( CAI_BaseNPC *pNPC )
 		//
 		if ( m_hNextCine != NULL )
 		{
-			CAI_ScriptedSequence *pNextCine = ( CAI_ScriptedSequence * )m_hNextCine.Get();
+			// HL2RPM: checked cast (see Activate)
+			CAI_ScriptedSequence *pNextCine = dynamic_cast< CAI_ScriptedSequence * >( m_hNextCine.Get() );
 
 			//
 			// Don't link ourselves in if we are going to be deleted.
 			// TODO: use EHANDLEs instead of pointers to scripts!
 			//
-			if ( ( pNextCine != this ) || ( m_spawnflags & SF_SCRIPT_REPEATABLE ) )
+			if ( pNextCine && ( ( pNextCine != this ) || ( m_spawnflags & SF_SCRIPT_REPEATABLE ) ) )
 			{
 				pNextCine->SetTarget( pNPC );
 				pNextCine->StartScript();
@@ -1566,7 +1568,28 @@ void CAI_ScriptedSequence::Activate( void )
 	//
 	// See if there is another script specified to run immediately after this one.
 	//
-	m_hNextCine = gEntList.FindEntityByName( NULL, m_iszNextScript );
+	// HL2RPM: the "Next Script" must be a scripted_sequence. The stock code took the first
+	// entity of that name and cast it blindly: on map_v11 a sequence named a path_corner as its
+	// next script, and StartScript() ran on the path_corner (garbage outputs -> crash in
+	// CBaseEntityOutput::FireOutput when the first sequence finished).
+	CBaseEntity *pNext = NULL;
+	CBaseEntity *pWrongClass = NULL;
+	if ( m_iszNextScript != NULL_STRING )
+	{
+		while ( ( pNext = gEntList.FindEntityByName( pNext, m_iszNextScript ) ) != NULL )
+		{
+			if ( dynamic_cast< CAI_ScriptedSequence * >( pNext ) )
+				break;
+			pWrongClass = pNext;
+		}
+	}
+	if ( !pNext && pWrongClass )
+	{
+		Warning( "scripted_sequence '%s' at (%.0f %.0f %.0f): 'Next Script' \"%s\" is a %s, not a scripted_sequence - ignored (level design error).\n",
+			GetDebugName(), GetAbsOrigin().x, GetAbsOrigin().y, GetAbsOrigin().z, STRING( m_iszNextScript ), pWrongClass->GetClassname() );
+	}
+
+	m_hNextCine = pNext;
 	if ( m_hNextCine == NULL )
 	{
 		m_iszNextScript = NULL_STRING;

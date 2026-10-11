@@ -51,6 +51,7 @@ CDeferredExtension::CDeferredExtension()
 	m_pTexSSAOBlur = NULL;
 
 	m_pTexGIProbes = NULL;
+	m_pTexGIProbesFar = NULL;
 	m_pTexGI = NULL;
 	m_pTexGIBlur = NULL;
 
@@ -291,9 +292,10 @@ void CDeferredExtension::CommitGIData( const giData_t &data )
 	m_dataGI = data;
 }
 
-void CDeferredExtension::CommitTexture_GI( ITexture *pProbes, ITexture *pGI, ITexture *pBlur )
+void CDeferredExtension::CommitTexture_GI( ITexture *pProbes, ITexture *pProbesFar, ITexture *pGI, ITexture *pBlur )
 {
 	m_pTexGIProbes = pProbes;
+	m_pTexGIProbesFar = pProbesFar;
 	m_pTexGI = pGI;
 	m_pTexGIBlur = pBlur;
 }

@@ -2,6 +2,7 @@
 // STATIC:		"MODEL"					"0..1"
 // STATIC:		"MORPHING_VTEX"			"0..1"
 // STATIC:		"MULTITEXTURE"			"0..2"
+// STATIC:		"TREESWAY"				"0..1"
 
 // DYNAMIC:		"COMPRESSED_VERTS"		"0..1"
 // DYNAMIC:		"SKINNING"				"0..1"
@@ -10,11 +11,19 @@
 // DYNAMIC:		"SHADOW_MODE"			"0..2"
 // DYNAMIC:		"RADIOSITY"				"0..1"
 
+// SKIP:		!$MODEL && $TREESWAY
+
 #include "common_vs_fxc.h"
 #include "common_deferred_fxc.h"
+#include "hl2rpm_sway_fxc.h"
 
 
 static const bool g_bSkinning		= SKINNING ? true : false;
+
+#if TREESWAY
+const float4 g_vecSwayWind					: register( SHADER_SPECIFIC_CONST_8 );
+const float4 g_vecSwayParams				: register( SHADER_SPECIFIC_CONST_9 );
+#endif
 
 
 #if MODEL
@@ -136,6 +145,11 @@ VS_OUTPUT main( const VS_INPUT In )
 		In.vVertexID, In.vTexCoord2, vPos.xyz, vNormal );
 #else
 	ApplyMorph( In.vPosFlex, In.vNormalFlex, vPos.xyz, vNormal );
+#endif
+
+#if TREESWAY
+	// HL2RPM: trees and bushes in the wind (the same in the shadow and composite passes)
+	vPos.xyz = TreeSway( vPos.xyz, cModel[0], g_vecSwayWind, g_vecSwayParams );
 #endif
 
 	SkinPositionAndNormal( g_bSkinning, vPos, vNormal,

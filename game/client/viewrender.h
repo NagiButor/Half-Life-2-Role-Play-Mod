@@ -220,6 +220,9 @@ protected:
 
 	// Fog setup
 	void			EnableWorldFog( void );
+	// HL2RPM: the map's fog and the weather's height fog in one, for the translucent pass of
+	// the deferred view (false = nothing changed, the weather has no fog)
+	bool			EnableWorldFogWithWeather( void );
 	void			SetFogVolumeState( const VisibleFogVolumeInfo_t &fogInfo, bool bUseHeightFog );
 
 	// Draw setup

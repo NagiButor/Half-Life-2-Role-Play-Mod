@@ -1,4 +1,8 @@
 // ALL SKIP STATEMENTS THAT AFFECT THIS SHADER!!!
+// $POM && !$BUMPMAP
+// $POM && $BUMPMAP2
+// $POM && $MULTIBLEND
+// $POM && $BLENDMODULATE
 // !$BUMPMAP2 && !$MULTIBLEND && $BLENDMODULATE
 // !$BUMPMAP && $BUMPMAP2
 // $MODEL && $BUMPMAP2
@@ -32,6 +36,7 @@ class gbuffer_ps30_Static_Index
 	unsigned int m_nBUMPMAP2 : 2;
 	unsigned int m_nBLENDMODULATE : 2;
 	unsigned int m_nMULTIBLEND : 2;
+	unsigned int m_nPOM : 2;
 #ifdef _DEBUG
 	bool m_bALPHATEST : 1;
 	bool m_bBUMPMAP : 1;
@@ -40,6 +45,7 @@ class gbuffer_ps30_Static_Index
 	bool m_bBUMPMAP2 : 1;
 	bool m_bBLENDMODULATE : 1;
 	bool m_bMULTIBLEND : 1;
+	bool m_bPOM : 1;
 #endif	// _DEBUG
 public:
 	void SetALPHATEST( int i )
@@ -105,6 +111,15 @@ public:
 #endif	// _DEBUG
 	}
 
+	void SetPOM( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nPOM = i;
+#ifdef _DEBUG
+		m_bPOM = true;
+#endif	// _DEBUG
+	}
+
 	gbuffer_ps30_Static_Index( IShaderShadow* pShaderShadow, IMaterialVar** params )
 	{
 		m_nALPHATEST = 0;
@@ -114,6 +129,7 @@ public:
 		m_nBUMPMAP2 = 0;
 		m_nBLENDMODULATE = 0;
 		m_nMULTIBLEND = 0;
+		m_nPOM = 0;
 #ifdef _DEBUG
 		m_bALPHATEST = false;
 		m_bBUMPMAP = false;
@@ -122,20 +138,25 @@ public:
 		m_bBUMPMAP2 = false;
 		m_bBLENDMODULATE = false;
 		m_bMULTIBLEND = false;
+		m_bPOM = false;
 #endif	// _DEBUG
 	}
 
 	int GetIndex() const
 	{
-		Assert( m_bALPHATEST && m_bBUMPMAP && m_bNOCULL && m_bPHONGMAP && m_bBUMPMAP2 && m_bBLENDMODULATE && m_bMULTIBLEND );
+		Assert( m_bALPHATEST && m_bBUMPMAP && m_bNOCULL && m_bPHONGMAP && m_bBUMPMAP2 && m_bBLENDMODULATE && m_bMULTIBLEND && m_bPOM );
+		AssertMsg( !( m_nPOM && !m_nBUMPMAP ), "Invalid combo combination ( POM && !BUMPMAP )" );
+		AssertMsg( !( m_nPOM && m_nBUMPMAP2 ), "Invalid combo combination ( POM && BUMPMAP2 )" );
+		AssertMsg( !( m_nPOM && m_nMULTIBLEND ), "Invalid combo combination ( POM && MULTIBLEND )" );
+		AssertMsg( !( m_nPOM && m_nBLENDMODULATE ), "Invalid combo combination ( POM && BLENDMODULATE )" );
 		AssertMsg( !( !m_nBUMPMAP2 && ( !m_nMULTIBLEND && m_nBLENDMODULATE ) ), "Invalid combo combination ( !BUMPMAP2 && ( !MULTIBLEND && BLENDMODULATE ) )" );
 		AssertMsg( !( !m_nBUMPMAP && m_nBUMPMAP2 ), "Invalid combo combination ( !BUMPMAP && BUMPMAP2 )" );
 		AssertMsg( !( m_nBUMPMAP2 && m_nMULTIBLEND ), "Invalid combo combination ( BUMPMAP2 && MULTIBLEND )" );
-		return ( 1 * m_nALPHATEST ) + ( 2 * m_nBUMPMAP ) + ( 6 * m_nNOCULL ) + ( 12 * m_nPHONGMAP ) + ( 24 * m_nBUMPMAP2 ) + ( 48 * m_nBLENDMODULATE ) + ( 96 * m_nMULTIBLEND ) + 0;
+		return ( 1 * m_nALPHATEST ) + ( 2 * m_nBUMPMAP ) + ( 6 * m_nNOCULL ) + ( 12 * m_nPHONGMAP ) + ( 24 * m_nBUMPMAP2 ) + ( 48 * m_nBLENDMODULATE ) + ( 96 * m_nMULTIBLEND ) + ( 192 * m_nPOM ) + 0;
 	}
 };
 
-#define shaderStaticTest_gbuffer_ps30 psh_forgot_to_set_static_ALPHATEST + psh_forgot_to_set_static_BUMPMAP + psh_forgot_to_set_static_NOCULL + psh_forgot_to_set_static_PHONGMAP + psh_forgot_to_set_static_BUMPMAP2 + psh_forgot_to_set_static_BLENDMODULATE + psh_forgot_to_set_static_MULTIBLEND
+#define shaderStaticTest_gbuffer_ps30 psh_forgot_to_set_static_ALPHATEST + psh_forgot_to_set_static_BUMPMAP + psh_forgot_to_set_static_NOCULL + psh_forgot_to_set_static_PHONGMAP + psh_forgot_to_set_static_BUMPMAP2 + psh_forgot_to_set_static_BLENDMODULATE + psh_forgot_to_set_static_MULTIBLEND + psh_forgot_to_set_static_POM
 
 
 class gbuffer_ps30_Dynamic_Index

@@ -10,6 +10,7 @@
 #include "deferred/deferred_ssao.h"
 #include "deferred/deferred_gi.h"
 #include "deferred/deferred_postfx.h"
+#include "deferred/deferred_pom.h"
 #include "deferred/deferred_taa.h"
 #include "deferred/deferred_shared_common.h"
 
@@ -267,6 +268,30 @@ bool WeatherRender_GetSkyboxFogColor( float *pColor )
 static Vector4D s_vecSkyLightDiff( 0, 0, 0, 0 );
 static bool s_bGodRaysVisible = false;	// this frame's sun / moon is on (or near) the screen
 
+// The height fog of the weather pass (weather_post_ps30) is exponential: along a level ray at
+// the eye its optical depth is sigma * distance. The pixel fog of the stock shaders (and of the
+// deferred composite) is a squared linear ramp between a start and an end distance; this one
+// follows 1 - exp( -sigma * d ) within ~0.2 up to the distance where the fog is nearly opaque.
+static Vector4D s_vecWeatherFogParams( 0, 0, 0, 0 );	// density /1000u, falloff /1000u, base z, -
+static float s_flWeatherFogEyeZ = 0.0f;
+static float s_flWeatherFogMaxDensity = 0.985f;
+
+bool WeatherRender_GetForwardFog( float &flStart, float &flEnd, float &flMaxDensity )
+{
+	if ( !GetWeatherSystem()->IsActive() || !s_bWeatherFogColorValid || s_vecWeatherFogParams.x <= 0.0f )
+		return false;
+
+	const float flFalloff = Max( s_vecWeatherFogParams.y * 0.001f, 1e-6f );
+	const float flSigma = s_vecWeatherFogParams.x * 0.001f * expf( -flFalloff * ( s_flWeatherFogEyeZ - s_vecWeatherFogParams.z ) );
+	if ( flSigma < 1e-7f )
+		return false;
+
+	flStart = -0.2f / flSigma;
+	flEnd = 1.4f / flSigma;
+	flMaxDensity = s_flWeatherFogMaxDensity;
+	return true;
+}
+
 void WeatherRender_SetSkyLight( const lightData_Global_t &light )
 {
 	s_vecSkyLightDir = light.vecLight;
@@ -381,7 +406,9 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 				const float flOnScreen = clamp( ( 1.1f - flOff ) / 0.5f, 0.0f, 1.0f );
 				const float flHorizon = clamp( ( vecLightDir.z + 0.03f ) / 0.08f, 0.0f, 1.0f );
 				const float flNight = pSys->GetNightFactor();
-				float flStrength = ( 0.15f + p.flVolumetricDensity * 0.85f ) * flOnScreen * flHorizon * r_weather_godrays_strength.GetFloat();
+				// (0.15 in clear air before: with the rays coming from around the sun now - see
+				// weather_godrays_ps30 - a clear day shows them where the sun stands behind something)
+				float flStrength = ( 0.22f + p.flVolumetricDensity * 0.78f ) * flOnScreen * flHorizon * r_weather_godrays_strength.GetFloat();
 				flStrength *= Lerp( flNight, 1.0f, 0.25f );
 				// light: the direct light above the clouds, dimmed like the sky it shines through
 				Vector vecColor = vecDirect * 0.18f;
@@ -424,6 +451,9 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 
 	if ( !r_weather_fog.GetBool() )
 		data.vecFogParams.x = 0.0f;
+	s_vecWeatherFogParams = data.vecFogParams;
+	s_flWeatherFogEyeZ = view.origin.z;
+	s_flWeatherFogMaxDensity = data.vecFogColor.w;
 	if ( !r_weather_wetness.GetBool() )
 	{
 		data.vecRainParams.y = 0.0f;
@@ -1044,7 +1074,27 @@ struct ForwardMatVar_t
 };
 static CUtlVector< ForwardMatVar_t > s_ForwardVars;
 static int s_nForwardMatCount = -1;
+static int s_nForwardPrecached = -1;
 static float s_flForwardScale = 1.0f;
+
+// How many materials are loaded right now. Asking a material for its shader, a variable or
+// whether it is translucent *loads* it - and the material system keeps every material it has
+// ever seen: the ones of the maps played before stay in its list, unloaded. Their files were
+// in those maps (the cubemap patches vbsp writes into the .bsp: water, the Combine's shield
+// panes): "CMaterial::PrecacheVars: error loading vmt file for maps/<old map>/..." twice per
+// material on every scan, and every other material of every map played came back into memory
+// with its textures. Only what is loaded is looked at; this count tells when that changed.
+static int CountPrecachedMaterials()
+{
+	int nCount = 0;
+	for ( MaterialHandle_t h = materials->FirstMaterial(); h != materials->InvalidMaterial(); h = materials->NextMaterial( h ) )
+	{
+		IMaterial *pMat = materials->GetMaterial( h );
+		if ( pMat && pMat->IsPrecached() )
+			nCount++;
+	}
+	return nCount;
+}
 
 static IMaterialVar *FindForwardVar( IMaterial *pMat, const char *pszVar )
 {
@@ -1055,7 +1105,14 @@ static IMaterialVar *FindForwardVar( IMaterial *pMat, const char *pszVar )
 	return pVar;
 }
 
-static void AddForwardVar( IMaterial *pMat, const char *pszVar )
+// pKnown: what was tracked before this scan - its originals are taken from there, not from the
+// variables. With the queued material system (mat_queue_mode 2) a SetVecValue takes effect
+// when the render thread gets to it: the variable read right after "putting the original back"
+// still held the scaled color, which then became the original. Every rescan (a material
+// loaded, a shader replaced by the passthru) while the light was not 1 - the weather blending in
+// after a map load, an evening - multiplied the colors once more: the water's own color went
+// to black, "all the water is just transparent".
+static void AddForwardVar( IMaterial *pMat, const char *pszVar, const CUtlVector< ForwardMatVar_t > *pKnown = NULL )
 {
 	IMaterialVar *pVar = FindForwardVar( pMat, pszVar );
 	if ( !pVar )
@@ -1063,6 +1120,20 @@ static void AddForwardVar( IMaterial *pMat, const char *pszVar )
 
 	float flVec[3] = { 1.0f, 1.0f, 1.0f };
 	pVar->GetVecValue( flVec, 3 );
+	if ( pKnown )
+	{
+		for ( int i = 0; i < pKnown->Count(); i++ )
+		{
+			const ForwardMatVar_t &k = pKnown->Element( i );
+			if ( k.pMat == pMat && !V_strcmp( k.pszVar, pszVar ) )
+			{
+				flVec[0] = k.vecOrig.x;
+				flVec[1] = k.vecOrig.y;
+				flVec[2] = k.vecOrig.z;
+				break;
+			}
+		}
+	}
 	pMat->IncrementReferenceCount();
 	ForwardMatVar_t &v = s_ForwardVars[ s_ForwardVars.AddToTail() ];
 	v.pMat = pMat;
@@ -1082,17 +1153,32 @@ static void RestoreForwardMaterials()
 	}
 	s_ForwardVars.RemoveAll();
 	s_nForwardMatCount = -1;
+	s_nForwardPrecached = -1;
 	s_flForwardScale = 1.0f;
 }
 
 static void ScanForwardMaterials()
 {
-	RestoreForwardMaterials();
+	// (the old list keeps its references until the new one holds its own)
+	CUtlVector< ForwardMatVar_t > known;
+	known.AddVectorToTail( s_ForwardVars );
+	for ( int i = 0; i < known.Count(); i++ )
+	{
+		IMaterialVar *pVar = FindForwardVar( known[i].pMat, known[i].pszVar );
+		if ( pVar )
+			pVar->SetVecValue( known[i].vecOrig.x, known[i].vecOrig.y, known[i].vecOrig.z );
+	}
+	s_ForwardVars.RemoveAll();
 
+	int nPrecached = 0;
 	for ( MaterialHandle_t h = materials->FirstMaterial(); h != materials->InvalidMaterial(); h = materials->NextMaterial( h ) )
 	{
 		IMaterial *pMat = materials->GetMaterial( h );
-		if ( !pMat || pMat->IsErrorMaterial() )
+		// (only the loaded ones - see CountPrecachedMaterials)
+		if ( !pMat || !pMat->IsPrecached() )
+			continue;
+		nPrecached++;
+		if ( pMat->IsErrorMaterial() )
 			continue;
 		const char *pszShader = pMat->GetShaderName();
 		if ( !pszShader )
@@ -1101,27 +1187,42 @@ static void ScanForwardMaterials()
 		if ( V_stristr( pszShader, "Water" ) )
 		{
 			// the water's own color
-			AddForwardVar( pMat, "$fogcolor" );
+			AddForwardVar( pMat, "$fogcolor", &known );
 			// real-time reflections are lit right (REFLECTVIEW); the cubemap one isn't
 			bool bFound = false;
 			IMaterialVar *pReflect = pMat->FindVar( "$reflecttexture", &bFound, false );
 			if ( !bFound || !pReflect || !pReflect->IsDefined() || !pReflect->IsTexture() )
-				AddForwardVar( pMat, "$reflecttint" );
+				AddForwardVar( pMat, "$reflecttint", &known );
+		}
+		else if ( V_stristr( pszShader, "Refract" ) )
+		{
+			// the Combine's shield panes & co: the frame behind them, bent, plus a cubemap
+			AddForwardVar( pMat, "$envmaptint", &known );
 		}
 		else if ( pMat->IsTranslucent() && ( V_stristr( pszShader, "LightmappedGeneric" ) || V_stristr( pszShader, "VertexLitGeneric" ) ) )
 		{
 			// glass & co: baked lighting and a baked cubemap
-			AddForwardVar( pMat, "$envmaptint" );
+			AddForwardVar( pMat, "$envmaptint", &known );
 			// (models: studiorender overwrites $color with the entity's color modulation on
 			// every draw - the scaled value never showed, the translucent shell of the skybox
 			// Citadel shone blue at night. Their static tint is $color2, which the base
 			// shader multiplies in.)
-			AddForwardVar( pMat, V_stristr( pszShader, "VertexLitGeneric" ) ? "$color2" : "$color" );
+			AddForwardVar( pMat, V_stristr( pszShader, "VertexLitGeneric" ) ? "$color2" : "$color", &known );
 		}
 	}
 
+	for ( int i = 0; i < known.Count(); i++ )
+		known[i].pMat->DecrementReferenceCount();
+
 	s_nForwardMatCount = materials->GetNumMaterials();
+	s_nForwardPrecached = nPrecached;
 	s_flForwardScale = -1.0f;	// apply on the next update
+}
+
+// mat_reloadallmaterials & co: the variables are as the files say again
+void WeatherRender_OnMaterialsRestored()
+{
+	s_flForwardScale = -1.0f;
 }
 
 static bool IsDeferredShaderMaterial( IMaterial *pMat )
@@ -1138,19 +1239,46 @@ static void UpdateForwardMaterials( float flScale )
 	for ( int i = 0; i < s_ForwardVars.Count() && !bReplaced; i++ )
 		bReplaced = IsDeferredShaderMaterial( s_ForwardVars[i].pMat );
 
-	if ( bReplaced || materials->GetNumMaterials() != s_nForwardMatCount )
+	bool bRescan = bReplaced || materials->GetNumMaterials() != s_nForwardMatCount;
+
+	// (once a second anyway: a material loaded anew - mat_reloadmaterial, a setting that reloads
+	// the water materials - has the colors of its file again)
+	static float s_flNextApply = 0.0f;
+	if ( gpGlobals->realtime > s_flNextApply || gpGlobals->realtime < s_flNextApply - 2.0f )
+	{
+		s_flNextApply = gpGlobals->realtime + 1.0f;
+		s_flForwardScale = -1.0f;
+		// (a material found earlier and loaded only now, with its first draw, changes no count)
+		if ( !bRescan && CountPrecachedMaterials() != s_nForwardPrecached )
+			bRescan = true;
+	}
+
+	if ( bRescan )
 		ScanForwardMaterials();
 
-	if ( fabsf( flScale - s_flForwardScale ) < 0.01f )
+	// (relative: the scale is a few % at night - a step of 0.01 was a third of it)
+	if ( fabsf( flScale - s_flForwardScale ) < 0.01f * Max( flScale, 0.05f ) )
 		return;
 	s_flForwardScale = flScale;
 
+	// The variables are colors in gamma space - the shaders turn them into linear ones (or work
+	// in gamma space altogether: cheap water without HDR): scaled so that the light they stand
+	// for is scaled by flScale. Multiplied by the scale itself they went with its power of 2.2:
+	// at 0.6 of the daylight the water's own color was a third of itself, and at night black.
+	const float flGamma = powf( Max( flScale, 0.0f ), 1.0f / 2.2f );
+	// (a map without cubemaps of its own: what these materials mirror is the engine's default
+	// cubemap - a greenish blur that has nothing to do with the place. Much less of it.)
+	static ConVarRef mat_hl2rpm_map_cubemaps( "mat_hl2rpm_map_cubemaps" );
+	const float flGammaEnv = ( mat_hl2rpm_map_cubemaps.IsValid() && !mat_hl2rpm_map_cubemaps.GetBool() )
+		? flGamma * powf( 0.2f, 1.0f / 2.2f ) : flGamma;
 	for ( int i = 0; i < s_ForwardVars.Count(); i++ )
 	{
 		const ForwardMatVar_t &v = s_ForwardVars[i];
 		IMaterialVar *pVar = FindForwardVar( v.pMat, v.pszVar );
-		if ( pVar )
-			pVar->SetVecValue( v.vecOrig.x * flScale, v.vecOrig.y * flScale, v.vecOrig.z * flScale );
+		if ( !pVar )
+			continue;
+		const float f = !V_strcmp( v.pszVar, "$envmaptint" ) ? flGammaEnv : flGamma;
+		pVar->SetVecValue( v.vecOrig.x * f, v.vecOrig.y * f, v.vecOrig.z * f );
 	}
 }
 
@@ -1186,6 +1314,7 @@ public:
 		ShutdownSSAO();
 		ShutdownGI();
 		DeferredPostFX_Shutdown();
+		DeferredPOM_Shutdown();
 		DeferredTAA_Shutdown();
 		ShutdownWeatherTextures();
 	}

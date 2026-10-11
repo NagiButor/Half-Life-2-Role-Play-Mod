@@ -38,6 +38,8 @@
 #include "deferred/deferred_gi.h"
 #include "deferred/deferred_postfx.h"
 #include "deferred/deferred_taa.h"
+#include "deferred/deferred_worldmesh.h"
+#include "deferred/deferred_occlusion.h"
 #include "detailobjectsystem.h"
 #include "c_func_reflective_glass.h"
 
@@ -49,6 +51,9 @@
 //#include "viewrender_deferred_helper.h" // doesn't seem to be working, let's not hook into the engine dll
 
 #include "tier0/memdbgon.h"
+
+// HL2RPM: see CBaseWorldViewDeferred::DrawExecute (viewrender.cpp draws the ropes)
+extern bool g_bDeferredHoldRopes;
 
 extern ConVar r_drawopaquerenderables;
 extern ConVar r_entityclips;
@@ -491,8 +496,15 @@ protected:
 	// HL2RPM: the main G-buffer view also draws the opaque parts of translucent models and
 	// the detail sprites (grass) into the G-buffer
 	virtual bool	IsMainGBufferView() const { return false; }
-	void			DrawTranslucentModelsOpaquePartsToGBuffer();
-	void			DrawDetailSpritesToGBuffer();
+
+	// HL2RPM: the composite of a view with the weather pass (wet surfaces, fog). Whatever
+	// belongs to the opaque scene - the opaque meshes of "translucent" models, props fading
+	// with distance, the alpha tested detail sprites - is composited ahead of that pass there
+	// (after it they stayed dry, unfogged and saturated in a rainy scene).
+	virtual bool	IsMainCompositeView() const { return false; }
+	virtual bool	IsEyeInFogVolume() const { return false; }
+	void			DrawTranslucentModelsOpaqueParts( bool bComposite, bool bSkybox = false );
+	bool			DrawDetailSpritesOpaque();
 
 	// HL2RPM: shadow views skip casters whose angular size from the camera is below this
 	// (their shadow would be a couple of pixels) - 0 = keep everything
@@ -506,6 +518,10 @@ protected:
 
 	// HL2RPM: DrawSetup built this view's renderables list (it does only with entities)
 	bool m_bRenderablesListBuilt;
+
+	// HL2RPM: a shadow map is drawn (the main view's G-buffer pass runs DrawExecute with
+	// bShadowDepth set as well: it means "depth-like pass", not "shadow map")
+	virtual bool	IsShadowMapView() const { return false; }
 };
 
 // HL2RPM: soft particles - the scene depth into the frame's alpha before the translucent pass
@@ -527,6 +543,8 @@ public:
 
 	// HL2RPM: wet surfaces + weather fog on the lit opaque scene, the depth for soft particles
 	virtual void	OnPostOpaque() { WeatherRender_PostOpaque( *this ); DeferredSoftParticleDepth( *this ); }
+	virtual bool	IsMainCompositeView() const { return true; }
+	virtual bool	IsEyeInFogVolume() const { return m_fogInfo.m_bEyeInFogVolume; }
 
 private:
 	VisibleFogVolumeInfo_t m_fogInfo;
@@ -664,6 +682,8 @@ public:
 	virtual void	CommitData(){};
 
 	virtual int		GetShadowMode() = 0;
+
+	virtual bool	IsShadowMapView() const { return true; }
 
 	void			AddExtraVisOrigin( const Vector &vecOrigin ) { shadowVis.AddVisOrigin( vecOrigin ); }
 
@@ -968,6 +988,7 @@ public:
 	// look and the height fog vanished whenever water came into view. (Only this view's own
 	// pass - the reflection/refraction views below keep the empty one.)
 	virtual void	OnPostOpaque() { WeatherRender_PostOpaque( *this ); DeferredSoftParticleDepth( *this ); }
+	virtual bool	IsMainCompositeView() const { return true; }
 
 	class CReflectionView : public CBaseWorldViewDeferred
 	{
@@ -1045,6 +1066,11 @@ public:
 		void Setup();
 		void Draw();
 
+		// HL2RPM: what is above the water, seen from under it - the same camera as the main
+		// view and its G-buffer: the weather's fog and wet surfaces belong on it too (a tree in
+		// the fog was crisp as soon as the eye went under)
+		virtual void	OnPostOpaque() { WeatherRender_PostOpaque( *this ); }
+
 	private:
 		CUnderWaterViewDeferred *GetOuter() { return GET_OUTER( CUnderWaterViewDeferred, m_RefractionView ); }
 	};
@@ -1119,7 +1145,11 @@ void CBaseWorldViewDeferred::DrawSetup( float waterHeight, int nSetupFlags, floa
 	if ( bDrawEntities )
 	{
 		const bool bOptimized = bShadowDepth;
+		// HL2RPM: what the walls of the map hide from this camera is left out of the lists (not
+		// in the shadow views: what the eye can't see still casts its shadow into view)
+		DeferredOcclusion_SetCollecting( !IsShadowMapView() && DeferredOcclusion_IsForView( origin, angles ) );
 		BuildRenderableRenderLists( bOptimized ? VIEW_SHADOW_DEPTH_TEXTURE : savedViewID );
+		DeferredOcclusion_SetCollecting( false );
 
 		if ( bShadowDepth )
 			CullSmallShadowCasters();
@@ -1163,6 +1193,8 @@ void CBaseWorldViewDeferred::CullSmallShadowCasters()
 	}
 }
 
+extern ConVar r_deferred_translucent_weather_fog;
+
 void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, float waterZAdjust, bool bShadowDepth )
 {
 	const view_id_t savedViewID = CurrentViewID();
@@ -1205,7 +1237,24 @@ void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, f
 	if ( bShadowDepth && r_drawdecals.IsValid() )
 		r_drawdecals.SetValue( 0 );
 
-	DrawWorldDeferred( waterZAdjust );
+	// HL2RPM: the world of a shadow map comes from the renderer's own meshes of the map
+	// (deferred_worldmesh.cpp): the engine's world lists drop materials past 127 mesh changes -
+	// on a map with hundreds of materials walls cast no shadow in the views that see all of it
+	bool bWorldDrawn = false;
+	if ( IsShadowMapView() )
+	{
+		const int iMeshMode = DeferredWorldMesh_Mode();
+		if ( iMeshMode >= 2 || ( iMeshMode == 1 && m_bOrtho ) )
+		{
+			if ( DeferredWorldMesh_AlsoEngine() )
+				DrawWorldDeferred( waterZAdjust );
+			bWorldDrawn = DeferredWorldMesh_DrawShadowCasters();
+			if ( DeferredWorldMesh_AlsoEngine() )
+				bWorldDrawn = true;
+		}
+	}
+	if ( !bWorldDrawn )
+		DrawWorldDeferred( waterZAdjust );
 
 	if ( bShadowDepth && iOldDrawDecals >= 0 )
 		r_drawdecals.SetValue( iOldDrawDecals );
@@ -1213,17 +1262,58 @@ void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, f
 	// HL2RPM: only with a renderables list of this view's own. A view drawn without entities
 	// (the reflection of a water without $reflectentities) builds none and read whatever the
 	// pointer held - freed memory: a crash in DrawOpaqueRenderables_DrawBrushModels
+	// HL2RPM: the ropes (wires) are drawn by a forward shader at the end of the opaque
+	// entities - in every pass: into the G-buffer (color where a normal belongs, no depth), into
+	// the shadow maps, and in the composite before the weather pass, which then saw the sky's
+	// depth behind them: black wires, sharp and unfogged, in front of buildings fading into the
+	// rain. Not in the G-buffer and shadow passes; in the main composite after the weather pass,
+	// with the fog the translucents get.
+	const bool bCompositeOpaqueParts = !bShadowDepth && IsMainCompositeView();
+	const bool bHoldRopes = bShadowDepth || IsMainGBufferView() || bCompositeOpaqueParts;
+	g_bDeferredHoldRopes = bHoldRopes;
 	if ( m_bRenderablesListBuilt && m_pRenderablesList )
 		DrawOpaqueRenderablesDeferred( false );
+	g_bDeferredHoldRopes = false;
 
+	// HL2RPM: what belongs to the opaque scene but sits in the translucent lists - into the
+	// G-buffer, and composited before the weather pass
+	bool bDetailSpritesDrawn = false;
 	if ( IsMainGBufferView() )
 	{
-		DrawTranslucentModelsOpaquePartsToGBuffer();
-		DrawDetailSpritesToGBuffer();
+		DrawTranslucentModelsOpaqueParts( false );
+		DrawDetailSpritesOpaque();
+	}
+	else if ( bCompositeOpaqueParts )
+	{
+		DrawTranslucentModelsOpaqueParts( true );
+		bDetailSpritesDrawn = DrawDetailSpritesOpaque();
 	}
 
 	if ( !bShadowDepth )
+	{
+		// HL2RPM: the passes of OnPostOpaque are full screen quads - without the view's height
+		// clip plane. With the eye right at a water's surface (the view plane cuts the water) the
+		// main view is drawn clipped at the water's height, and the plane clipped the quads too:
+		// no weather fog, no wet surfaces on anything while wading into a pool or swimming at the
+		// surface ("objects turn fullbright when I get into the water").
+		CMatRenderContextPtr pPostContext( materials );
+		const MaterialHeightClipMode_t clipMode = pPostContext->GetHeightClipMode();
+		if ( clipMode != MATERIAL_HEIGHTCLIPMODE_DISABLE )
+			pPostContext->SetHeightClipMode( MATERIAL_HEIGHTCLIPMODE_DISABLE );
+		pPostContext.SafeRelease();
+
 		OnPostOpaque();
+
+		if ( bCompositeOpaqueParts )
+			DeferredWorldMesh_DebugDraw();
+
+		if ( clipMode != MATERIAL_HEIGHTCLIPMODE_DISABLE )
+		{
+			pPostContext.GetFrom( materials );
+			pPostContext->SetHeightClipMode( clipMode );
+			pPostContext.SafeRelease();
+		}
+	}
 
 	//if (!m_bDrawWorldNormal)
 	{
@@ -1231,8 +1321,24 @@ void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, f
 		{
 			if (!bShadowDepth)
 			{
+				// (the sprites are in the frame already; the rest of the translucent pass gets the
+				// weather's fog from its own shaders)
+				if ( bDetailSpritesDrawn )
+					DetailObjectSystem()->SuppressTranslucentSprites( true );
+				const bool bWeatherFog = bCompositeOpaqueParts && !IsEyeInFogVolume()
+					&& r_deferred_translucent_weather_fog.GetBool() && EnableWorldFogWithWeather();
+
+				// (the ropes held back above: their cache is still this view's)
+				if ( bCompositeOpaqueParts && m_bRenderablesListBuilt && m_pRenderablesList )
+					RopeManager()->DrawRenderCache( false );
+
 				DrawTranslucentRenderables( false, false );
 				DrawNoZBufferTranslucentRenderables();
+
+				if ( bWeatherFog )
+					EnableWorldFog();
+				if ( bDetailSpritesDrawn )
+					DetailObjectSystem()->SuppressTranslucentSprites( false );
 			}
 		}
 		else
@@ -1400,11 +1506,26 @@ static void DebugPrintRenderablesList( CClientRenderablesList *pList, const char
 // shapes of the skybox buildings showed "through" the houses of the map. Their opaque parts are
 // drawn into the G-buffer here (STUDIO_TWOPASS without STUDIO_TRANSPARENCY = opaque meshes only);
 // the translucent pass draws them as before and now reads their own light.
+//
+// The same in the composite of the main view (bComposite), ahead of the weather pass - drawn
+// with the translucents these facades stayed dry and unfogged in the rain ("fullbright" houses
+// next to fogged ones) - and the entry is marked: the translucent pass then draws only the
+// translucent meshes (the antenna).
+//
+// A model fading with distance (static props, and entities with fade distances) is a
+// translucent renderable for as long as it fades: lit by whatever is behind it, without shadow
+// and fog - a distant tree turned into a crisp dark shape. It is drawn solid until it is gone.
+// An entity with a render alpha, mode or fx of its own is see-through on purpose and left alone.
 static ConVar r_deferred_gbuffer_translucent_models( "r_deferred_gbuffer_translucent_models", "1", 0,
-	"Draw the opaque parts of translucent (not two-pass) models into the G-buffer" );
-void CBaseWorldViewDeferred::DrawTranslucentModelsOpaquePartsToGBuffer()
+	"Draw the opaque parts of translucent (not two-pass) models with the opaque scene: G-buffer and composite" );
+static ConVar r_deferred_solid_fading_props( "r_deferred_solid_fading_props", "1", 0,
+	"Props fading with distance are drawn solid (fading they are lit by what is behind them)" );
+ConVar r_deferred_translucent_weather_fog( "r_deferred_translucent_weather_fog", "1", 0,
+	"The weather's height fog on what is drawn after the weather pass (water, particles, glass)" );
+void CBaseWorldViewDeferred::DrawTranslucentModelsOpaqueParts( bool bComposite, bool bSkybox )
 {
-	if ( !m_pRenderablesList || !( m_DrawFlags & DF_DRAW_ENTITITES ) || !r_deferred_gbuffer_translucent_models.GetBool() )
+	// (the 3D skybox view builds its list itself and has no DF_DRAW_ENTITITES)
+	if ( !m_pRenderablesList || !( bSkybox || ( m_DrawFlags & DF_DRAW_ENTITITES ) ) || !r_deferred_gbuffer_translucent_models.GetBool() )
 		return;
 
 	CClientRenderablesList::CEntry *pEntities = m_pRenderablesList->m_RenderGroups[ RENDER_GROUP_TRANSLUCENT_ENTITY ];
@@ -1413,20 +1534,33 @@ void CBaseWorldViewDeferred::DrawTranslucentModelsOpaquePartsToGBuffer()
 	{
 		IClientRenderable *pRenderable = pEntities[i].m_pRenderable;
 		// (two-pass ones are in the opaque list already)
-		if ( !pRenderable || pEntities[i].m_TwoPass )
+		if ( !pRenderable || ( pEntities[i].m_TwoPass & CClientRenderablesList::ENTRY_TWOPASS ) )
 			continue;
 		const model_t *pModel = pRenderable->GetModel();
 		if ( !pModel || modelinfo->GetModelType( pModel ) != mod_studio )
 			continue;
-		// (see-through as a whole: fading, render alpha)
-		if ( pRenderable->GetFxBlend() < 255 )
+		if ( pRenderable->IgnoresZBuffer() )
 			continue;
+
+		if ( pRenderable->GetFxBlend() < 255 )
+		{
+			if ( !r_deferred_solid_fading_props.GetBool() )
+				continue;
+			// (a static prop has no entity)
+			C_BaseEntity *pEntity = pRenderable->GetIClientUnknown()->GetBaseEntity();
+			if ( pEntity && ( pEntity->GetRenderMode() != kRenderNormal || pEntity->GetRenderColor().a != 255
+				|| pEntity->m_nRenderFX != kRenderFxNone ) )
+				continue;
+		}
 
 		float color[3];
 		pRenderable->GetColorModulation( color );
 		render->SetColorModulation( color );
 		render->SetBlend( 1.0f );
 		pRenderable->DrawModel( STUDIO_RENDER | STUDIO_TWOPASS );
+
+		if ( bComposite )
+			pEntities[i].m_TwoPass |= CClientRenderablesList::ENTRY_OPAQUE_PARTS_DRAWN;
 	}
 }
 
@@ -1436,18 +1570,22 @@ void CBaseWorldViewDeferred::DrawTranslucentModelsOpaquePartsToGBuffer()
 // sun. With a deferred material (materialsystem_passthru.cpp: alpha-tested DEFERRED_BRUSH)
 // they are drawn into the G-buffer here as well (up normal), and the composite of the
 // translucent pass lights them with their own depth and normal.
-void CBaseWorldViewDeferred::DrawDetailSpritesToGBuffer()
+// The composite of the main view draws them here too, with the opaque scene (they are alpha
+// tested and write depth): the weather pass that follows wets and fogs them like the ground
+// they stand on.
+bool CBaseWorldViewDeferred::DrawDetailSpritesOpaque()
 {
 	static ConVarRef r_DrawDetailProps( "r_DrawDetailProps" );
 	if ( !m_pWorldListInfo || !( m_DrawFlags & DF_DRAW_ENTITITES ) || ( r_DrawDetailProps.IsValid() && !r_DrawDetailProps.GetBool() ) )
-		return;
+		return false;
 
 	IMaterial *pMat = DetailObjectSystem()->GetDetailSpriteMaterial();
 	const char *pszShader = pMat ? pMat->GetShaderName() : NULL;
 	if ( !pszShader || V_strnicmp( pszShader, "DEFERRED_", 9 ) != 0 )
-		return;
+		return false;
 
 	DrawDetailPropsInAllLeaves();
+	return true;
 }
 
 void CBaseWorldViewDeferred::DrawOpaqueRenderablesDeferred(bool k)
@@ -1957,12 +2095,24 @@ void CSkyboxViewDeferred::DrawInternal( view_id_t iSkyBoxViewID, ITexture *pRend
 
 	BuildWorldRenderLists( true, -1, ShouldCacheLists() );
 
-	BuildRenderableRenderLists( m_bGBufferPass ? VIEW_SHADOW_DEPTH_TEXTURE : iSkyBoxViewID );
+	// HL2RPM: the G-buffer pass built its list like a shadow view - without the translucent
+	// renderables, so the skybox models with one translucent material (the house rows with their
+	// antennas: row_res_2, row_upscale, row_hill_cluster) had nothing for
+	// DrawTranslucentModelsOpaqueParts to put into the G-buffer: no depth - no weather fog, and
+	// the composite lit them with the light of the sky behind them. "Fullbright" houses standing
+	// sharp in the rain behind a street fading into it.
+	BuildRenderableRenderLists( ( m_bGBufferPass && !r_deferred_gbuffer_translucent_models.GetBool() ) ? VIEW_SHADOW_DEPTH_TEXTURE : iSkyBoxViewID );
 
 	DrawWorldDeferred( 0.0f );
 
 	// Iterate over all leaves and render objects in those leaves
+	// (no ropes in the G-buffer pass, see DrawExecute)
+	g_bDeferredHoldRopes = m_bGBufferPass;
 	DrawOpaqueRenderablesDeferred( false );
+	g_bDeferredHoldRopes = false;
+
+	// HL2RPM: the opaque meshes of the skybox's translucent models, as in the map
+	DrawTranslucentModelsOpaqueParts( !m_bGBufferPass, true );
 
 	if ( !m_bGBufferPass )
 	{
@@ -2977,9 +3127,13 @@ static void GetMapWaterTargets( bool &bAnyReflect, bool &bAnyRefract )
 {
 	static int s_nMaterialCount = -1;
 	static bool s_bReflect = false, s_bRefract = false;
+	// (and once a second: the water materials can be loaded anew with other targets -
+	// r_deferred_water_reflect_all, mat_reloadmaterial)
+	static float s_flNextScan = 0.0f;
 	const int nCount = materials->GetNumMaterials();
-	if ( nCount != s_nMaterialCount )
+	if ( nCount != s_nMaterialCount || gpGlobals->realtime > s_flNextScan || gpGlobals->realtime < s_flNextScan - 2.0f )
 	{
+		s_flNextScan = gpGlobals->realtime + 1.0f;
 		s_nMaterialCount = nCount;
 		s_bReflect = s_bRefract = false;
 		static ConVarRef r_waterforceexpensive( "r_waterforceexpensive" );
@@ -3160,6 +3314,22 @@ void CDeferredViewRender::DrawWorldComposite( const CViewSetup &view, int nClear
 				fogVolumeInfo.m_bEyeInFogVolume ? 1 : 0, fogVolumeInfo.m_flDistanceToWater, fogVolumeInfo.m_flWaterHeight,
 				info.m_bCheapWater ? 1 : 0, info.m_bDrawWaterSurface ? 1 : 0, info.m_bRefract ? 1 : 0, info.m_bReflect ? 1 : 0,
 				fogVolumeInfo.m_pFogVolumeMaterial ? fogVolumeInfo.m_pFogVolumeMaterial->GetName() : "-" );
+			// its own color as the shaders get it now (it follows the time of day) and its fog range
+			if ( fogVolumeInfo.m_pFogVolumeMaterial )
+			{
+				float flFog[3] = { 0, 0, 0 };
+				bool bFound = false;
+				IMaterialVar *pVar = fogVolumeInfo.m_pFogVolumeMaterial->FindVar( "$fogcolor", &bFound, false );
+				if ( bFound && pVar )
+					pVar->GetVecValue( flFog, 3 );
+				IMaterialVar *pStart = fogVolumeInfo.m_pFogVolumeMaterial->FindVar( "$fogstart", &bFound, false );
+				const float flStart = ( bFound && pStart ) ? pStart->GetFloatValue() : 0.0f;
+				IMaterialVar *pEnd = fogVolumeInfo.m_pFogVolumeMaterial->FindVar( "$fogend", &bFound, false );
+				const float flEnd = ( bFound && pEnd ) ? pEnd->GetFloatValue() : 0.0f;
+				Msg( "[water]   $fogcolor now %.0f %.0f %.0f, fog %.0f..%.0f, world light %.3f of the daylight\n",
+					flFog[0] * 255.0f, flFog[1] * 255.0f, flFog[2] * 255.0f, flStart, flEnd,
+					GetWeatherSystem()->IsActive() ? GetWeatherSystem()->GetEnvLightScale() : 1.0f );
+			}
 		}
 	}
 
@@ -3388,8 +3558,10 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 
 	// HL2RPM: world-space indirect light (GI probes) and ambient occlusion of the sky light (SSAO +
 	// sky visibility), read by the global light pass
-	DeferredGI_Render( lightingView, giLightState );
+	// (the SSAO target first: its sky visibility is what the GI estimates the light beyond its
+	// probes from)
 	DeferredSSAO_Render( lightingView );
+	DeferredGI_Render( lightingView, giLightState );
 
 	CMatRenderContextPtr pRenderContext( materials );
 	pRenderContext->PushRenderTargetAndViewport( GetDefRT_Lightaccum() );
@@ -4094,6 +4266,8 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	SetupVis( worldView, visFlags, NULL );
 
 	ProcessDeferredGlobals( worldView );
+	// HL2RPM: the occlusion buffer of the frame - before the lights are culled and the lists built
+	DeferredOcclusion_Setup( worldView );
 	GetLightingManager()->LightSetup( worldView );
 
 	// Force it to clear the framebuffer if they're in solid space.

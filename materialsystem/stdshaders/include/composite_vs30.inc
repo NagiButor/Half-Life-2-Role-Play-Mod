@@ -4,6 +4,10 @@
 // $MODEL && $BASETEXTURE2
 // $MODEL && $MULTIBLEND
 // $BASETEXTURE2 && $MULTIBLEND
+// !$MODEL && $TREESWAY
+// $MODEL && $POM
+// $BASETEXTURE2 && $POM
+// $MULTIBLEND && $POM
 // defined $LIGHTING_PREVIEW && defined $FASTPATH && $LIGHTING_PREVIEW && $FASTPATH
 // !$MODEL && $MORPHING_VTEX
 // !$MODEL && $COMPRESSED_VERTS
@@ -21,6 +25,8 @@ class composite_vs30_Static_Index
 	unsigned int m_nBASETEXTURE2 : 2;
 	unsigned int m_nBLENDMODULATE : 2;
 	unsigned int m_nMULTIBLEND : 2;
+	unsigned int m_nTREESWAY : 2;
+	unsigned int m_nPOM : 2;
 #ifdef _DEBUG
 	bool m_bMODEL : 1;
 	bool m_bDECAL : 1;
@@ -29,6 +35,8 @@ class composite_vs30_Static_Index
 	bool m_bBASETEXTURE2 : 1;
 	bool m_bBLENDMODULATE : 1;
 	bool m_bMULTIBLEND : 1;
+	bool m_bTREESWAY : 1;
+	bool m_bPOM : 1;
 #endif	// _DEBUG
 public:
 	void SetMODEL( int i )
@@ -94,6 +102,24 @@ public:
 #endif	// _DEBUG
 	}
 
+	void SetTREESWAY( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nTREESWAY = i;
+#ifdef _DEBUG
+		m_bTREESWAY = true;
+#endif	// _DEBUG
+	}
+
+	void SetPOM( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nPOM = i;
+#ifdef _DEBUG
+		m_bPOM = true;
+#endif	// _DEBUG
+	}
+
 	composite_vs30_Static_Index( IShaderShadow* pShaderShadow, IMaterialVar** params )
 	{
 		m_nMODEL = 0;
@@ -103,6 +129,8 @@ public:
 		m_nBASETEXTURE2 = 0;
 		m_nBLENDMODULATE = 0;
 		m_nMULTIBLEND = 0;
+		m_nTREESWAY = 0;
+		m_nPOM = 0;
 #ifdef _DEBUG
 		m_bMODEL = false;
 		m_bDECAL = false;
@@ -111,24 +139,30 @@ public:
 		m_bBASETEXTURE2 = false;
 		m_bBLENDMODULATE = false;
 		m_bMULTIBLEND = false;
+		m_bTREESWAY = false;
+		m_bPOM = false;
 #endif	// _DEBUG
 	}
 
 	int GetIndex() const
 	{
-		Assert( m_bMODEL && m_bDECAL && m_bMORPHING_VTEX && m_bEYEVEC && m_bBASETEXTURE2 && m_bBLENDMODULATE && m_bMULTIBLEND );
+		Assert( m_bMODEL && m_bDECAL && m_bMORPHING_VTEX && m_bEYEVEC && m_bBASETEXTURE2 && m_bBLENDMODULATE && m_bMULTIBLEND && m_bTREESWAY && m_bPOM );
 		AssertMsg( !( !m_nMODEL && m_nDECAL ), "Invalid combo combination ( !MODEL && DECAL )" );
 		AssertMsg( !( !m_nBASETEXTURE2 && ( !m_nMULTIBLEND && m_nBLENDMODULATE ) ), "Invalid combo combination ( !BASETEXTURE2 && ( !MULTIBLEND && BLENDMODULATE ) )" );
 		AssertMsg( !( m_nMODEL && m_nBASETEXTURE2 ), "Invalid combo combination ( MODEL && BASETEXTURE2 )" );
 		AssertMsg( !( m_nMODEL && m_nMULTIBLEND ), "Invalid combo combination ( MODEL && MULTIBLEND )" );
 		AssertMsg( !( m_nBASETEXTURE2 && m_nMULTIBLEND ), "Invalid combo combination ( BASETEXTURE2 && MULTIBLEND )" );
+		AssertMsg( !( !m_nMODEL && m_nTREESWAY ), "Invalid combo combination ( !MODEL && TREESWAY )" );
+		AssertMsg( !( m_nMODEL && m_nPOM ), "Invalid combo combination ( MODEL && POM )" );
+		AssertMsg( !( m_nBASETEXTURE2 && m_nPOM ), "Invalid combo combination ( BASETEXTURE2 && POM )" );
+		AssertMsg( !( m_nMULTIBLEND && m_nPOM ), "Invalid combo combination ( MULTIBLEND && POM )" );
 		AssertMsg( !( !m_nMODEL && m_nMORPHING_VTEX ), "Invalid combo combination ( !MODEL && MORPHING_VTEX )" );
 		AssertMsg( !( !m_nMODEL && m_nMORPHING_VTEX ), "Invalid combo combination ( !MODEL && MORPHING_VTEX )" );
-		return ( 8 * m_nMODEL ) + ( 16 * m_nDECAL ) + ( 32 * m_nMORPHING_VTEX ) + ( 64 * m_nEYEVEC ) + ( 128 * m_nBASETEXTURE2 ) + ( 256 * m_nBLENDMODULATE ) + ( 512 * m_nMULTIBLEND ) + 0;
+		return ( 8 * m_nMODEL ) + ( 16 * m_nDECAL ) + ( 32 * m_nMORPHING_VTEX ) + ( 64 * m_nEYEVEC ) + ( 128 * m_nBASETEXTURE2 ) + ( 256 * m_nBLENDMODULATE ) + ( 512 * m_nMULTIBLEND ) + ( 1024 * m_nTREESWAY ) + ( 2048 * m_nPOM ) + 0;
 	}
 };
 
-#define shaderStaticTest_composite_vs30 vsh_forgot_to_set_static_MODEL + vsh_forgot_to_set_static_DECAL + vsh_forgot_to_set_static_MORPHING_VTEX + vsh_forgot_to_set_static_EYEVEC + vsh_forgot_to_set_static_BASETEXTURE2 + vsh_forgot_to_set_static_BLENDMODULATE + vsh_forgot_to_set_static_MULTIBLEND
+#define shaderStaticTest_composite_vs30 vsh_forgot_to_set_static_MODEL + vsh_forgot_to_set_static_DECAL + vsh_forgot_to_set_static_MORPHING_VTEX + vsh_forgot_to_set_static_EYEVEC + vsh_forgot_to_set_static_BASETEXTURE2 + vsh_forgot_to_set_static_BLENDMODULATE + vsh_forgot_to_set_static_MULTIBLEND + vsh_forgot_to_set_static_TREESWAY + vsh_forgot_to_set_static_POM
 
 
 class composite_vs30_Dynamic_Index

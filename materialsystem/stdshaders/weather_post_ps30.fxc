@@ -169,6 +169,12 @@ float4 main( const PS_INPUT In ) : COLOR
 	const float3 dRdv = ddy( In.vecWorldRay ) / ddy( In.vTexCoord.y );
 
 	float depth = tex2D( sDepth, In.vTexCoord ).x;
+	// HL2RPM: the slope of the surface itself (its depth across the neighbouring pixels), ahead
+	// of any branch too: the detail sprites - grass, drawn with the opaque scene now - carry an
+	// "up" normal for their lighting, and a puddle is no place for a mirror standing on its edge
+	const float3 dPdx = ddx( In.vecWorldRay ) * depth + In.vecWorldRay * ddx( depth );
+	const float3 dPdy = ddy( In.vecWorldRay ) * depth + In.vecWorldRay * ddy( depth );
+	const float flDepthStep = max( abs( ddx( depth ) ), abs( ddy( depth ) ) );
 	if ( depth < 0.1 )
 		return float4( 0, 0, 0, 1 );	// sky: handled by the sky shader
 
@@ -205,6 +211,10 @@ float4 main( const PS_INPUT In ) : COLOR
 		float puddles = g_vecRain.z;
 		float puddle = puddles * exposure * smoothstep( 0.92, 0.985, N.z )
 			* smoothstep( 0.62 - puddles * 0.28, 0.70 - puddles * 0.28, pn );
+		// (level ground only; along a silhouette the depth jumps and its slope means nothing)
+		const float3 vecFaceN = normalize( cross( dPdx, dPdy ) );
+		if ( flDepthStep < depth * 0.02 )
+			puddle *= smoothstep( 0.55, 0.8, abs( vecFaceN.z ) );
 
 		float3 Nw = N;
 		if ( puddle > 0.01 )

@@ -50,7 +50,7 @@ const char *g_MapName;
 
 extern ISoundEmitterSystemBase *soundemitterbase;
 
-ConVar mapbase_load_default_manifest("mapbase_load_default_manifest", "1", FCVAR_ARCHIVE, "Should we automatically load our default manifest file? (\"maps/%mapname%_manifest.txt\")");
+ConVar mapbase_load_default_manifest("mapbase_load_default_manifest", "1", FCVAR_ARCHIVE | FCVAR_REPLICATED, "Should we automatically load our default manifest file? (\"maps/%mapname%_manifest.txt\")");
 
 #ifdef GAME_DLL
 // This constant should change with each Mapbase update
@@ -133,7 +133,7 @@ enum
 
 struct ManifestType_t
 {
-	ManifestType_t( const char *_string, const char *cvarname, const char *cvardesc ) : cvar( cvarname, "1", FCVAR_ARCHIVE, cvardesc )
+	ManifestType_t( const char *_string, const char *cvarname, const char *cvardesc ) : cvar( cvarname, "1", FCVAR_ARCHIVE | FCVAR_REPLICATED, cvardesc )
 	{
 		string = _string;
 	}
@@ -143,7 +143,7 @@ struct ManifestType_t
 	ConVar cvar;
 };
 
-#define DECLARE_MANIFEST_TYPE(name, cvar, desc) { #name,		ConVar(#cvar, "1", FCVAR_ARCHIVE, #desc) }
+#define DECLARE_MANIFEST_TYPE(name, cvar, desc) { #name,		ConVar(#cvar, "1", FCVAR_ARCHIVE | FCVAR_REPLICATED, #desc) }
 
 // KEEP THS IN SYNC WITH THE ENUM!
 static const ManifestType_t gm_szManifestFileStrings[MANIFEST_NUM_TYPES] = {

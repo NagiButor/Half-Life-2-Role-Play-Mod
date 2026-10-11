@@ -59,6 +59,17 @@ public:
 #endif
 	};
 
+	// HL2RPM: bits of CEntry::m_TwoPass. The leaf system writes 0 or 1 (a two-pass model: its
+	// opaque meshes go with the opaque renderables, its translucent ones with the translucents).
+	// The deferred renderer adds ENTRY_OPAQUE_PARTS_DRAWN to a translucent renderable whose opaque
+	// meshes it has drawn in the opaque passes itself: the translucent pass then draws only the
+	// translucent meshes of the model, without its distance fade.
+	enum
+	{
+		ENTRY_TWOPASS = 1,
+		ENTRY_OPAQUE_PARTS_DRAWN = 2,
+	};
+
 	struct CEntry
 	{
 		IClientRenderable	*m_pRenderable;

@@ -99,8 +99,8 @@ float4 DoPointLightBasic( const int index, float3 normal,
 	float3 flLitNormal = lerp( normal, dot( normal, normalizedLightVec ) * normal, litface );
 
 #if DEFCFG_BLINN_PHONG
-	float flSpecular = saturate( dot( normalize( vecWorldRayInv + normalizedLightVec ), flLitNormal ) );
-	flSpecular = pow( flSpecular, phong_exp ) * dot( vecWorldRayInv, flLitNormal );
+	// HL2RPM (PBR): phong_exp is the roughness of the surface (UnpackLightingControls)
+	float flSpecular = SpecularGGX( normal, vecWorldRayInv, normalizedLightVec, phong_exp );
 #else
 	float flSpecular = dot( reflect( -normalizedLightVec, flLitNormal ), vecWorldRayInv );
 	flSpecular = pow( flSpecular, phong_exp );
@@ -167,10 +167,7 @@ PS_OUTPUT main( const PS_INPUT In )
 	UnpackLightingControls( flNormalCtrl.a, phong_exp, half_lambert, litface );
 #endif
 
-	float3 worldRayInv = -vecWorldRay;
-#if DEFCFG_BLINN_PHONG == 0
-		worldRayInv = normalize( worldRayInv );
-#endif
+	float3 worldRayInv = normalize( -vecWorldRay );
 
 	float4 flLight = 0;
 

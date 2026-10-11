@@ -31,9 +31,14 @@ struct defParms_gBuffer
 	// control
 	int iAlphatestRef;
 	int iLitface;
-	int iPhongExp;
+	int iPhongExp;		// HL2RPM (PBR): the gloss of the surface, 0 .. 1 (hl2rpm_pbr.h)
 	int iPhongExp2;
+	int iGlossMask;		// HL2RPM (PBR): the alpha of the bump map scales it
 	int iSSBump;
+	// HL2RPM: the relief of a brush material (hl2rpm_pom_fxc.h), the wind in a tree (hl2rpm_sway_fxc.h)
+	int iPomHeightmap;
+	int iPomScale;
+	int iTreeSway;
 
 	// blending
 	int iBlendmodulateTransform;

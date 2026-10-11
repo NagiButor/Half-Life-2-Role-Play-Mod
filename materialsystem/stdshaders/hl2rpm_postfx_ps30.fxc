@@ -27,6 +27,7 @@ const float4 g_vecLens		: register( c4 );	// x vignette, y grain, z chromatic ab
 const float4 g_vecTint		: register( c5 );	// rgb color balance, w aspect ratio
 const float4 g_vecUV		: register( c6 );	// xy bloom uv offset, zw frame texture size (pixels)
 const float4 g_vecFlare		: register( c7 );	// lens flare of the sun: xy its place (uv), z strength (0 = off), w bloom brightness it starts at
+const float4 g_vecGlare		: register( c8 );	// glare of the sun: rgb its light x how much of it is in sight x strength (0 = off)
 
 struct PS_INPUT
 {
@@ -130,6 +131,22 @@ float4 main( const PS_INPUT In ) : COLOR
 
 			lin += src * f * ( 0.7 + 0.9 * dirt );
 		}
+	}
+
+	// The glare of the sun: its light scattered in the lens and in the eye - a soft glow around
+	// the disk that lies over whatever stands in front of it. Without it the edge of a roof or a
+	// tree crown cut the sun's light off as with a knife: the shafts in the air (the volumetric
+	// passes) have a foot of air to scatter in before a near wall and a street's length before
+	// the far one - "the light isn't there at the edge". The client says how much of the disk
+	// and of the sky right around it is in sight (traces), so it fades as the sun goes behind
+	// something and is gone behind a wall.
+	[branch]
+	if ( dot( g_vecGlare.rgb, 1.0 ) > 0.002 )
+	{
+		const float dg = length( ( uv - g_vecFlare.xy ) * float2( g_vecTint.w, 1.0 ) );
+		// (a tight core, a wide skirt)
+		const float glare = 0.6 * exp( -dg * dg * ( 1.0 / ( 0.05 * 0.05 ) ) ) + 0.16 * exp( -dg * ( 1.0 / 0.15 ) );
+		lin += g_vecGlare.rgb * ( glare * ( 0.85 + 0.5 * dirt ) );
 	}
 
 	// soft shoulder: [ start, exposure ] -> [ start, 1 ] (identity at exposure 1)

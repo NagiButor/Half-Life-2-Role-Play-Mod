@@ -1,5 +1,6 @@
 
 #include "deferred_includes.h"
+#include "hl2rpm_pbr.h"
 
 #include "tier0/memdbgon.h"
 
@@ -51,6 +52,21 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 		SHADER_PARAM( ENVMAPPARALLAX, SHADER_PARAM_TYPE_MATRIX, "[1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1]", "" )
 		SHADER_PARAM( ENVMAPORIGIN, SHADER_PARAM_TYPE_VEC3, "[0 0 0]", "The world space position of the env_cubemap being corrected" )
 
+		// HL2RPM (PBR, hl2rpm_pbr.h): what the material may say, and what the stock material says
+		SHADER_PARAM( PBR_ROUGHNESS, SHADER_PARAM_TYPE_FLOAT, "-1", "0 (a mirror) .. 1 (matte); not set = by what the material is made of" )
+		SHADER_PARAM( PBR_METALNESS, SHADER_PARAM_TYPE_FLOAT, "-1", "0 .. 1" )
+		SHADER_PARAM( PBR_SPECULAR, SHADER_PARAM_TYPE_FLOAT, "-1", "the mirror reflection of the non-metal, 1 = 4 %" )
+		SHADER_PARAM( PBR_GLOSSMASK, SHADER_PARAM_TYPE_BOOL, "", "the alpha of the bump map scales the gloss" )
+		SHADER_PARAM( SURFACEPROP, SHADER_PARAM_TYPE_STRING, "", "" )
+		SHADER_PARAM( NORMALMAPALPHAENVMAPMASK, SHADER_PARAM_TYPE_BOOL, "", "" )
+		SHADER_PARAM( BASEALPHAENVMAPMASK, SHADER_PARAM_TYPE_BOOL, "", "" )
+		SHADER_PARAM( PBR_ROUGHNESS2, SHADER_PARAM_TYPE_FLOAT, "-1", "$pbr_roughness of $basetexture2" )
+
+		// HL2RPM: the relief (parallax occlusion mapping) and the light through thin things
+		SHADER_PARAM( POM_HEIGHTMAP, SHADER_PARAM_TYPE_TEXTURE, "", "the height map of the relief (the client makes one of the bump map)" )
+		SHADER_PARAM( POM_SCALE, SHADER_PARAM_TYPE_FLOAT, "", "the depth of the relief in repeats of the texture; not set = by what the material is" )
+		SHADER_PARAM( PBR_TRANSMISSION, SHADER_PARAM_TYPE_FLOAT, "0", "0 .. 1: how much light shines through (grass, cloth)" )
+
 	END_SHADER_PARAMS
 
 	void SetupParmsGBuffer( defParms_gBuffer &p )
@@ -74,7 +90,10 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 		p.iLitface = LITFACE;
 		p.iPhongExp = PHONG_EXP;
 		p.iPhongExp2 = PHONG_EXP2;
+		p.iGlossMask = PBR_GLOSSMASK;
 		p.iSSBump = SSBUMP;
+		p.iPomHeightmap = POM_HEIGHTMAP;
+		p.iPomScale = POM_SCALE;
 
 		p.iMultiblend = MULTIBLEND;
 		p.iBlendmodulate = BLENDMODULATETEXTURE;
@@ -121,6 +140,11 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 
 		p.iPhongScale = PHONG_SCALE;
 		p.iPhongFresnel = PHONG_FRESNEL;
+		p.iMetalness = PBR_METALNESS;
+		p.iSpecular = PBR_SPECULAR;
+		p.iPomHeightmap = POM_HEIGHTMAP;
+		p.iPomScale = POM_SCALE;
+		p.iTransmission = PBR_TRANSMISSION;
 
 		p.iBlendmodulate = BLENDMODULATETEXTURE;
 	p.iBlendmodulate2 = BLENDMODULATETEXTURE2;
@@ -155,6 +179,30 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 		SET_FLAGS2( MATERIAL_VAR2_LIGHTING_LIGHTMAP );
 		if ( PARM_DEFINED( BUMPMAP ) )
 			SET_FLAGS2( MATERIAL_VAR2_LIGHTING_BUMPED_LIGHTMAP );
+
+		// HL2RPM (PBR): roughness, metalness and specular level of what the material is made of
+		{
+			pbrParms_t pbr;
+			pbr.iRoughness = PBR_ROUGHNESS;
+			pbr.iRoughness2 = PBR_ROUGHNESS2;
+			pbr.iMetalness = PBR_METALNESS;
+			pbr.iSpecular = PBR_SPECULAR;
+			pbr.iGlossMask = PBR_GLOSSMASK;
+			pbr.iGloss = PHONG_EXP;
+			pbr.iGloss2 = PHONG_EXP2;
+			pbr.iSurfaceProp = SURFACEPROP;
+			pbr.iBaseTexture2 = BASETEXTURE2;
+			pbr.iBumpmap = BUMPMAP;
+			pbr.iEnvmap = ENVMAP;
+			pbr.iEnvmapTint = ENVMAPTINT;
+			pbr.iNormalAlphaEnvmapMask = NORMALMAPALPHAENVMAPMASK;
+			pbr.iBaseAlphaEnvmapMask = BASEALPHAENVMAPMASK;
+			InitParmsPBR( pbr, params, pMaterialName );
+		}
+
+		// HL2RPM: the depth of the relief, by what the material is
+		if ( PARM_DEFINED( POM_HEIGHTMAP ) && !PARM_DEFINED( POM_SCALE ) )
+			params[ POM_SCALE ]->SetFloatValue( PBR_GetReliefDepth( pMaterialName ) );
 
 		const bool bDrawToGBuffer = DrawToGBuffer( params );
 

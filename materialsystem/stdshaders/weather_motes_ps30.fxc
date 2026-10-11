@@ -23,7 +23,7 @@ const float4 g_vecUVTransform[8]	: register( c26 );
 const float4 g_vecLightColor		: register( c58 );
 const float4 g_matRainMap[3]		: register( c65 );	// rows of world -> rain map texture (c65 - c67)
 const float4 g_vecMoteLight			: register( c68 );	// x "covered" margin (rain map depth units), y intensity, z rain map valid, w outdoor share
-const float4 g_vecMoteParams		: register( c69 );	// x scattering anisotropy (g), y debug
+const float4 g_vecMoteParams		: register( c69 );	// x scattering anisotropy (g), y debug, z camera indoors (0..1)
 
 struct PS_INPUT
 {
@@ -68,8 +68,10 @@ float4 main( const PS_INPUT In ) : COLOR
 
 	const float3 p = In.vWorldPos;
 
-	// indoors in full, outdoors a trace
-	const float covered = ( g_vecMoteLight.z > 0.5 ) ? Covered( p ) : 0.0;
+	// indoors in full, outdoors a trace. Indoors = under a roof while the camera is indoors
+	// itself (g_vecMoteParams.z, from the GI probes): under a tree or an overhang outdoors the
+	// "roof" alone filled the air with bright specks.
+	const float covered = ( g_vecMoteLight.z > 0.5 ) ? Covered( p ) * g_vecMoteParams.z : 0.0;
 	const float place = lerp( g_vecMoteLight.w, 1.0, covered );
 
 	float lit = 0.0;

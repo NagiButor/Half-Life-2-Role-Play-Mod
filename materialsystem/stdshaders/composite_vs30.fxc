@@ -6,6 +6,8 @@
 // STATIC:		"BASETEXTURE2"			"0..1"
 // STATIC:		"BLENDMODULATE"			"0..1"
 // STATIC:		"MULTIBLEND"			"0..1"
+// STATIC:		"TREESWAY"				"0..1"
+// STATIC:		"POM"					"0..1"
 
 // DYNAMIC:		"COMPRESSED_VERTS"		"0..1"
 // DYNAMIC:		"SKINNING"				"0..1"
@@ -16,11 +18,21 @@
 // SKIP:		$MODEL && $BASETEXTURE2
 // SKIP:		$MODEL && $MULTIBLEND
 // SKIP:		$BASETEXTURE2 && $MULTIBLEND
+// SKIP:		!$MODEL && $TREESWAY
+// SKIP:		$MODEL && $POM
+// SKIP:		$BASETEXTURE2 && $POM
+// SKIP:		$MULTIBLEND && $POM
 
 #include "common_vs_fxc.h"
 #include "common_deferred_fxc.h"
+#include "hl2rpm_sway_fxc.h"
 
 static const bool g_bSkinning		= SKINNING ? true : false;
+
+#if TREESWAY
+const float4 g_vecSwayWind					: register( SHADER_SPECIFIC_CONST_8 );
+const float4 g_vecSwayParams				: register( SHADER_SPECIFIC_CONST_9 );
+#endif
 
 #if MODEL
 
@@ -51,6 +63,12 @@ struct VS_INPUT
 	float4 vNormal					: NORMAL;
 #else
 	float3 vPos						: POSITION;
+
+#if POM
+	float3 vNormal					: NORMAL;
+	float3 vTangentS				: TANGENT;
+	float3 vTangentT				: BINORMAL;
+#endif
 
 #endif
 
@@ -95,7 +113,9 @@ struct VS_OUTPUT
 	float2 vTexCoord				: TEXCOORD0;
 #endif
 
-	//float3 vProjPosXYW				: TEXCOORD1;
+	// HL2RPM: from the surface to the eye in tangent space (parallax occlusion mapping,
+	// composite_ps30; the G-buffer pass makes the same of the same)
+	float3 vecViewTS				: TEXCOORD1;
 	float3 worldPos					: TEXCOORD2;
 
 #if EYEVEC
@@ -147,6 +167,11 @@ VS_OUTPUT main( const VS_INPUT In )
 	ApplyMorph( In.vPosFlex, In.vNormalFlex, vPos.xyz, vNormal );
 #endif
 
+#if TREESWAY
+	// HL2RPM: trees and bushes in the wind (the same in the shadow and composite passes)
+	vPos.xyz = TreeSway( vPos.xyz, cModel[0], g_vecSwayWind, g_vecSwayParams );
+#endif
+
 #if DECAL
 	SkinPositionAndNormal( g_bSkinning, vPos, vNormal,
 		In.vBoneWeights, In.vBoneIndices,
@@ -193,6 +218,16 @@ VS_OUTPUT main( const VS_INPUT In )
 	//Out.vProjPosXYW = Out.vProjPos.xyw;
 
 	Out.worldPos = worldPos;
+
+#if POM
+	const float3 vecPomNormal = mul( In.vNormal, ( float3x3 )cModel[0] );
+	const float3 vecPomTangentS = mul( In.vTangentS, ( float3x3 )cModel[0] );
+	const float3 vecPomTangentT = mul( In.vTangentT, ( float3x3 )cModel[0] );
+	const float3 vecToEye = cEyePos - worldPos;
+	Out.vecViewTS = float3( dot( vecToEye, vecPomTangentS ), dot( vecToEye, vecPomTangentT ), dot( vecToEye, vecPomNormal ) );
+#else
+	Out.vecViewTS = float3( 0.0f, 0.0f, 1.0f );
+#endif
 
 #if EYEVEC
 	Out.worldToEye = flEyepos - worldPos;

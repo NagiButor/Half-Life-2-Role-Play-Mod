@@ -68,9 +68,13 @@ float3 DecodeDirectionVectorXYZFromSphericalST( half2 vSphericalST )
     return vDirectionVector.xyz * 2 + float3(0,0,-1);*/
 }
 
-// phong exp 6						-half lambert 1	- litface 1
+// gloss 6							-half lambert 1	- litface 1
 // 128 + 64 + 32 + 16 + 8 + 4		- 2				- 1
 // 6 bits, 63						- 1				- 1
+//
+// HL2RPM (PBR): the 6 bits that held a phong exponent hold the gloss of the surface, 0 (rough)
+// .. 62 (a mirror); 63 stays reserved for the marks of the G-buffer pass (gbuffer_ps30). The
+// lighting passes and the composite pass make the roughness of it: 1 - gloss / 62.
 
 float PackLightingControls( int phong_exp, int half_lambert, int litface )
 {
@@ -79,6 +83,7 @@ float PackLightingControls( int phong_exp, int half_lambert, int litface )
 		phong_exp * 4 ) * 0.0039215686f;
 }
 
+// (the first output is the roughness now - the name is kept where the passes call it)
 void UnpackLightingControls( float mixed,
 	out float phong_exp, out bool half_lambert, out bool litface )
 {
@@ -88,16 +93,54 @@ void UnpackLightingControls( float mixed,
 	float tmp = fmod( mixed -= litface, 4.0f );
 	phong_exp = fmod( mixed -= tmp, 256.0f );
 
-#if 0
-	// normalized values
-	half_lambert /= 2.0f;
-	phong_exp /= 252.0f;
-#else
-	// pre-scaled values for lighting
-	//half_lambert *= 0.5f;
 	half_lambert = tmp * 0.5f;
-	phong_exp = pow( SPECULAREXP_BASE, 1 + phong_exp * 0.02f );
-#endif
+	// (the marks - the 3D skybox, the first person body - are matte)
+	phong_exp = ( phong_exp > 250.0f ) ? 1.0f : clamp( 1.0f - phong_exp * ( 1.0f / 248.0f ), 0.08f, 1.0f );
+}
+
+// HL2RPM (PBR): the roughness alone (the composite pass)
+float UnpackRoughness( float mixed )
+{
+	mixed *= 255.0f;
+	const float gloss = mixed - fmod( mixed, 4.0f );
+	return ( gloss > 250.0f ) ? 1.0f : clamp( 1.0f - gloss * ( 1.0f / 248.0f ), 0.08f, 1.0f );
+}
+
+// HL2RPM (PBR): the mirror reflection of a light off a rough surface - the GGX distribution of
+// the microfacets x their Smith-Schlick visibility. Without N.L (the passes multiply their
+// light amount in, which holds it and the shadow). In the units of this renderer, where a
+// light's color is what multiplies the albedo (irradiance / pi): the pi of the distribution
+// cancels.
+//
+// The Fresnel factor - how much of the light a surface mirrors: a few % seen from the front,
+// nearly all of it at a glancing angle (the glare of a road toward a low sun) - is split: the
+// composite pass, which knows the material, multiplies by its reflectance from the front (F0);
+// its growth toward glancing angles is here, as a multiple of the F0 of a common non-metal
+// (PBR_F0_REF: 1 from the front .. PBR_FRESNEL_MAX). A metal, whose F0 is high, comes out too
+// bright at glancing angles for it - capped.
+#define PBR_F0_REF 0.04f
+#define PBR_FRESNEL_MAX 9.0f
+
+float SpecularGGX( float3 N, float3 V, float3 L, float roughness )
+{
+	const float a = roughness * roughness;
+	const float a2 = a * a;
+	const float3 H = normalize( V + L );
+	const float NH = saturate( dot( N, H ) );
+	const float NL = saturate( dot( N, L ) );
+	const float NV = abs( dot( N, V ) ) + 1e-3f;
+	const float d = NH * NH * ( a2 - 1.0f ) + 1.0f;
+	const float k = a * 0.5f;
+	const float flFresnel = min( 1.0f + ( 1.0f / PBR_F0_REF - 1.0f ) * pow( 1.0f - saturate( dot( V, H ) ), 5.0f ), PBR_FRESNEL_MAX );
+	return min( a2 / ( d * d ) * 0.25f / ( ( NL * ( 1.0f - k ) + k ) * ( NV * ( 1.0f - k ) + k ) ), 96.0f ) * flFresnel;
+}
+
+// ...and of the light around a surface (pre-integrated: the rougher it is, the less of the
+// glancing angles' reflection is left)
+float EnvFresnel( float3 N, float3 V, float roughness )
+{
+	return 1.0f + ( min( max( 1.0f - roughness, PBR_F0_REF ) * ( 1.0f / PBR_F0_REF ), PBR_FRESNEL_MAX ) - 1.0f )
+		* pow( 1.0f - saturate( dot( N, V ) ), 5.0f );
 }
 
 #define ONEOVERTHREE 0.33333333333333333333333333333333

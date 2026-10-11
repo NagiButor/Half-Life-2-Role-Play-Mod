@@ -6,6 +6,12 @@
 // STATIC:		"BUMPMAP2"			"0..1"
 // STATIC:		"BLENDMODULATE"		"0..1"
 // STATIC:		"MULTIBLEND"		"0..1"
+// STATIC:		"POM"				"0..1"
+
+// SKIP:		$POM && !$BUMPMAP
+// SKIP:		$POM && $BUMPMAP2
+// SKIP:		$POM && $MULTIBLEND
+// SKIP:		$POM && $BLENDMODULATE
 
 // SKIP:		!$BUMPMAP2 && !$MULTIBLEND && $BLENDMODULATE
 // SKIP:		!$BUMPMAP && $BUMPMAP2
@@ -22,6 +28,7 @@
 
 #include "common_ps_fxc.h"
 #include "common_deferred_fxc.h"
+#include "hl2rpm_pom_fxc.h"
 
 
 #if ALPHATEST
@@ -39,15 +46,23 @@ sampler sBumpmap						: register( s1 );
 
 #if PHONGMAP
 sampler sPhongmap						: register( s2 );
-#else
-const float2 g_flPhong_exp				: register( c2 );
 #endif
+// HL2RPM (PBR): x, y the gloss of the material and of the second texture of a blend (0 .. 62),
+// z how much the alpha of the bump map scales it (the specular mask of the stock materials)
+const float4 g_flPhong_exp				: register( c2 );
 
 const float2 g_flHalflambert_Litface	: register( c1 );
 
 // HL2RPM: x 1 while the 3D skybox is drawn, y 1 while the local player's first person body
 // is drawn (defpass_gbuffer)
 const float2 g_vecPassMarks				: register( c3 );
+
+#if POM
+// HL2RPM: the relief of the material (hl2rpm_pom_fxc.h): its height map, x its depth, y, z its
+// fade with the distance
+sampler sPomHeight						: register( s7 );
+const float4 g_vecPOM					: register( c4 );
+#endif
 
 #if BUMPMAP2
 sampler sBumpmap2							: register( s3 );
@@ -79,6 +94,10 @@ struct PS_INPUT
 #if BUMPMAP
 	float3 worldTangentS			: TEXCOORD2;
 	float3 worldTangentT			: TEXCOORD3;
+#endif
+
+#if POM
+	float3 vecViewTS				: TEXCOORD4;
 #endif
 
 #if NOCULL
@@ -121,8 +140,18 @@ PS_OUTPUT main( const PS_INPUT In )
 {
 	PS_OUTPUT Out;
 
+#if POM
+	// (the gradients of the texture coordinate as it came: the shifted one is out of a loop)
+	const float2 vecUVdx = ddx( In.vTexCoord.xy );
+	const float2 vecUVdy = ddy( In.vTexCoord.xy );
+	const float2 vecUV = ParallaxOcclusionUV( sPomHeight, In.vTexCoord.xy, In.vecViewTS, g_vecPOM );
+#	define SAMPLE_UV( _s ) tex2Dgrad( _s, vecUV, vecUVdx, vecUVdy )
+#else
+#	define SAMPLE_UV( _s ) tex2D( _s, In.vTexCoord.xy )
+#endif
+
 #if ALPHATEST
-	float4 flAlbedoSample = tex2D( sAlbedo, In.vTexCoord.xy );
+	float4 flAlbedoSample = SAMPLE_UV( sAlbedo );
 #	if ALPHATEST
 	clip( flAlbedoSample.a - g_flAlphaRef );
 #	endif
@@ -133,7 +162,8 @@ PS_OUTPUT main( const PS_INPUT In )
 #else
 
 #if BUMPMAP
-	float3 bumpNormal = tex2D( sBumpmap, In.vTexCoord.xy ).rgb;
+	const float4 bumpSample = SAMPLE_UV( sBumpmap );
+	float3 bumpNormal = bumpSample.rgb;
 
 #if BUMPMAP2
 	float3 bumpNormal2 = tex2D( sBumpmap2, In.vTexCoord.xy ).rgb;
@@ -184,7 +214,7 @@ PS_OUTPUT main( const PS_INPUT In )
 
 #if ( TRANSLUCENT == 0 )
 #	if PHONGMAP
-	float phong_exp = tex2D( sPhongmap, In.vTexCoord.xy ).x * 63.0f;
+	float phong_exp = SAMPLE_UV( sPhongmap ).x * 62.0f;
 #	else
 #		if BUMPMAP2
 	float phong_exp = lerp( g_flPhong_exp.x, g_flPhong_exp.y, flBlendfactor );
@@ -194,6 +224,12 @@ PS_OUTPUT main( const PS_INPUT In )
 	float phong_exp = g_flPhong_exp.x;
 #		endif
 #	endif
+#	if BUMPMAP == 1
+	// (the specular mask: where the stock material mirrored less, the surface is rougher)
+	phong_exp *= lerp( 1.0f, bumpSample.a, g_flPhong_exp.z );
+#	endif
+	// (whole steps: the packing below adds the flags to it)
+	phong_exp = floor( phong_exp + 0.5f );
 #endif
 
 #if DEFCFG_LIGHTCTRL_PACKING

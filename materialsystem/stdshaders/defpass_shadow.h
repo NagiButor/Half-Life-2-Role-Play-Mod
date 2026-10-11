@@ -25,6 +25,9 @@ struct defParms_shadow
 	// blending
 	int iMultiblend;
 
+	// HL2RPM: the wind in a tree (hl2rpm_sway_fxc.h)
+	int iTreeSway;
+
 	// config
 	bool bModel;
 	bool bDepthBias;

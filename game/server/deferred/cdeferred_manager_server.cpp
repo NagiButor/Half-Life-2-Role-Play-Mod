@@ -11,7 +11,7 @@
 
 #include "tier0/memdbgon.h"
 
-static ConVar r_deferred( "r_deferred", "1", FCVAR_ARCHIVE, "Enable deferred renderer (requires SM3)." );
+static ConVar r_deferred( "r_deferred", "1", FCVAR_ARCHIVE | FCVAR_REPLICATED, "Enable deferred renderer (requires SM3)." );
 
 static CDeferredManagerServer __g_defmanager;
 

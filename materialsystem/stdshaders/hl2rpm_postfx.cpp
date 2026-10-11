@@ -288,6 +288,7 @@ BEGIN_VS_SHADER( HL2RPM_POSTFX, "" )
 			const float c6[4] = { data.vecFrameToBloom.z, data.vecFrameToBloom.w, data.vecFrameTexel.z, data.vecFrameTexel.w };
 			pShaderAPI->SetPixelShaderConstant( 6, c6, 1, true );
 			pShaderAPI->SetPixelShaderConstant( 7, data.vecFlare.Base(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 8, data.vecGlare.Base(), 1, true );
 		}
 
 		Draw();

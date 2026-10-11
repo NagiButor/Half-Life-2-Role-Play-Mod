@@ -416,6 +416,7 @@ public:
 
 	// HL2RPM
 	IMaterial *GetDetailSpriteMaterial() { return m_DetailSpriteMaterial; }
+	void SuppressTranslucentSprites( bool bSuppress ) { m_bSuppressTranslucentSprites = bSuppress; }
 
 	// Method of ISpatialLeafEnumerator
 	bool EnumerateLeaf( int leaf, int context );
@@ -495,6 +496,7 @@ private:
 	int m_nFirstSprite;
 	int m_nSortedLeaf;
 	int m_nSortedFastLeaf;
+	bool m_bSuppressTranslucentSprites;	// HL2RPM (SuppressTranslucentSprites)
 	SortInfo_t *m_pSortInfo;
 	SortInfo_t *m_pFastSortInfo;
 	FastSpriteQuadBuildoutBufferX4_t *m_pBuildoutBuffer;
@@ -1428,6 +1430,7 @@ CDetailObjectSystem::CDetailObjectSystem() : m_DetailSpriteDict( 0, 32 ), m_Deta
 	m_pSortInfo = NULL;
 	m_pFastSortInfo = NULL;
 	m_pBuildoutBuffer = NULL;
+	m_bSuppressTranslucentSprites = false;
 }
 
 void CDetailObjectSystem::FreeSortBuffers( void )
@@ -2289,8 +2292,48 @@ int CDetailObjectSystem::BuildOutSortedSprites( CFastDetailLeafSpriteList *pData
 }
 
 
+//-----------------------------------------------------------------------------
+// HL2RPM: grass in the wind. The top edge of every sprite leans with the wind of the weather
+// and swings about that lean, each tuft out of step with its neighbours (by where it stands).
+// The same for every pass of a frame (the G-buffer and the composite draw the sprites alike).
+//-----------------------------------------------------------------------------
+static Vector2D s_vecDetailWind( 0.0f, 0.0f );
+static float s_flDetailWindTime = 0.0f;
+
+static void UpdateDetailWind()
+{
+	static ConVarRef r_deferred_treesway( "r_deferred_treesway" );
+	static ConVarRef r_deferred_treesway_strength( "r_deferred_treesway_strength" );
+	s_vecDetailWind.Init( 0.0f, 0.0f );
+	s_flDetailWindTime = gpGlobals->curtime;
+	if ( r_deferred_treesway.IsValid() && !r_deferred_treesway.GetBool() )
+		return;
+	C_WeatherSystem *pWeather = GetWeatherSystem();
+	Vector2D vecWind( 0.12f, 0.05f );
+	if ( pWeather && pWeather->IsActive() )
+	{
+		vecWind = pWeather->GetRainSlant() * 2.0f;
+		// (a breath of air on the calmest day)
+		const float flLen = vecWind.Length();
+		const Vector2D vecDir = ( flLen > 1e-4f ) ? vecWind / flLen : pWeather->GetWindDir();
+		vecWind = vecDir * ( flLen + 0.14f );
+	}
+	s_vecDetailWind = vecWind * ( r_deferred_treesway_strength.IsValid() ? r_deferred_treesway_strength.GetFloat() : 1.0f );
+}
+
+// the shift of a sprite's top edge: vecBase its foot, flHeight its height (units)
+static inline Vector DetailWindSway( float flBaseX, float flBaseY, float flHeight )
+{
+	const float flPhase = flBaseX * 0.031f + flBaseY * 0.047f;
+	const float t = s_flDetailWindTime;
+	const float flSwing = 0.5f + 0.5f * sinf( t * 1.9f + flPhase ) + 0.35f * sinf( t * 4.3f + flPhase * 2.1f );
+	const float flAmount = flHeight * 0.45f * flSwing;
+	return Vector( s_vecDetailWind.x * flAmount, s_vecDetailWind.y * flAmount, 0.0f );
+}
+
 void CDetailObjectSystem::RenderFastSprites( const Vector &viewOrigin, const Vector &viewForward, const Vector &viewRight, const Vector &viewUp, int nLeafCount, LeafIndex_t const * pLeafList )
 {
+	UpdateDetailWind();
 	const float flLightScale = DetailLightScale();
 
 	// Here, we must draw all detail objects back-to-front
@@ -2392,19 +2435,23 @@ void CDetailObjectSystem::RenderFastSprites( const Vector &viewOrigin, const Vec
 
 					DetailPropSpriteDict_t *pDict = pquad->m_pSpriteDefs[0];
 
+					// HL2RPM: the top edge (vertices 1 and 2) moves in the wind
+					const Vector vecSway = DetailWindSway( pquad->m_flX0[0], pquad->m_flY0[0],
+						fabsf( pquad->m_flZ1[0] - pquad->m_flZ0[0] ) );
+
 					meshBuilder.Position3f( pquad->m_flX0[0], pquad->m_flY0[0], pquad->m_flZ0[0] );
 					meshBuilder.Color4ubv( color );
 					meshBuilder.TexCoord2f( 0, pDict->m_TexLR.x, pDict->m_TexLR.y );
 					meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 					meshBuilder.AdvanceVertex();
 
-					meshBuilder.Position3f( pquad->m_flX1[0], pquad->m_flY1[0], pquad->m_flZ1[0] );
+					meshBuilder.Position3f( pquad->m_flX1[0] + vecSway.x, pquad->m_flY1[0] + vecSway.y, pquad->m_flZ1[0] );
 					meshBuilder.Color4ubv( color );
 					meshBuilder.TexCoord2f( 0, pDict->m_TexLR.x, pDict->m_TexUL.y );
 					meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
 					meshBuilder.AdvanceVertex();
 
-					meshBuilder.Position3f( pquad->m_flX2[0], pquad->m_flY2[0], pquad->m_flZ2[0] );
+					meshBuilder.Position3f( pquad->m_flX2[0] + vecSway.x, pquad->m_flY2[0] + vecSway.y, pquad->m_flZ2[0] );
 					meshBuilder.Color4ubv( color );
 					meshBuilder.TexCoord2f( 0, pDict->m_TexUL.x, pDict->m_TexUL.y );
 					meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );	// HL2RPM: deferred (G-buffer) sprites are lit like the ground
@@ -2432,7 +2479,7 @@ void CDetailObjectSystem::RenderFastSprites( const Vector &viewOrigin, const Vec
 void CDetailObjectSystem::RenderTranslucentDetailObjects( const Vector &viewOrigin, const Vector &viewForward, const Vector &viewRight, const Vector &viewUp, int nLeafCount, LeafIndex_t *pLeafList )
 {
 	VPROF_BUDGET( "CDetailObjectSystem::RenderTranslucentDetailObjects", VPROF_BUDGETGROUP_DETAILPROP_RENDERING );
-	if (nLeafCount == 0)
+	if (nLeafCount == 0 || m_bSuppressTranslucentSprites)
 		return;
 
 	// We better not have any partially drawn leaf of detail sprites!
@@ -2670,6 +2717,9 @@ void CDetailObjectSystem::RenderFastTranslucentDetailObjectsInLeaf( const Vector
 void CDetailObjectSystem::RenderTranslucentDetailObjectsInLeaf( const Vector &viewOrigin, const Vector &viewForward, const Vector &viewRight, const Vector &viewUp, int nLeaf, const Vector *pVecClosestPoint )
 {
 	VPROF_BUDGET( "CDetailObjectSystem::RenderTranslucentDetailObjectsInLeaf", VPROF_BUDGETGROUP_DETAILPROP_RENDERING );
+
+	if ( m_bSuppressTranslucentSprites )
+		return;
 
 	RenderFastTranslucentDetailObjectsInLeaf( viewOrigin, viewForward, viewRight, viewUp, nLeaf, pVecClosestPoint );
 	// We may have already sorted this leaf. If not, sort the leaf.

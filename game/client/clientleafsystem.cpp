@@ -23,6 +23,7 @@
 #include "datacache/imdlcache.h"
 #include "view.h"
 #include "viewrender.h"
+#include "deferred/deferred_occlusion.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -1581,6 +1582,10 @@ void CClientLeafSystem::CollateRenderablesInLeaf( int leaf, int worldListLeafInd
 			if ( engine->CullBox( absMins, absMaxs ) )
 				continue;
 		}
+
+		// HL2RPM: behind the walls of the map (deferred/deferred_occlusion.cpp; the main view only)
+		if ( DeferredOcclusion_IsCollecting() && DeferredOcclusion_IsBoxHidden( absMins, absMaxs ) )
+			continue;
 
 		// UNDONE: Investigate speed tradeoffs of occlusion culling brush models too?
 		if ( renderable.m_Flags & RENDER_FLAGS_STUDIO_MODEL )

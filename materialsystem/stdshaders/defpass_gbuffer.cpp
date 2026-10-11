@@ -1,5 +1,6 @@
 
 #include "deferred_includes.h"
+#include "hl2rpm_pbr.h"
 
 #include "gbuffer_vs30.inc"
 #include "gbuffer_ps30.inc"
@@ -49,6 +50,9 @@ void InitPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 	if ( PARM_DEFINED( info.iAlbedo ) )
 		pShader->LoadTexture( info.iAlbedo );
 
+	if ( PARM_DEFINED( info.iPomHeightmap ) )
+		pShader->LoadTexture( info.iPomHeightmap );
+
 #if DEFCFG_DEFERRED_SHADING == 1
 	if ( PARM_DEFINED( info.iAlbedo2 ) )
 		pShader->LoadTexture( info.iAlbedo2 );
@@ -95,6 +99,11 @@ void DrawPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 	const bool bAlphatest = IS_FLAG_SET( MATERIAL_VAR_ALPHATEST ) && bAlbedo;
 	const bool bTranslucent = IS_FLAG_SET( MATERIAL_VAR_TRANSLUCENT ) && bAlbedo && bIsDecal;
 	const bool bSSBump = bBumpmap && PARM_SET( info.iSSBump );
+
+	// HL2RPM: the relief - plain bumped brush materials with a height map (no blends); the wind
+	const bool bPOM = !bModel && !bIsDecal && bBumpmap && !bBumpmap2 && !bAlbedo2 && !bMultiBlend
+		&& PARM_TEX( info.iPomHeightmap );
+	const int iTreeSway = ( bModel && PARM_VALID( info.iTreeSway ) && PARM_DEFINED( info.iTreeSway ) ) ? PARM_INT( info.iTreeSway ) : 0;
 
 	Assert( !bIsDecal || bDeferredShading );
 	Assert( !bTranslucent || bDeferredShading );
@@ -158,6 +167,12 @@ void DrawPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER2, false );
 		}
 
+		if ( bPOM )
+		{
+			pShaderShadow->EnableTexture( SHADER_SAMPLER7, true );
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER7, false );
+		}
+
 		if ( bAlbedo2 || bBumpmap2 || bMultiBlendBump )
 		{
 			pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
@@ -202,6 +217,7 @@ void DrawPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 		SET_STATIC_VERTEX_SHADER_COMBO( BUMPMAP2, bBumpmap2 && !bMultiBlend );
 		SET_STATIC_VERTEX_SHADER_COMBO( BLENDMODULATE, bBlendmodulate );
 		SET_STATIC_VERTEX_SHADER_COMBO( MULTIBLEND, bMultiBlendBump );
+		SET_STATIC_VERTEX_SHADER_COMBO( TREESWAY, iTreeSway > 0 );
 		SET_STATIC_VERTEX_SHADER( gbuffer_vs30 );
 
 #if DEFCFG_DEFERRED_SHADING == 1
@@ -221,6 +237,7 @@ void DrawPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 		SET_STATIC_PIXEL_SHADER_COMBO( DECAL, bIsDecal );
 		SET_STATIC_PIXEL_SHADER( gbuffer_defshading_ps30 );
 #else
+		SET_STATIC_PIXEL_SHADER_COMBO( POM, bPOM );
 		SET_STATIC_PIXEL_SHADER( gbuffer_ps30 );
 #endif
 	}
@@ -252,20 +269,21 @@ void DrawPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 
 			if ( bPhongmap )
 				tmpBuf.BindTexture( pShader, SHADER_SAMPLER2, info.iPhongmap );
-			else
+
+			if ( bPOM )
+				tmpBuf.BindTexture( pShader, SHADER_SAMPLER7, info.iPomHeightmap );
+
+			// HL2RPM (PBR): the gloss of the surface, 0 .. 62 (63 is reserved for the marks of
+			// the pass), of the second texture of a blend, and whether the alpha of the bump
+			// map scales it (the specular mask of the stock materials)
 			{
-				float flPhongExp[2] = { 0 };
-				flPhongExp[0] = clamp( PARM_FLOAT( info.iPhongExp ), 0, 1 ) * 63.0f;
-
-				if ( bBumpmap2 || bAlbedo2 )
-				{
-					PARM_VALIDATE( info.iPhongExp2 );
-
-					flPhongExp[1] = clamp( PARM_FLOAT( info.iPhongExp2 ), 0, 1 ) * 63.0f;
-					tmpBuf.SetPixelShaderConstant2( 2, flPhongExp[0], flPhongExp[1] );
-				}
-				else
-					tmpBuf.SetPixelShaderConstant1( 2, flPhongExp[0] );
+				float flGloss[4] = { 0, 0, 0, 0 };
+				flGloss[0] = clamp( PARM_FLOAT( info.iPhongExp ), 0, 1 ) * 62.0f;
+				flGloss[1] = flGloss[0];
+				if ( ( bBumpmap2 || bAlbedo2 ) && info.iPhongExp2 != -1 )
+					flGloss[1] = clamp( PARM_FLOAT( info.iPhongExp2 ), 0, 1 ) * 62.0f;
+				flGloss[2] = ( bBumpmap && !bSSBump && info.iGlossMask != -1 && PARM_SET( info.iGlossMask ) ) ? 1.0f : 0.0f;
+				tmpBuf.SetPixelShaderConstant4( 2, flGloss[0], flGloss[1], flGloss[2], flGloss[3] );
 			}
 
 			if ( bAlbedo2 || bBumpmap2 || bMultiBlendBump )
@@ -379,6 +397,17 @@ void DrawPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 		}
 
 		pShader->LoadViewMatrixIntoVertexShaderConstant( VERTEX_SHADER_AMBIENT_LIGHT );
+
+		// HL2RPM: the relief (per draw: the convars, the view - the composite pass sets the same)
+		if ( bPOM )
+		{
+			float flPOM[4];
+			PBR_GetReliefConstants( PARM_VALID( info.iPomScale ) ? PARM_FLOAT( info.iPomScale ) : 0.0f,
+				GetDeferredExt()->IsReflectionView(), flPOM );
+			pShaderAPI->SetPixelShaderConstant( 4, flPOM, 1, true );
+		}
+		if ( iTreeSway > 0 )
+			PBR_SetTreeSwayConstants( pShaderAPI, iTreeSway );
 
 		pShaderAPI->ExecuteCommandBuffer( pDeferredContext->GetCommands( CDeferredPerMaterialContextData::DEFSTAGE_GBUFFER ) );
 	}

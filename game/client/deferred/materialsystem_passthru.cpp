@@ -18,6 +18,7 @@
 #include "deferred/deferred_gi.h"
 #include "deferred/deferred_taa.h"
 #include "deferred/deferred_postfx.h"
+#include "deferred/deferred_pom.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -40,6 +41,14 @@ CON_COMMAND( r_deferred_list_materials, "Dev: list loaded materials containing <
 		nTotal++;
 		if ( !pMat || ( *pszFilter && !V_stristr( pMat->GetName(), pszFilter ) ) )
 			continue;
+		// (asking for the shader or a variable loads the material: one left over from a map
+		// played before has no file any more - "error loading vmt file")
+		if ( !pMat->IsPrecached() )
+		{
+			Msg( "[matlist] %s | not loaded\n", pMat->GetName() );
+			nShown++;
+			continue;
+		}
 		bool bFound = false;
 		IMaterialVar *pTranslucent = pMat->FindVar( "$translucent", &bFound, false );
 		IMaterialVar *pAlphaTest = pMat->FindVar( "$alphatest", &bFound, false );
@@ -49,6 +58,17 @@ CON_COMMAND( r_deferred_list_materials, "Dev: list loaded materials containing <
 			pMat->IsTranslucent() ? 1 : 0, pMat->GetMaterialVarFlag( MATERIAL_VAR_TRANSLUCENT ) ? 1 : 0,
 			pTranslucent ? pTranslucent->GetIntValue() : -1, pMat->IsAlphaTested() ? 1 : 0,
 			pAlphaTest ? pAlphaTest->GetIntValue() : -1, pMat->GetAlphaModulation() );
+		// (what the renderer gave it: wind sway, light through it, two-sided light, relief)
+		IMaterialVar *pSway = pMat->FindVar( "$treesway", &bFound, false );
+		IMaterialVar *pTransmission = pMat->FindVar( "$pbr_transmission", &bFound, false );
+		IMaterialVar *pLitface = pMat->FindVar( "$litface", &bFound, false );
+		IMaterialVar *pRelief = pMat->FindVar( "$pom_heightmap", &bFound, false );
+		if ( pSway || pTransmission || pLitface || pRelief )
+		{
+			Msg( "[matlist]     sway %d, transmission %.2f, litface %d, relief %s\n", pSway ? pSway->GetIntValue() : 0,
+				pTransmission ? pTransmission->GetFloatValue() : 0.0f, pLitface ? pLitface->GetIntValue() : 0,
+				( pRelief && pRelief->IsDefined() ) ? pRelief->GetStringValue() : "-" );
+		}
 		nShown++;
 	}
 	Msg( "[matlist] %d of %d materials\n", nShown, nTotal );
@@ -119,7 +139,143 @@ static bool IsHairMaterial( const char *pszName )
 	return false;
 }
 
+//-----------------------------------------------------------------------------
+// HL2RPM: what moves in the wind (stdshaders/hl2rpm_sway_fxc.h) - a narrower list than the
+// vegetation above: a rigid prop taken for a plant by its name ("powerplant") only gets other
+// lighting there, here it would wave.
+//-----------------------------------------------------------------------------
+static bool IsSwayMaterial( const char *pszName )
+{
+	if ( !pszName || V_strnicmp( pszName, "models", 6 ) != 0 )
+		return false;
+	static const char *const s_pszKeys[] = {
+		"foliage", "grass", "bush", "shrub", "fern", "leaf", "leaves", "hedge", "ivy",
+		"weed", "/tree", "tree_", "_tree", "trees",
+	};
+	// (what lies in the folders of the plants and is no plant)
+	static const char *const s_pszRigid[] = { "driftwood", "rock", "stump", "log", "planter", "pot" };
+	for ( const char *pszKey : s_pszRigid )
+	{
+		if ( V_stristr( pszName, pszKey ) )
+			return false;
+	}
+	for ( const char *pszKey : s_pszKeys )
+	{
+		if ( V_stristr( pszName, pszKey ) )
+			return true;
+	}
+	return false;
+}
+
+// HL2RPM: thin cloth the light shines through (two-sided model materials)
+static bool IsClothMaterial( const char *pszName )
+{
+	if ( !pszName )
+		return false;
+	static const char *const s_pszKeys[] = { "curtain", "cloth", "fabric", "tarp", "awning", "banner", "flag", "canvas", "lampshade" };
+	for ( const char *pszKey : s_pszKeys )
+	{
+		if ( V_stristr( pszName, pszKey ) )
+			return true;
+	}
+	return false;
+}
+
+static ConVar r_deferred_pom_auto( "r_deferred_pom_auto", "1", 0,
+	"Parallax occlusion mapping: brush materials get a height map made of their bump map (takes effect as materials load)" );
+
 // Copied from cdeferred_manager_client.cpp
+//-----------------------------------------------------------------------------
+// HL2RPM (PBR): what single materials are made of, where the guess of the shaders
+// (stdshaders/hl2rpm_pbr.cpp: $surfaceprop, folder, name) is wrong or too coarse.
+// scripts/hl2rpm_pbr.txt:  "<text in the material's name>"  "<roughness> <metalness> <specular>"
+// (-1 = leave it to the guess; the first line that fits wins). Read when a map loads and by
+// r_deferred_pbr_reload; a material that sets $pbr_roughness & co itself keeps its own.
+//-----------------------------------------------------------------------------
+struct PBROverride_t
+{
+	char szKey[128];
+	float flRoughness, flMetalness, flSpecular;
+};
+static CUtlVector< PBROverride_t > s_PBROverrides;
+static bool s_bPBROverridesLoaded = false;
+
+static void LoadPBROverrides()
+{
+	s_bPBROverridesLoaded = true;
+	s_PBROverrides.RemoveAll();
+	KeyValues *pKV = new KeyValues( "hl2rpm_pbr" );
+	if ( pKV->LoadFromFile( filesystem, "scripts/hl2rpm_pbr.txt", "MOD" ) )
+	{
+		for ( KeyValues *pSub = pKV->GetFirstValue(); pSub; pSub = pSub->GetNextValue() )
+		{
+			PBROverride_t o;
+			V_strncpy( o.szKey, pSub->GetName(), sizeof( o.szKey ) );
+			V_FixSlashes( o.szKey, '/' );
+			o.flRoughness = o.flMetalness = o.flSpecular = -1.0f;
+			sscanf( pSub->GetString(), "%f %f %f", &o.flRoughness, &o.flMetalness, &o.flSpecular );
+			if ( o.szKey[0] )
+				s_PBROverrides.AddToTail( o );
+		}
+	}
+	pKV->deleteThis();
+	DevMsg( "[pbr] %d material overrides (scripts/hl2rpm_pbr.txt)\n", s_PBROverrides.Count() );
+}
+
+static void ApplyPBROverride( KeyValues *pMsg, const char *pszMatname )
+{
+	// (read at the first material: the world's materials are loaded before any level init)
+	if ( !s_bPBROverridesLoaded )
+		LoadPBROverrides();
+	if ( !pszMatname || s_PBROverrides.Count() == 0 )
+		return;
+	char szName[MAX_PATH];
+	V_strncpy( szName, pszMatname, sizeof( szName ) );
+	V_FixSlashes( szName, '/' );
+	for ( int i = 0; i < s_PBROverrides.Count(); i++ )
+	{
+		const PBROverride_t &o = s_PBROverrides[i];
+		if ( !V_stristr( szName, o.szKey ) )
+			continue;
+		if ( o.flRoughness >= 0.0f && !pMsg->FindKey( "$pbr_roughness" ) )
+			pMsg->SetFloat( "$pbr_roughness", o.flRoughness );
+		if ( o.flMetalness >= 0.0f && !pMsg->FindKey( "$pbr_metalness" ) )
+			pMsg->SetFloat( "$pbr_metalness", o.flMetalness );
+		if ( o.flSpecular >= 0.0f && !pMsg->FindKey( "$pbr_specular" ) )
+			pMsg->SetFloat( "$pbr_specular", o.flSpecular );
+		return;
+	}
+}
+
+CON_COMMAND( r_deferred_pbr_reload, "Read scripts/hl2rpm_pbr.txt again and load the materials anew" )
+{
+	LoadPBROverrides();
+	engine->ClientCmd_Unrestricted( "mat_reloadallmaterials\n" );
+}
+
+//-----------------------------------------------------------------------------
+// HL2RPM: has the map cubemaps of its own? A map compiled and never opened with
+// buildcubemaps has none: every $envmap material gets the engine's default cubemap. The
+// shaders are told (mat_hl2rpm_map_cubemaps): the deferred composite mirrors the light at the
+// pixel instead, the forward materials (weather_render.cpp) show less of it.
+//-----------------------------------------------------------------------------
+static void DetectMapCubemaps()
+{
+	char szMap[MAX_PATH];
+	V_FileBase( engine->GetLevelName(), szMap, sizeof( szMap ) );
+	char szPath[MAX_PATH];
+	V_snprintf( szPath, sizeof( szPath ), "materials/maps/%s/c*.vtf", szMap );
+	FileFindHandle_t hFind = FILESYSTEM_INVALID_FIND_HANDLE;
+	const bool bFound = filesystem->FindFirstEx( szPath, "GAME", &hFind ) != NULL;
+	filesystem->FindClose( hFind );
+
+	ConVarRef mat_hl2rpm_map_cubemaps( "mat_hl2rpm_map_cubemaps" );
+	if ( mat_hl2rpm_map_cubemaps.IsValid() )
+		mat_hl2rpm_map_cubemaps.SetValue( bFound ? 1 : 0 );
+	if ( !bFound )
+		Msg( "[deferred] map %s has no built cubemaps: $envmap materials mirror the light around them instead\n", szMap );
+}
+
 static void ShaderReplaceReplMat( const char *szNewShadername, IMaterial *pMat, bool bVegetation = false, bool bHair = false )
 {
 	const char *pszOldShadername = pMat->GetShaderName();
@@ -244,6 +400,14 @@ static void ShaderReplaceReplMat( const char *szNewShadername, IMaterial *pMat, 
 		// deferred model shader instead, it is lit like the sky behind it.
 		if ( pszMatname && V_stristr( pszMatname, "props_combine/" ) && V_stristr( pszMatname, "citadel" ) )
 			msg->SetInt( "$deferredtranslucent", 1 );
+		// HL2RPM: glass of models (the windshield of the APC, bottles, windows of vehicles): blended
+		// with a cubemap. The forward fallback lights it with the lighting baked into the map and
+		// mirrors the cubemap - the default one on a map without cubemaps: a white or greenish
+		// "fullbright" pane in the rain and at night. Composited by the deferred model shader it is
+		// lit by the light behind it and mirrors the light around it.
+		else if ( !bSelfillum && !V_stricmp( szNewShadername, "DEFERRED_MODEL" ) && msg->FindKey( "$envmap" )
+			&& !pMat->GetMaterialVarFlag( MATERIAL_VAR_ADDITIVE ) )
+			msg->SetInt( "$deferredtranslucent", 1 );
 	}
 
 	if ( pMat->IsTwoSided() )
@@ -270,6 +434,50 @@ static void ShaderReplaceReplMat( const char *szNewShadername, IMaterial *pMat, 
 	if ( pMat->GetMaterialVarFlag( MATERIAL_VAR_NOFOG ) )
 	{
 		msg->SetInt( "$nofog", 1 );
+	}
+
+	ApplyPBROverride( msg, pszMatname );
+
+	const bool bDeferredModel = !V_stricmp( szNewShadername, "DEFERRED_MODEL" );
+	const bool bDeferredBrush = !V_stricmp( szNewShadername, "DEFERRED_BRUSH" );
+
+	// HL2RPM: the relief of a plain bumped brush material - a height map made of its bump map
+	// (deferred_pom.cpp; a material that names a $pom_heightmap itself keeps its own)
+	if ( bDeferredBrush && !bDecal && !bAlphaBlending && r_deferred_pom_auto.GetBool() && !msg->FindKey( "$pom_heightmap" )
+		&& !msg->FindKey( "$basetexture2" ) && !msg->FindKey( "$bumpmap2" ) )
+	{
+		const char *pszBump = msg->GetString( "$bumpmap", "" );
+		if ( pszBump[0] )
+		{
+			const char *pszHeight = DeferredPOM_GetHeightTexture( pszBump, msg->GetInt( "$ssbump", 0 ) != 0 );
+			if ( pszHeight )
+				msg->SetString( "$pom_heightmap", pszHeight );
+		}
+	}
+
+	// HL2RPM: leaves and grass - lit from both sides, glowing against the sun, moving in the wind
+	if ( bVegetation && !bDecal )
+	{
+		const bool bLeaves = bAlphaTesting || bAlphaBlending;
+		if ( bLeaves )
+		{
+			msg->SetInt( "$litface", 1 );
+			if ( !msg->FindKey( "$pbr_transmission" ) )
+				msg->SetFloat( "$pbr_transmission", bDeferredModel ? 0.6f : 0.45f );
+		}
+		// (Mapbase's copies of the stock tree materials say "$treesway 0" - its own sway, of the
+		// forward shaders, is for the "_sway" skins a mapper picks. Here every tree moves: the
+		// wind is the weather's. "$treesway -1" in a material keeps it still.)
+		if ( bDeferredModel && IsSwayMaterial( pszMatname ) && msg->GetInt( "$treesway", 0 ) >= 0 )
+			msg->SetInt( "$treesway", bLeaves ? 2 : 1 );
+		else if ( msg->FindKey( "$treesway" ) )
+			msg->SetInt( "$treesway", 0 );
+	}
+	else if ( bDeferredModel && !bDecal && !bAlphaBlending && pMat->IsTwoSided() && IsClothMaterial( pszMatname ) )
+	{
+		msg->SetInt( "$litface", 1 );
+		if ( !msg->FindKey( "$pbr_transmission" ) )
+			msg->SetFloat( "$pbr_transmission", 0.3f );
 	}
 
 	pMat->SetShaderAndParams( msg );
@@ -422,6 +630,7 @@ static void DeferredMaterials_OnRelease()
 }
 
 extern void DeferredSkyLUT_ForceRebuild();	// viewrender_deferred.cpp
+extern void WeatherRender_OnMaterialsRestored();	// weather_render.cpp
 
 static void DeferredMaterials_OnRestore( int nChangeFlags )
 {
@@ -438,6 +647,8 @@ static void DeferredMaterials_OnRestore( int nChangeFlags )
 	DeferredTAA_Reset();
 	DeferredPostFX_Reset();
 	DeferredSkyLUT_ForceRebuild();
+	// (the materials may have been loaded anew: the colors scaled with the light go back in)
+	WeatherRender_OnMaterialsRestored();
 }
 
 static void DeferredMaterials_ReplaceSweep( const char *pszWhen )
@@ -480,6 +691,7 @@ public:
 	{
 		// the new map's models are loaded now: their materials are replaced as found
 		s_bMaterialsRestoring = false;
+		DetectMapCubemaps();
 	}
 
 	virtual void LevelInitPostEntity()

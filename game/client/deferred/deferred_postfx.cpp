@@ -78,6 +78,8 @@ static ConVar r_hl2rpm_ca( "r_hl2rpm_ca", "0.8", 0, "Lens: chromatic aberration 
 static ConVar r_hl2rpm_flare( "r_hl2rpm_flare", "0.5", 0, "Lens: flare of the sun (ghosts along the line through the center of the frame, a halo)", true, 0.0f, true, 4.0f );
 static ConVar r_hl2rpm_flare_threshold( "r_hl2rpm_flare_threshold", "0.06", 0, "Lens flare: brightness of the bloom at the sun it starts at", true, 0.0f, true, 4.0f );
 static ConVar r_hl2rpm_flare_debug( "r_hl2rpm_flare_debug", "0", 0, "Lens flare: print where the sun is on screen and what the visibility trace hit, twice a second" );
+// HL2RPM: the glare of the sun (see hl2rpm_postfx_ps30)
+static ConVar r_hl2rpm_glare( "r_hl2rpm_glare", "1.0", FCVAR_ARCHIVE, "Lens: glare of the sun - the soft glow around it, over the edge of what it stands behind (0 = off)", true, 0.0f, true, 4.0f );
 static ConVar r_hl2rpm_sharpen( "r_hl2rpm_sharpen", "0.4", FCVAR_ARCHIVE, "Sharpening of the frame (contrast adaptive, 0..1)", true, 0.0f, true, 1.0f );
 
 static ConVar r_hl2rpm_dof( "r_hl2rpm_dof", "1", FCVAR_ARCHIVE,
@@ -624,6 +626,76 @@ void DeferredPostFX_Draw( const CViewSetup &view )
 		const float flStep = flDt / 0.12f;
 		s_flSunSeen = ( flTarget > s_flSunSeen ) ? Min( flTarget, s_flSunSeen + flStep ) : Max( flTarget, s_flSunSeen - flStep );
 		data.vecFlare.Init( vecSun.x, vecSun.y, s_flSunSeen * r_hl2rpm_flare.GetFloat(), r_hl2rpm_flare_threshold.GetFloat() );
+
+		// The glare: how much of the sun is in sight - its center, six points around it 1.3
+		// degrees out (the disk and the brightest of the sky around it) and six more 4 degrees
+		// out (the aureole): the glow fades while the sun goes behind an edge and a little of it
+		// stays while the sun stands just behind one; a single trace switched it. The two rings
+		// take turns, a frame each (the result is smoothed anyway). The sun may be a little
+		// outside of the frame: the skirt of the glow reaches in.
+		static float s_flGlareSeen = 0.0f;
+		static float s_flRingSeen[2] = { 0.0f, 0.0f };
+		static int s_iRingFrame = 0;
+		float flGlareTarget = 0.0f;
+		Vector vecGlareColor( 0, 0, 0 );
+		const float flGlare = bLens ? r_hl2rpm_glare.GetFloat() : 0.0f;
+		Vector2D vecSunG( 0.5f, 0.5f );
+		Vector vecSunDirG( 0, 0, 1 );
+		if ( flGlare > 0.0f && pWeather && pWeather->IsActive() && WeatherRender_GetSunScreenPos( vecSunG, vecSunDirG ) )
+		{
+			const float flOff = Max( fabsf( vecSunG.x - 0.5f ), fabsf( vecSunG.y - 0.5f ) );
+			const float flNear = clamp( ( 0.68f - flOff ) / 0.16f, 0.0f, 1.0f );
+			if ( flNear > 0.0f )
+			{
+				Vector vecRight, vecUp;
+				VectorVectors( vecSunDirG, vecRight, vecUp );
+				const int iRing = ( s_iRingFrame++ ) & 1;
+				const float flRing = tanf( DEG2RAD( iRing ? 4.0f : 1.3f ) );
+				float flCenter = 0.0f, flSeen = 0.0f;
+				for ( int i = 0; i < 7; i++ )
+				{
+					Vector vecDir = vecSunDirG;
+					if ( i > 0 )
+					{
+						const float a = ( i - 1 + iRing * 0.5f ) * ( 2.0f * M_PI_F / 6.0f );
+						vecDir += ( vecRight * cosf( a ) + vecUp * sinf( a ) ) * flRing;
+					}
+					trace_t tr;
+					UTIL_TraceLine( view.origin, view.origin + vecDir * 30000.0f, MASK_OPAQUE, NULL, COLLISION_GROUP_NONE, &tr );
+					if ( tr.fraction >= 1.0f || ( tr.surface.flags & ( SURF_SKY | SURF_SKY2D ) ) )
+					{
+						if ( i == 0 )
+							flCenter = 1.0f;
+						else
+							flSeen += 1.0f / 6.0f;
+					}
+				}
+				s_flRingSeen[ iRing ] = flSeen;
+				// (the disk itself counts most; the aureole alone leaves a third)
+				flGlareTarget = ( 0.3f * flCenter + 0.35f * s_flRingSeen[0] + 0.35f * s_flRingSeen[1] ) * flNear;
+			}
+
+			// its light: the global light as the weather leaves it (dim behind clouds, red at
+			// sunset, the moon's at night), no brighter than a clear noon
+			const lightData_Global_t light = GetGlobalLight() ? GetGlobalLight()->GetState() : lightData_Global_t();
+			if ( light.bEnabled )
+			{
+				vecGlareColor = light.diff.AsVector3D();
+				const float flMax = Max( vecGlareColor.x, Max( vecGlareColor.y, vecGlareColor.z ) );
+				if ( flMax > 1.0f )
+					vecGlareColor *= 1.0f / flMax;
+			}
+		}
+		const float flGlareStep = flDt / 0.18f;
+		s_flGlareSeen = ( flGlareTarget > s_flGlareSeen ) ? Min( flGlareTarget, s_flGlareSeen + flGlareStep ) : Max( flGlareTarget, s_flGlareSeen - flGlareStep );
+		const float flGlareScale = s_flGlareSeen * flGlare;
+		data.vecGlare.Init( vecGlareColor.x * flGlareScale, vecGlareColor.y * flGlareScale, vecGlareColor.z * flGlareScale, 0.0f );
+		// (the shader takes the sun's place from the flare's constants)
+		if ( flGlareScale > 0.0f )
+		{
+			data.vecFlare.x = vecSunG.x;
+			data.vecFlare.y = vecSunG.y;
+		}
 	}
 
 	data.vecLumBlocks.Init( ( (float)vw / LUM_BLOCKS_X ) / fbw, ( (float)vh / LUM_BLOCKS_Y ) / fbh, LUM_BLOCKS_X, LUM_BLOCKS_Y );

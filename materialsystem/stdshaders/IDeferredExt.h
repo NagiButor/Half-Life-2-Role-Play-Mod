@@ -205,22 +205,28 @@ struct giData_t
 	giData_t()
 	{
 		bEnabled = false;
-		vecGrid.Init();
-		vecDims.Init();
+		for ( int i = 0; i < 2; i++ )
+		{
+			vecGrid[i].Init();
+			vecDims[i].Init();
+		}
 		vecAtlas.Init();
 		vecParams0.Init();
 		vecParams1.Init();
+		vecParams2.Init( 1.0f, 0.0f, 0.0f, 0.0f );
 		vecBlurH.Init();
 		vecBlurV.Init();
 		vecApply.Init();
 	}
 
 	bool bEnabled;
-	Vector4D vecGrid;		// xyz world cell index of the grid's first probe, w 1 / probe spacing
-	Vector4D vecDims;		// xyz probes per axis, w probe spacing (units)
-	Vector4D vecAtlas;		// x 1 / atlas width, y 1 / atlas height, z lookup offset along the normal (units), w debug
-	Vector4D vecParams0;	// x sun bounce scale, y sky bounce scale, z multiple bounce fill, w sky light left without sky in sight
-	Vector4D vecParams1;	// x leak tolerance (units), y probe offset in its cell, z sky light boost (daylight), w unused
+	// two grids of probes: the near one and, around it, the far one (4 x the spacing)
+	Vector4D vecGrid[2];	// xyz world cell index of the grid's first probe, w 1 / probe spacing
+	Vector4D vecDims[2];	// xyz probes per axis (0: the grid is off), w probe spacing (units)
+	Vector4D vecAtlas;		// x 1 / atlas width, y 1 / atlas height, z lookup offset along the normal (x spacing), w debug
+	Vector4D vecParams0;	// x sun bounce scale, y sky bounce scale, z 1 / cells over which the near grid fades into the far one, w sky light left without sky in sight
+	Vector4D vecParams1;	// x leak tolerance (x spacing), y probe offset in its cell, z sky light boost (daylight), w indirect sun boost indoors
+	Vector4D vecParams2;	// x sky in sight at the camera (0 closed room .. 1 open), yzw unused
 	Vector4D vecBlurH;		// xy step (screen uv), z depth tolerance, w GI uv scale
 	Vector4D vecBlurV;
 	Vector4D vecApply;		// x on, y debug, z unused, w GI uv scale (lighting pass)
@@ -256,6 +262,7 @@ struct postfxData_t
 		vecLens.Init();
 		vecTint.Init( 1.0f, 1.0f, 1.0f, 1.0f );
 		vecFlare.Init();
+		vecGlare.Init();
 		vecDoF.Init();
 		vecLumBlocks.Init();
 		vecFrameToBloom.Init();
@@ -274,6 +281,7 @@ struct postfxData_t
 	Vector4D vecLens;			// x vignette, y grain, z chromatic aberration (pixels), w frame
 	Vector4D vecTint;			// rgb color balance, w aspect ratio
 	Vector4D vecFlare;			// lens flare of the sun: xy its place on screen (uv), z strength (0 = off), w bloom brightness there it starts at
+	Vector4D vecGlare;			// glare of the sun (the soft glow around it): rgb its light x how much of it is in sight x strength, w unused
 	Vector4D vecDoF;			// depth of field: x circle of confusion scale (pixels x units), y 1 / focus distance, z largest radius (pixels), w debug
 	Vector4D vecLumBlocks;		// xy one block of the frame (uv) / texel size of the block target, zw blocks in x / y
 	Vector4D vecFrameToBloom;	// xy frame uv -> bloom uv scale, zw offset
@@ -306,7 +314,7 @@ struct taaData_t
 	Vector4D vecCamDelta;		// xyz last camera position - this one
 	Vector4D vecParams;			// x history weight (history like the frame), y (history unlike it), z clip box size (deviations), w reset
 	Vector4D vecParams2;		// x debug mode, y motion (pixels) at which less history is kept, zw view size / texture size
-	Vector4D vecParams3;		// x frame number (dither of the 8 bit history), y mip bias of the albedo in the composite (this frame jittered)
+	Vector4D vecParams3;		// x frame number (dither of the 8 bit history), y mip bias of the albedo in the composite (this frame jittered), z 1 = the frame is accumulated, w phase of per pixel dither patterns this frame (0..1)
 	Vector4D vecTexel;			// xy 1 / texture size, zw texture size
 };
 
@@ -400,7 +408,7 @@ public:
 
 	// HL2RPM: GI probes (atlas), the half resolution indirect light and its blur target
 	virtual void CommitGIData( const giData_t &data ) = 0;
-	virtual void CommitTexture_GI( ITexture *pProbes, ITexture *pGI, ITexture *pBlur ) = 0;
+	virtual void CommitTexture_GI( ITexture *pProbes, ITexture *pProbesFar, ITexture *pGI, ITexture *pBlur ) = 0;
 
 	// HL2RPM: post-processing of the final frame
 	virtual void CommitPostFXData( const postfxData_t &data ) = 0;
@@ -409,7 +417,7 @@ public:
 	virtual void CommitTAAData( const taaData_t &data ) = 0;
 };
 
-#define DEFERRED_EXTENSION_VERSION "DeferredExtensionVersion008"
+#define DEFERRED_EXTENSION_VERSION "DeferredExtensionVersion010"
 
 #ifdef STDSHADER_DX9_DLL_EXPORT
 
@@ -479,9 +487,10 @@ public:
 	virtual void CommitTexture_CascadedDepthRaw( const int &index, ITexture *pTexDepthRaw );
 
 	virtual void CommitGIData( const giData_t &data );
-	virtual void CommitTexture_GI( ITexture *pProbes, ITexture *pGI, ITexture *pBlur );
+	virtual void CommitTexture_GI( ITexture *pProbes, ITexture *pProbesFar, ITexture *pGI, ITexture *pBlur );
 	inline const giData_t &GetGIData() { return m_dataGI; }
 	inline ITexture *GetTexture_GIProbes() { return m_pTexGIProbes; }
+	inline ITexture *GetTexture_GIProbesFar() { return m_pTexGIProbesFar; }
 	inline ITexture *GetTexture_GI() { return m_pTexGI; }
 	inline ITexture *GetTexture_GIBlur() { return m_pTexGIBlur; }
 
@@ -611,6 +620,7 @@ private:
 
 	giData_t m_dataGI;
 	ITexture *m_pTexGIProbes;
+	ITexture *m_pTexGIProbesFar;
 	ITexture *m_pTexGI;
 	ITexture *m_pTexGIBlur;
 

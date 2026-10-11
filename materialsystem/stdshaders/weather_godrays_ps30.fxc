@@ -61,13 +61,18 @@ float4 main( const PS_INPUT In ) : COLOR
 	float jitter = frac( 52.9829189 * frac( dot( In.vScreenPos + g_vecCloudUV.z * 5.588238, float2( 0.06711056, 0.00583715 ) ) ) );
 	float2 p = uv + stepUV * jitter;
 
+	// HL2RPM: the light comes from the sun and the bright sky right around it - a sample of
+	// open sky counts by how close to the sun it is. Every sky pixel on the way counting alike,
+	// the result was a veil over all that stood near the sun on screen; like this the edge of a
+	// roof or the branches of a tree in front of the sun throw rays.
 	float illum = 0.0;
 	float w = 1.0;
 	float wsum = 0.0;
 	[loop]
 	for ( int i = 0; i < NUM_SAMPLES; i++ )
 	{
-		illum += OpenSky( p ) * w;
+		const float2 ds = ( g_vecSun.xy - p ) * float2( g_vecSun.w, 1.0 );
+		illum += OpenSky( p ) * w * ( 0.3 + 1.7 * exp( -dot( ds, ds ) * 26.0 ) );
 		wsum += w;
 		w *= g_vecColor.w;
 		p += stepUV;

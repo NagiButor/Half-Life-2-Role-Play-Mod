@@ -34,10 +34,10 @@
 
 extern ConVar mp_facefronttime, mp_feetyawrate;
 
-ConVar sv_playeranimstate_animtype( "sv_playeranimstate_animtype", "0", FCVAR_NONE, "The leg animation type used by the Mapbase animation state. 9way = 0, 8way = 1, GoldSrc = 2" );
-ConVar sv_playeranimstate_bodyyaw( "sv_playeranimstate_bodyyaw", "45.0", FCVAR_NONE, "The maximum body yaw used by the Mapbase animation state." );
-ConVar sv_playeranimstate_use_aim_sequences( "sv_playeranimstate_use_aim_sequences", "0", FCVAR_NONE, "Allows the Mapbase animation state to use aim sequences." );
-ConVar sv_playeranimstate_use_walk_anims( "sv_playeranimstate_use_walk_anims", "0", FCVAR_NONE, "Allows the Mapbase animation state to use walk animations when the player is walking." );
+ConVar sv_playeranimstate_animtype( "sv_playeranimstate_animtype", "0", FCVAR_REPLICATED, "The leg animation type used by the Mapbase animation state. 9way = 0, 8way = 1, GoldSrc = 2" );
+ConVar sv_playeranimstate_bodyyaw( "sv_playeranimstate_bodyyaw", "45.0", FCVAR_REPLICATED, "The maximum body yaw used by the Mapbase animation state." );
+ConVar sv_playeranimstate_use_aim_sequences( "sv_playeranimstate_use_aim_sequences", "0", FCVAR_REPLICATED, "Allows the Mapbase animation state to use aim sequences." );
+ConVar sv_playeranimstate_use_walk_anims( "sv_playeranimstate_use_walk_anims", "0", FCVAR_REPLICATED, "Allows the Mapbase animation state to use walk animations when the player is walking." );
 
 #define MIN_TURN_ANGLE_REQUIRING_TURN_ANIMATION        15.0f
 

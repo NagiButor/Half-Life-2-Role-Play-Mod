@@ -1,0 +1,64 @@
+//========= HL2RPM ============================================================//
+//
+// The half resolution indirect light (deferred_gi_ps30, blurred) for every pixel
+// of the full resolution: what lightingpass_global_ps30 reads.
+//
+// Each half resolution pixel was computed for the lower right pixel of its 2 x 2
+// block. Of the four around a pixel those count whose surface is the pixel's own -
+// the same normal - and that are a surface at all. A plain bilinear read took the
+// light of the next face across every edge of a box (a light line along the edge,
+// lighter than both faces: "comic" outlines on every brush) and half of the "no
+// light" of the sky along every silhouette (a dark line around hills and roofs
+// against the sky).
+//
+// (A pass of its own: the global light pass has no registers left for it.)
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+sampler sGI				: register( s0 );	// half resolution GI (top left of a full size RT)
+sampler sNormals		: register( s1 );	// G-buffer normals
+
+const float4 g_vecUp	: register( c0 );	// x GI uv scale of the half resolution source
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+};
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	const float2 texel = float2( abs( ddx( In.vTexCoord.x ) ), abs( ddy( In.vTexCoord.y ) ) );
+	const float2 pix = floor( In.vTexCoord / texel );
+	const float2 h0 = floor( pix * 0.5 );
+	// (toward the nearest other half resolution pixel)
+	const float2 dir = ( pix - h0 * 2.0 ) * 2.0 - 1.0;
+	const float2 hMax = floor( 0.5 / texel + 0.01 ) - 1.0;
+
+	const float3 N = normalize( tex2Dlod( sNormals, float4( ( pix + 0.5 ) * texel, 0, 0 ) ).xyz * 2.0 - 1.0 );
+
+	static const float2 vecTap[4] = { float2( 0, 0 ), float2( 1, 0 ), float2( 0, 1 ), float2( 1, 1 ) };
+	static const float flTap[4] = { 0.5625, 0.1875, 0.1875, 0.0625 };
+
+	float4 sum = 0.0;
+	float4 plain = 0.0;
+	float wsum = 0.0;
+	[unroll]
+	for ( int i = 0; i < 4; i++ )
+	{
+		const float2 h = clamp( h0 + dir * vecTap[i], 0.0, hMax );
+		const float4 g = tex2Dlod( sGI, float4( ( h + 0.5 ) * 2.0 * texel * g_vecUp.x, 0, 0 ) );
+		const float3 n = normalize( tex2Dlod( sNormals, float4( ( h * 2.0 + 1.5 ) * texel, 0, 0 ) ).xyz * 2.0 - 1.0 );
+		const float w = flTap[i] * g.a * saturate( dot( n, N ) * 2.0 - 1.0 );
+		sum += g * w;
+		wsum += w;
+		plain += g * flTap[i];
+	}
+
+	// (none of this surface: a shape thinner than two pixels - whatever surfaces there are)
+	if ( wsum > 0.01 )
+		return sum / wsum;
+	return float4( plain.rgb / max( plain.a, 0.001 ), plain.a );
+}

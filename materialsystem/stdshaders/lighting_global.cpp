@@ -38,13 +38,26 @@ static ConVar r_csm_shadow_normal( "r_csm_shadow_normal", "2", 0,
 static ConVar r_csm_footprint( "r_csm_footprint", "0.5", 0,
 	"Sun shadows: filter scale per shadow map texel a pixel covers (0 = off; the B-spline of scale s averages ~2s texels)", true, 0.0f, true, 2.0f );
 // HL2RPM: contact shadows (see lightingpass_global_ps30)
+// HL2RPM (PBR): what the surfaces mirror (lightingpass_global_ps30, composite_ps30)
+static ConVar r_deferred_pbr_sun( "r_deferred_pbr_sun", "1.0", 0, "PBR: the sun's (moon's) mirror reflection", true, 0.0f, true, 4.0f );
+static ConVar r_deferred_pbr_sun_roughness( "r_deferred_pbr_sun_roughness", "0.16", 0,
+	"PBR: least roughness for the sun's reflection (a perfect mirror of the sun's disk is a few pixels of pure white)", true, 0.05f, true, 1.0f );
+static ConVar r_deferred_pbr_env( "r_deferred_pbr_env", "1.0", 0, "PBR: what the surfaces mirror of the light around them", true, 0.0f, true, 4.0f );
+static ConVar r_deferred_pbr_wet( "r_deferred_pbr_wet", "1.0", FCVAR_ARCHIVE, "PBR: rain makes what lies under the open sky smooth (0 = off)", true, 0.0f, true, 1.0f );
+static ConVar r_deferred_pbr_wet_roughness( "r_deferred_pbr_wet_roughness", "0.3", 0, "PBR: the roughness of a wet surface", true, 0.05f, true, 1.0f );
+
 static ConVar r_deferred_contact_shadows( "r_deferred_contact_shadows", "1", FCVAR_ARCHIVE,
 	"Contact shadows: the small shadows right at the foot of things the sun cascades are too coarse for (screen space)" );
-static ConVar r_deferred_contact_shadows_length( "r_deferred_contact_shadows_length", "24", 0, "Contact shadows: how far toward the sun (units)", true, 2.0f, true, 256.0f );
+static ConVar r_deferred_contact_shadows_length( "r_deferred_contact_shadows_length", "24", 0, "Contact shadows: how far toward the sun at most (units)", true, 2.0f, true, 256.0f );
+// HL2RPM: ...and no farther than the sun cascade at the point is coarse (see lightingpass_global_ps30)
+static ConVar r_deferred_contact_shadows_texels( "r_deferred_contact_shadows_texels", "8", 0,
+	"Contact shadows: length of the march in texels of the sun cascade at the point (a fine cascade needs none; 1000 = always the full length)", true, 0.0f, true, 1000.0f );
 static ConVar r_deferred_contact_shadows_thickness( "r_deferred_contact_shadows_thickness", "12", 0, "Contact shadows: how thick an occluder is assumed (units)", true, 1.0f, true, 128.0f );
 static ConVar r_deferred_contact_shadows_distance( "r_deferred_contact_shadows_distance", "1500", 0, "Contact shadows: up to this distance from the eye (units)", true, 0.0f, true, 20000.0f );
 static ConVar r_deferred_contact_shadows_strength( "r_deferred_contact_shadows_strength", "0.85", 0, "Contact shadows: strength (0..1)", true, 0.0f, true, 1.0f );
 static ConVar r_deferred_contact_shadows_debug( "r_deferred_contact_shadows_debug", "0", FCVAR_CHEAT, "Contact shadows debug: red = occlusion, green = strength, blue = lit (march skipped)" );
+static ConVar r_deferred_contact_shadows_dither( "r_deferred_contact_shadows_dither", "1", 0,
+	"Contact shadows: per pixel offset of the march - 0 none, 1 moving with the frame while TAA accumulates (smooth), 2 the same every frame (the old stipple, for comparison)" );
 
 static ConVar r_csm_body_bias( "r_csm_body_bias", "36", 0,
 	"Sun shadows on the local player's first person body ignore casters closer than this (units) - the body's own", true, 0.0f, true, 128.0f );
@@ -145,7 +158,16 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 				float flPCSS[4] = { flSunRadius, flMax, flMaxWorld, bPCSS ? (float)r_csm_pcss.GetInt() : 0.0f };
 				pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 13, flPCSS, 1, true );
 
-				float flShadowExtra[4] = { r_csm_body_bias.GetFloat(), (float)r_csm_shadow_normal.GetInt(), r_csm_footprint.GetFloat(), 0 };
+				// (w: the per pixel dither of the contact shadow march moves every frame while TAA
+				// accumulates the frames - and is off without it, see lightingpass_global_ps30)
+				const taaData_t &taa = GetDeferredExt()->GetTAAData();
+				const int iDither = r_deferred_contact_shadows_dither.GetInt();
+				float flDitherPhase = -1.0f;
+				if ( iDither == 2 )
+					flDitherPhase = 0.0f;
+				else if ( iDither == 1 && taa.vecParams3.z > 0.5f && !GetDeferredExt()->IsReflectionView() )
+					flDitherPhase = taa.vecParams3.w;
+				float flShadowExtra[4] = { r_csm_body_bias.GetFloat(), (float)r_csm_shadow_normal.GetInt(), r_csm_footprint.GetFloat(), flDitherPhase };
 				pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 8, flShadowExtra, 1, true );
 			}
 
@@ -187,7 +209,8 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 4, w.vecCloudParams0.Base(), 1, true );
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 5, w.vecCloudParams1.Base(), 1, true );
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 6, w.vecWind.Base(), 1, true );
-			float flWeatherFlags[4] = { bCloudShadows ? w.vecCloudParams2.y : 0.0f, w.vecCloudParams3.z, 0, 0 };
+			// (z: the contact shadow march, in texels of the cascade at the point)
+			float flWeatherFlags[4] = { bCloudShadows ? w.vecCloudParams2.y : 0.0f, w.vecCloudParams3.z, r_deferred_contact_shadows_texels.GetFloat(), 0 };
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 7, flWeatherFlags, 1, true );
 
 			// HL2RPM: ambient occlusion (SSAO) and sky visibility (top-down occlusion map), both
@@ -221,6 +244,17 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 			float flContact[4] = { r_deferred_contact_shadows_length.GetFloat(), r_deferred_contact_shadows_thickness.GetFloat(),
 				r_deferred_contact_shadows_distance.GetFloat(), bContact ? r_deferred_contact_shadows_strength.GetFloat() : 0.0f };
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 19, flContact, 1, true );
+
+			// HL2RPM (PBR): the sun's reflection; the light around the point as a surface
+			// mirrors it - less of it looking down at the ground, more looking up at the sky
+			const float flEnv = r_deferred_pbr_env.GetFloat();
+			float flPBR[4] = { r_deferred_pbr_sun.GetFloat(), 0.5f * flEnv, 1.3f * flEnv, r_deferred_pbr_sun_roughness.GetFloat() };
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 20, flPBR, 1, true );
+			// (the wetness of the weather: 0 dry .. 1 soaked)
+			const weatherData_t &wetWeather = GetDeferredExt()->GetWeatherData();
+			const float flWetness = wetWeather.bEnabled ? clamp( wetWeather.vecRainParams.y, 0.0f, 1.0f ) * r_deferred_pbr_wet.GetFloat() : 0.0f;
+			float flPBRWet[4] = { flWetness, r_deferred_pbr_wet_roughness.GetFloat(), 0.0f, 0.0f };
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 21, flPBRWet, 1, true );
 		}
 
 		Draw();

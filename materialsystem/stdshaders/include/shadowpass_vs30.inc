@@ -1,4 +1,5 @@
 // ALL SKIP STATEMENTS THAT AFFECT THIS SHADER!!!
+// !$MODEL && $TREESWAY
 // defined $LIGHTING_PREVIEW && defined $FASTPATH && $LIGHTING_PREVIEW && $FASTPATH
 // !$MODEL && $MORPHING_VTEX
 // !$MODEL && $COMPRESSED_VERTS
@@ -12,10 +13,12 @@ class shadowpass_vs30_Static_Index
 	unsigned int m_nMODEL : 2;
 	unsigned int m_nMORPHING_VTEX : 2;
 	unsigned int m_nMULTITEXTURE : 2;
+	unsigned int m_nTREESWAY : 2;
 #ifdef _DEBUG
 	bool m_bMODEL : 1;
 	bool m_bMORPHING_VTEX : 1;
 	bool m_bMULTITEXTURE : 1;
+	bool m_bTREESWAY : 1;
 #endif	// _DEBUG
 public:
 	void SetMODEL( int i )
@@ -45,28 +48,40 @@ public:
 #endif	// _DEBUG
 	}
 
+	void SetTREESWAY( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nTREESWAY = i;
+#ifdef _DEBUG
+		m_bTREESWAY = true;
+#endif	// _DEBUG
+	}
+
 	shadowpass_vs30_Static_Index( IShaderShadow* pShaderShadow, IMaterialVar** params )
 	{
 		m_nMODEL = 0;
 		m_nMORPHING_VTEX = 0;
 		m_nMULTITEXTURE = 0;
+		m_nTREESWAY = 0;
 #ifdef _DEBUG
 		m_bMODEL = false;
 		m_bMORPHING_VTEX = false;
 		m_bMULTITEXTURE = false;
+		m_bTREESWAY = false;
 #endif	// _DEBUG
 	}
 
 	int GetIndex() const
 	{
-		Assert( m_bMODEL && m_bMORPHING_VTEX && m_bMULTITEXTURE );
+		Assert( m_bMODEL && m_bMORPHING_VTEX && m_bMULTITEXTURE && m_bTREESWAY );
+		AssertMsg( !( !m_nMODEL && m_nTREESWAY ), "Invalid combo combination ( !MODEL && TREESWAY )" );
 		AssertMsg( !( !m_nMODEL && m_nMORPHING_VTEX ), "Invalid combo combination ( !MODEL && MORPHING_VTEX )" );
 		AssertMsg( !( !m_nMODEL && m_nMORPHING_VTEX ), "Invalid combo combination ( !MODEL && MORPHING_VTEX )" );
-		return ( 48 * m_nMODEL ) + ( 96 * m_nMORPHING_VTEX ) + ( 192 * m_nMULTITEXTURE ) + 0;
+		return ( 48 * m_nMODEL ) + ( 96 * m_nMORPHING_VTEX ) + ( 192 * m_nMULTITEXTURE ) + ( 576 * m_nTREESWAY ) + 0;
 	}
 };
 
-#define shaderStaticTest_shadowpass_vs30 vsh_forgot_to_set_static_MODEL + vsh_forgot_to_set_static_MORPHING_VTEX + vsh_forgot_to_set_static_MULTITEXTURE
+#define shaderStaticTest_shadowpass_vs30 vsh_forgot_to_set_static_MODEL + vsh_forgot_to_set_static_MORPHING_VTEX + vsh_forgot_to_set_static_MULTITEXTURE + vsh_forgot_to_set_static_TREESWAY
 
 
 class shadowpass_vs30_Dynamic_Index

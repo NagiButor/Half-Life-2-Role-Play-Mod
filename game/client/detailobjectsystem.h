@@ -48,6 +48,10 @@ public:
 	// HL2RPM: the material of the detail sprites (the deferred view draws them into the
 	// G-buffer when it has a deferred shader)
 	virtual IMaterial *GetDetailSpriteMaterial() = 0;
+
+	// HL2RPM: the deferred view draws the (alpha tested) detail sprites with the opaque
+	// geometry, ahead of the weather pass, and turns their drawing with the translucents off
+	virtual void SuppressTranslucentSprites( bool bSuppress ) = 0;
 };
 
 

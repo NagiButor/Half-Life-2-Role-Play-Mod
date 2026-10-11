@@ -23,4 +23,8 @@ void DeferredGI_OnRTContentLost();
 // the changed ones, renders the half resolution indirect light
 void DeferredGI_Render( const CViewSetup &view, const lightData_Global_t &globalLight );
 
+// how much of the sky is in sight where the camera is: 1 in the open, 0 in a closed room
+// (smoothed; 1 without GI)
+float DeferredGI_GetCameraSky();
+
 #endif // DEFERRED_GI_H

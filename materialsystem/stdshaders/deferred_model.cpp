@@ -1,5 +1,6 @@
 
 #include "deferred_includes.h"
+#include "hl2rpm_pbr.h"
 
 #include "tier0/memdbgon.h"
 
@@ -41,6 +42,24 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 		// falling back to VertexLitGeneric (materialsystem_passthru.cpp sets it)
 		SHADER_PARAM( DEFERREDTRANSLUCENT, SHADER_PARAM_TYPE_BOOL, "0", "" )
 
+		// HL2RPM (PBR, hl2rpm_pbr.h): what the material may say, and what the stock material says
+		SHADER_PARAM( PBR_ROUGHNESS, SHADER_PARAM_TYPE_FLOAT, "-1", "0 (a mirror) .. 1 (matte); not set = by what the material is made of" )
+		SHADER_PARAM( PBR_METALNESS, SHADER_PARAM_TYPE_FLOAT, "-1", "0 .. 1" )
+		SHADER_PARAM( PBR_SPECULAR, SHADER_PARAM_TYPE_FLOAT, "-1", "the mirror reflection of the non-metal, 1 = 4 %" )
+		SHADER_PARAM( PBR_GLOSSMASK, SHADER_PARAM_TYPE_BOOL, "", "the alpha of the bump map scales the gloss" )
+		SHADER_PARAM( SURFACEPROP, SHADER_PARAM_TYPE_STRING, "", "" )
+		SHADER_PARAM( NORMALMAPALPHAENVMAPMASK, SHADER_PARAM_TYPE_BOOL, "", "" )
+		SHADER_PARAM( BASEALPHAENVMAPMASK, SHADER_PARAM_TYPE_BOOL, "", "" )
+		SHADER_PARAM( PHONG, SHADER_PARAM_TYPE_BOOL, "", "" )
+		SHADER_PARAM( PHONGEXPONENT, SHADER_PARAM_TYPE_FLOAT, "", "" )
+		SHADER_PARAM( PHONGBOOST, SHADER_PARAM_TYPE_FLOAT, "", "" )
+		SHADER_PARAM( BASEMAPALPHAPHONGMASK, SHADER_PARAM_TYPE_BOOL, "", "" )
+
+		// HL2RPM: the wind in a tree (1 = the trunk leans, 2 = and the leaves shiver), the light
+		// through leaves
+		SHADER_PARAM( TREESWAY, SHADER_PARAM_TYPE_INTEGER, "0", "" )
+		SHADER_PARAM( PBR_TRANSMISSION, SHADER_PARAM_TYPE_FLOAT, "0", "0 .. 1: how much light shines through (leaves, cloth)" )
+
 	END_SHADER_PARAMS
 
 	void SetupParmsGBuffer( defParms_gBuffer &p )
@@ -54,6 +73,8 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 		p.iAlphatestRef = ALPHATESTREFERENCE;
 		p.iLitface = LITFACE;
 		p.iPhongExp = PHONG_EXP;
+		p.iGlossMask = PBR_GLOSSMASK;
+		p.iTreeSway = TREESWAY;
 	}
 
 	void SetupParmsShadow( defParms_shadow &p )
@@ -61,6 +82,7 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 		p.bModel = true;
 		p.iAlbedo = BASETEXTURE;
 		p.iAlphatestRef = ALPHATESTREFERENCE;
+		p.iTreeSway = TREESWAY;
 	}
 
 	void SetupParmsComposite( defParms_composite &p )
@@ -85,6 +107,10 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 
 		p.iPhongScale = PHONG_SCALE;
 		p.iPhongFresnel = PHONG_FRESNEL;
+		p.iMetalness = PBR_METALNESS;
+		p.iSpecular = PBR_SPECULAR;
+		p.iTreeSway = TREESWAY;
+		p.iTransmission = PBR_TRANSMISSION;
 
 		p.iSelfIllumTint = SELFILLUMTINT;
 		p.iSelfIllumMaskInEnvmapAlpha = SELFILLUM_ENVMAPMASK_ALPHA;
@@ -112,6 +138,28 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 
 		if ( g_pHardwareConfig->HasFastVertexTextures() )
 			SET_FLAGS2( MATERIAL_VAR2_USES_VERTEXID );
+
+		// HL2RPM (PBR): roughness, metalness and specular level of what the material is made of
+		{
+			pbrParms_t pbr;
+			pbr.bModel = true;
+			pbr.iRoughness = PBR_ROUGHNESS;
+			pbr.iMetalness = PBR_METALNESS;
+			pbr.iSpecular = PBR_SPECULAR;
+			pbr.iGlossMask = PBR_GLOSSMASK;
+			pbr.iGloss = PHONG_EXP;
+			pbr.iSurfaceProp = SURFACEPROP;
+			pbr.iBumpmap = BUMPMAP;
+			pbr.iEnvmap = ENVMAP;
+			pbr.iEnvmapTint = ENVMAPTINT;
+			pbr.iNormalAlphaEnvmapMask = NORMALMAPALPHAENVMAPMASK;
+			pbr.iBaseAlphaEnvmapMask = BASEALPHAENVMAPMASK;
+			pbr.iPhong = PHONG;
+			pbr.iPhongExponent = PHONGEXPONENT;
+			pbr.iPhongBoost = PHONGBOOST;
+			pbr.iBaseAlphaPhongMask = BASEMAPALPHAPHONGMASK;
+			InitParmsPBR( pbr, params, pMaterialName );
+		}
 
 		const bool bDrawToGBuffer = DrawToGBuffer( params );
 

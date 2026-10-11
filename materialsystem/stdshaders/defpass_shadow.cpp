@@ -1,5 +1,6 @@
 
 #include "deferred_includes.h"
+#include "hl2rpm_pbr.h"
 
 #include "shadowpass_vs30.inc"
 #include "shadowpass_ps30.inc"
@@ -48,6 +49,8 @@ void DrawPassShadowPass( const defParms_shadow &info, CBaseVSShader *pShader, IM
 
 	const bool bMultiBlend = PARM_SET( info.iMultiblend ) && bAlbedo && bAlbedo2 && bAlbedo3;
 	const bool bBaseTexture2 = !bMultiBlend && bAlbedo2;
+	// HL2RPM: the wind (the shadow of a tree moves with it)
+	const int iTreeSway = ( bModel && PARM_VALID( info.iTreeSway ) && PARM_DEFINED( info.iTreeSway ) ) ? PARM_INT( info.iTreeSway ) : 0;
 
 	SHADOW_STATE
 	{
@@ -105,6 +108,7 @@ void DrawPassShadowPass( const defParms_shadow &info, CBaseVSShader *pShader, IM
 		SET_STATIC_VERTEX_SHADER_COMBO( MODEL, bModel );
 		SET_STATIC_VERTEX_SHADER_COMBO( MORPHING_VTEX, bModel && bFastVTex );
 		SET_STATIC_VERTEX_SHADER_COMBO( MULTITEXTURE, bMultiBlend ? 2 : bBaseTexture2 ? 1 : 0 );
+		SET_STATIC_VERTEX_SHADER_COMBO( TREESWAY, iTreeSway > 0 );
 		SET_STATIC_VERTEX_SHADER( shadowpass_vs30 );
 
 		DECLARE_STATIC_PIXEL_SHADER( shadowpass_ps30 );
@@ -187,6 +191,9 @@ void DrawPassShadowPass( const defParms_shadow &info, CBaseVSShader *pShader, IM
 		}
 
 		pShaderAPI->ExecuteCommandBuffer( pDeferredContext->GetCommands( CDeferredPerMaterialContextData::DEFSTAGE_SHADOW ) );
+
+		if ( iTreeSway > 0 )
+			PBR_SetTreeSwayConstants( pShaderAPI, iTreeSway );
 
 		switch ( shadowMode )
 		{

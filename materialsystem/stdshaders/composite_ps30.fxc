@@ -53,6 +53,7 @@
 #include "common_ps_fxc.h"
 #include "common_deferred_fxc.h"
 #include "common_vertexlitgeneric_dx9.h"
+#include "hl2rpm_pom_fxc.h"
 
 
 sampler sAlbedo							: register( s0 );
@@ -78,7 +79,9 @@ sampler sMainDepth						: register( s11 );
 // bound: find the reflected point in the main view and take its lighting from there
 const float4 g_vecMainToScreen[4]		: register( c16 );	// world -> main view screen texcoords (rows)
 const float4 g_vecMainEye				: register( c20 );	// xyz main view origin
-const float4 g_vecFallbackLight			: register( c22 );	// lighting of points the main view doesn't see
+const float4 g_vecFallbackLight			: register( c22 );	// points the main view doesn't see: rgb the sky's light, w debug view
+const float4 g_vecFallbackSunDir		: register( c24 );	// xyz direction to the sun / moon
+const float4 g_vecFallbackSun			: register( c25 );	// rgb its light there (a part: no shadow is known)
 #endif
 
 const float2 g_vecFullScreenTexel		: register( c1 );
@@ -87,6 +90,24 @@ const float4 g_vecCaustics				: register( c23 );	// HL2RPM: x strength (0 = off)
 const float3 g_vecOrigin				: register( c3 );
 
 const float g_flPhongScale				: register( c4 );
+
+// HL2RPM (PBR): x metalness, y the mirror reflection of the material as a non-metal (F0), z how
+// much dark texels of the texture mirror less, w 1 = on;  x the albedo brightness that mirrors
+// fully, y how much of its diffuse color a metal loses, z scale of all that is mirrored, w the
+// light at the pixel instead of the cubemap of $envmap (0 = the cubemap; see the envmap below)
+const float4 g_vecPBR					: register( c26 );
+const float4 g_vecPBR2					: register( c27 );
+// HL2RPM: x the most light a surface takes (x its albedo), y the most it mirrors (for F0 = 1)
+const float4 g_vecLightLimit			: register( c28 );
+// HL2RPM: the relief of a brush material (hl2rpm_pom_fxc.h) - its height map, x its depth (0 =
+// none), y, z its fade with the distance: what the G-buffer pass shifted its normals by
+sampler sPomHeight						: register( s12 );
+const float4 g_vecPOM					: register( c32 );
+// HL2RPM: thin things the light shines through - leaves, grass, cloth: x how much (0 = not at
+// all), y how narrow the glow about the direction of the sun, z how much of the surface's own
+// color the light takes on its way through;  xyz the direction to the sun / the moon
+const float4 g_vecTransmit				: register( c33 );
+const float4 g_vecTransmitSun			: register( c34 );
 
 #if ENVMAP
 sampler sEnvmap								: register( s3 );
@@ -151,7 +172,8 @@ struct PS_INPUT
 	float2 vTexCoord				: TEXCOORD0;
 #endif
 
-	//float3 vProjPosXYW				: TEXCOORD1;
+	// HL2RPM: from the surface to the eye in tangent space (the relief; ( 0, 0, 1 ) without)
+	float3 vecViewTS				: TEXCOORD1;
 	float3 vWorldPos				: TEXCOORD2;
 
 #if ENVMAP || RIMLIGHT || PHONGFRESNEL || ENVMAPFRESNEL
@@ -187,22 +209,30 @@ struct PS_OUTPUT
 };
 
 
-// HL2RPM: with TAA the frame is the average of jittered frames - a box filter of a pixel on
-// top of the texture filtering: textures looked soft. They are sampled a little sharper then
-// (negative mip bias, c23.w); TAA resolves what that would alias.
-float4 SampleAlbedo( sampler s, float2 uv )
-{
-	return tex2Dbias( s, float4( uv, 0.0f, g_vecCaustics.w ) );
-}
-
 PS_OUTPUT main( const PS_INPUT In )
 {
 	PS_OUTPUT Out;
 
-	float4 flAlbedoSample = SampleAlbedo( sAlbedo, In.vTexCoord.xy );
+	// HL2RPM: the relief of the material - the texture coordinate moved to where the view ray
+	// meets it (the same shift the G-buffer pass gave its normals). What is sampled with it gives
+	// its gradients - those of the coordinate as it came: the shifted one is out of a loop.
+	const float2 vecUVdx = ddx( In.vTexCoord.xy );
+	const float2 vecUVdy = ddy( In.vTexCoord.xy );
+	const float2 vecUV = ParallaxOcclusionUV( sPomHeight, In.vTexCoord.xy, In.vecViewTS, g_vecPOM );
+	// HL2RPM: with TAA the frame is the average of jittered frames - a box filter of a pixel on
+	// top of the texture filtering: textures looked soft. The albedo is sampled a little sharper
+	// then (a negative mip bias, c23.w - here as smaller gradients); TAA resolves what that
+	// would alias.
+	const float flMipScale = exp2( g_vecCaustics.w );
+	const float2 vecAlbedoDx = vecUVdx * flMipScale;
+	const float2 vecAlbedoDy = vecUVdy * flMipScale;
+#define SAMPLE_ALBEDO( _s ) tex2Dgrad( _s, vecUV, vecAlbedoDx, vecAlbedoDy )
+#define SAMPLE_UV( _s ) tex2Dgrad( _s, vecUV, vecUVdx, vecUVdy )
+
+	float4 flAlbedoSample = SAMPLE_ALBEDO( sAlbedo );
 
 #if BASETEXTURE2
-	float4 flAlbedoSample2 = SampleAlbedo( sAlbedo2, In.vTexCoord.xy );
+	float4 flAlbedoSample2 = SAMPLE_ALBEDO( sAlbedo2 );
 	float flBlendfactor = In.vColor_0.w;
 #if BLENDMODULATE
 	flBlendfactor = GetModulatedBlend( flBlendfactor, tex2D( sBlendmodulate, In.vTexCoord.zw ).rg );
@@ -226,9 +256,9 @@ PS_OUTPUT main( const PS_INPUT In )
 	flBlendFactors.w = remaining;
 
 	flAlbedoSample = flAlbedoSample * flBlendFactors.x
-		+ SampleAlbedo( sAlbedo2, In.vTexCoord.xy ) * flBlendFactors.y
-		+ SampleAlbedo( sAlbedo3, In.vTexCoord.xy ) * flBlendFactors.z
-		+ SampleAlbedo( sAlbedo4, In.vTexCoord.xy ) * flBlendFactors.w;
+		+ SAMPLE_ALBEDO( sAlbedo2 ) * flBlendFactors.y
+		+ SAMPLE_ALBEDO( sAlbedo3 ) * flBlendFactors.z
+		+ SAMPLE_ALBEDO( sAlbedo4 ) * flBlendFactors.w;
 
 	flAlbedoSample.rgb *= In.vColorBlend1.rgb * flBlendFactors.x
 		+ In.vColorBlend2.rgb * flBlendFactors.y
@@ -238,7 +268,7 @@ PS_OUTPUT main( const PS_INPUT In )
 
 #if ALPHATEST
 	// (the coverage exactly as the G-buffer pass tests it: the base texture, no mip bias)
-	clip( tex2D( sAlbedo, In.vTexCoord.xy ).a - g_flAlphaRef );
+	clip( SAMPLE_UV( sAlbedo ).a - g_flAlphaRef );
 #endif
 
 #if TRANSLUCENT
@@ -257,11 +287,28 @@ PS_OUTPUT main( const PS_INPUT In )
 	float2 mainUV = mainTex.xy / max( mainTex.w, 0.001f );
 	float mainZ = dot( In.vWorldPos - g_vecMainEye.xyz, g_vecMainFwd.xyz );
 	float gbufZ = tex2D( sMainDepth, mainUV ).x / max( g_vecMainFwd.w, 1e-6f );
-	float2 edge = saturate( mainUV ) - mainUV;
-	float flVisible = ( mainTex.w > 0.0f && dot( edge, edge ) == 0.0f
-		&& abs( gbufZ - mainZ ) < max( 8.0f, mainZ * 0.02f ) ) ? 1.0f : 0.0f;
-	float4 flLighting = lerp( g_vecFallbackLight, ReadLighting( tex2D( sLightAccum, mainUV ) ), flVisible );
+	// (on the main view's screen: compared, not "saturate( uv ) - uv == 0" - the two uv of that
+	// difference came out of different instructions (a mul and a mad) and never cancelled exactly:
+	// the test failed for every pixel and every reflection was lit by the fallback light alone -
+	// flat, unshadowed, as bright in a wall's shade as in the sun)
+	const float2 vecInside = step( 0.0f, mainUV ) * step( mainUV, 1.0f );
+	const float flOnScreen = ( mainTex.w > 0.0f ) ? vecInside.x * vecInside.y : 0.0f;
+	float flVisible = ( flOnScreen > 0.5f && abs( gbufZ - mainZ ) < max( 8.0f, mainZ * 0.02f ) ) ? 1.0f : 0.0f;
+	// what the main view doesn't see: the sky's light and the sun's by the facing of the surface
+	// (the face normal from the position's derivatives, toward this view's camera)
+	float3 vecFace = normalize( cross( ddx( In.vWorldPos ), ddy( In.vWorldPos ) ) );
+	vecFace *= sign( dot( vecFace, g_vecOrigin - In.vWorldPos ) );
+	const float3 vecFallback = g_vecFallbackLight.rgb
+		+ g_vecFallbackSun.rgb * saturate( dot( vecFace, g_vecFallbackSunDir.xyz ) );
+	float4 flLighting = lerp( float4( vecFallback, 0.0f ), ReadLighting( tex2D( sLightAccum, mainUV ) ), flVisible );
 	screenPos = mainUV;
+	// r_deferred_reflect_debug: r seen by the main view, g how far its depth there is from this
+	// point's (64 units = 1), b on the main view's screen
+	if ( g_vecFallbackLight.w > 0.5f )
+	{
+		Out.vColor_0 = float4( flVisible, saturate( abs( gbufZ - mainZ ) * ( 1.0f / 64.0f ) ), flOnScreen, 1.0f );
+		return Out;
+	}
 #else
 #if !TRANSLUCENT
 	// HL2RPM: with MSAA the pixel shader runs once per pixel for every triangle covering it,
@@ -303,10 +350,23 @@ PS_OUTPUT main( const PS_INPUT In )
 	float4 flLighting = ReadLighting( tex2Dlod( sLightAccum, float4( screenPos, 0, 0 ) ) );
 #endif
 
+	// HL2RPM: right at a lamp the light is many times what a lit surface of the day gets - the
+	// maps' lamps were set for lightmaps, which hold no more than twice "white": a patch of pure
+	// white on the ground under every strong lamp, white characters standing in it. A soft limit
+	// (nothing changes below about half of it; the sun stays as it is).
+	{
+		const float flLum = dot( flLighting.rgb, float3( 0.3f, 0.59f, 0.11f ) );
+		float2 vecOver = float2( flLum, flLighting.w ) / g_vecLightLimit.xy;
+		vecOver *= vecOver;
+		vecOver = rsqrt( sqrt( 1.0f + vecOver * vecOver ) );
+		flLighting.rgb *= vecOver.x;
+		flLighting.w *= vecOver.y;
+	}
+
 #if READNORMAL
 	float3 worldNormal = tex2Dlod( sNormals, float4( screenPos, 0, 0 ) ).xyz * 2.0f - 1.0f;
 #if REFLECTVIEW
-	worldNormal = lerp( float3( 0, 0, 1 ), worldNormal, flVisible );
+	worldNormal = lerp( vecFace, worldNormal, flVisible );
 #endif
 #endif
 
@@ -343,10 +403,10 @@ PS_OUTPUT main( const PS_INPUT In )
 #if ENVMAP
 	float flSpecularFactor;
 #if ENVMAPMASK
-	float4 vecEnvmapmaskColor = tex2D( sEnvmapMask, In.vTexCoord.xy );
+	float4 vecEnvmapmaskColor = SAMPLE_UV( sEnvmapMask );
 #if BASETEXTURE2
 	vecEnvmapmaskColor = lerp( vecEnvmapmaskColor,
-		tex2D( sEnvmapMask2, In.vTexCoord.xy ),
+		SAMPLE_UV( sEnvmapMask2 ),
 		flBlendfactor );
 #endif
 	flSpecularFactor = vecEnvmapmaskColor.r;
@@ -375,6 +435,13 @@ PS_OUTPUT main( const PS_INPUT In )
 #endif
 
 	float3 flCubemap = ENV_MAP_SCALE * texCUBE( sEnvmap, reflectVect ).rgb;
+	// HL2RPM: no cubemap to mirror - a map whose cubemaps were never built hands out the
+	// engine's default one (a greenish blur, the same at noon, in a storm and at night: "fullbright"
+	// shields, glass and floors in the rain), and a model's is not bound here at all. What a
+	// surface mirrors is about as bright and as colored as what lights it: the light at the pixel
+	// stands for its surroundings.
+	if ( g_vecPBR2.w > 0.0f )
+		flCubemap = flLighting.rgb * g_vecPBR2.w;
 	flCubemap *= flSpecularFactor;
 	flCubemap *= g_flEnvmapTint;
 
@@ -393,7 +460,7 @@ PS_OUTPUT main( const PS_INPUT In )
 #if SELFILLUM
 	float flSelfIllumAmount;
 #if SELFILLUM_MASK
-	flSelfIllumAmount = tex2D( sSelfIllumMask, In.vTexCoord.xy ).r;
+	flSelfIllumAmount = SAMPLE_UV( sSelfIllumMask ).r;
 #elif SELFILLUM_ENVMAP_ALPHA
 	flSelfIllumAmount = vecEnvmapmaskColor.a;
 #else
@@ -410,8 +477,43 @@ PS_OUTPUT main( const PS_INPUT In )
 		GAMMA_LIGHT_SCALE;
 #endif
 
-	Out.vColor_0.xyz = ( ( flAlbedoSample + flLighting.w * g_flPhongScale ) * flLighting.xyz
-		+ flSpecularLighting ) * flLightScale;
+	float3 vecDiffuseColor = flAlbedoSample.rgb;
+	// (the highlight of before: a phong term scaled per material - 0 for every stock material)
+	float3 vecMirrored = flLighting.w * g_flPhongScale * flLighting.xyz;
+#if !TRANSLUCENT
+	// HL2RPM (PBR): what the surface mirrors. The light passes left its luminance in the alpha
+	// of the light buffer - the reflections of the sun and the lamps by the roughness of the
+	// G-buffer and the light around the point, with their growth toward glancing angles - for a
+	// surface that mirrors all of it from the front. This material's share (F0): a few % for a
+	// non-metal; a metal mirrors much more, in its own color, and scatters little. The light
+	// mirrored has the color of the light at the pixel. Dark texels - the cracks, the dirt, the
+	// seams painted into a stock texture - mirror less.
+	if ( g_vecPBR.w > 0.5f )
+	{
+		const float3 vecF0 = lerp( g_vecPBR.yyy, flAlbedoSample.rgb, g_vecPBR.x );
+		const float flLightLum = dot( flLighting.rgb, float3( 0.3f, 0.59f, 0.11f ) );
+		const float flCavity = lerp( 1.0f, saturate( dot( flAlbedoSample.rgb, float3( 0.3f, 0.59f, 0.11f ) ) * g_vecPBR2.x ), g_vecPBR.z );
+		vecMirrored = flLighting.rgb * ( flLighting.w / max( flLightLum, 1e-4f ) ) * vecF0 * ( flCavity * g_vecPBR2.z );
+		vecDiffuseColor *= 1.0f - g_vecPBR.x * g_vecPBR2.y;
+		// r_deferred_pbr_debug: 1 = what is mirrored alone, 2 = what is scattered alone
+		if ( g_vecPBR.w > 2.5f )
+			vecMirrored = 0.0f;
+		else if ( g_vecPBR.w > 1.5f )
+			vecDiffuseColor = 0.0f;
+	}
+#endif
+
+	Out.vColor_0.xyz = ( vecDiffuseColor * flLighting.xyz + vecMirrored + flSpecularLighting ) * flLightScale;
+
+	// HL2RPM: thin things the light shines through. A leaf between the eye and the sun glows:
+	// what comes through it is the light on its far side, in the leaf's own color once more. The
+	// light passes light such a surface from both sides ($litface); here, looking toward the sun,
+	// it is brighter and more saturated - the more the closer to the sun's direction.
+	{
+		const float3 vecRay = normalize( In.vWorldPos - g_vecOrigin );
+		const float flThrough = pow( saturate( dot( vecRay, g_vecTransmitSun.xyz ) ), g_vecTransmit.y );
+		Out.vColor_0.xyz *= 1.0f + g_vecTransmit.x * flThrough * lerp( 1.0f, flAlbedoSample.rgb * 2.2f, g_vecTransmit.z );
+	}
 
 #if PIXELFOGTYPE == 0
 	float fogAmt = CalcPixelFogFactor( PIXELFOGTYPE, g_vecFogParams, g_vecOrigin, In.vWorldPos, 0 );
@@ -442,30 +544,50 @@ PS_OUTPUT main( const PS_INPUT In )
 	// position itself (~ -250) scaled the line terms; here that magnitude is a constant: the
 	// pattern tiles without seams and looks the same everywhere (with the world position it
 	// blew up into white near the map origin). The light is redistributed - the mean stays.
+	//
+	// Two layers of it, the second larger, turned and out of step: one layer repeats every pattern
+	// size (48 units) - from a few steps away the pool floor was a grid of identical cells. And on
+	// what the light falls along (walls: the face normal from the position's derivatives) nothing:
+	// a pattern of the horizontal position alone drew vertical stripes down every wall.
+	const float3 vecFaceNormal = normalize( cross( ddx( In.vWorldPos ), ddy( In.vWorldPos ) ) );
 	[branch]
 	if ( g_vecCaustics.x > 0.0f )
 	{
 		const float flUnder = g_vecFogParams.y - In.vWorldPos.z;
-		const float flFade = saturate( flUnder / 6.0f ) * saturate( 1.0f - flUnder / 320.0f );
+		const float flFade = saturate( flUnder / 6.0f ) * saturate( 1.0f - flUnder / 320.0f )
+			* saturate( abs( vecFaceNormal.z ) * 2.5f - 0.75f );
 		const float flSunlit = saturate( ( dot( flLighting.xyz, float3( 0.3f, 0.59f, 0.11f ) ) - 0.25f ) * 1.5f );
 		[branch]
 		if ( flFade * flSunlit > 0.001f )
 		{
-			const float2 p = frac( In.vWorldPos.xy * g_vecCaustics.z ) * 6.2831853f;
-			float2 w = p;
-			float c = 1.0f;
+			const float2 q = In.vWorldPos.xy * g_vecCaustics.z;
+			const float2 pA = frac( q ) * 6.2831853f;
+			// (turned by 37 degrees, 1.83 x larger)
+			const float2 pB = frac( float2( q.x * 0.4364f + q.y * 0.3289f, q.y * 0.4364f - q.x * 0.3289f ) + 0.37f ) * 6.2831853f;
+			float2 wA = pA;
+			float2 wB = pB;
+			float cA = 1.0f;
+			float cB = 1.0f;
 			[unroll]
 			for ( int n = 0; n < 4; n++ )
 			{
-				const float tt = g_vecCaustics.y * ( 1.0f - 3.5f / ( n + 1.0f ) );
-				w = p + float2( cos( tt - w.x ) + sin( tt + w.y ), sin( tt - w.y ) + cos( tt + w.x ) );
-				const float s = sin( w.x + tt );
-				const float k = cos( w.y + tt );
+				const float ttA = g_vecCaustics.y * ( 1.0f - 3.5f / ( n + 1.0f ) );
+				wA = pA + float2( cos( ttA - wA.x ) + sin( ttA + wA.y ), sin( ttA - wA.y ) + cos( ttA + wA.x ) );
+				const float sA = sin( wA.x + ttA );
+				const float kA = cos( wA.y + ttA );
 				// 1 / length( 1.25 / s, 1.25 / k )
-				c += abs( s * k ) * rsqrt( s * s + k * k + 1e-6f ) * 0.8f;
+				cA += abs( sA * kA ) * rsqrt( sA * sA + kA * kA + 1e-6f ) * 0.8f;
+
+				const float ttB = ( g_vecCaustics.y * 0.71f + 11.3f ) * ( 1.0f - 3.5f / ( n + 1.0f ) );
+				wB = pB + float2( cos( ttB - wB.x ) + sin( ttB + wB.y ), sin( ttB - wB.y ) + cos( ttB + wB.x ) );
+				const float sB = sin( wB.x + ttB );
+				const float kB = cos( wB.y + ttB );
+				cB += abs( sB * kB ) * rsqrt( sB * sB + kB * kB + 1e-6f ) * 0.8f;
 			}
-			c = 1.17f - pow( c * 0.25f, 1.4f );
-			const float flCaustic = pow( c, 8.0f );	// mean ~0.13, lines up to ~1.1
+			cA = 1.17f - pow( cA * 0.25f, 1.4f );
+			cB = 1.17f - pow( cB * 0.25f, 1.4f );
+			// (each: mean ~0.13, lines up to ~1.1)
+			const float flCaustic = pow( cA, 8.0f ) * 0.6f + pow( cB, 8.0f ) * 0.4f;
 			Out.vColor_0.xyz *= max( 1.0f + ( flCaustic * 2.0f - 0.26f ) * ( g_vecCaustics.x * flFade * flSunlit ), 0.0f );
 		}
 	}

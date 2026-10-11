@@ -182,8 +182,58 @@ void HL2RPM_EnsurePixelShaderConstants( IShaderDynamicAPI *pShaderAPI )
 		s_nEngineCount, HL2RPM_PS_CONSTANTS, s_nSlot[0], s_nSlot[1] );
 }
 
+//-----------------------------------------------------------------------------
+// The engine's own pixel shader constants (see BaseVSShader.h): c29 fog colour and
+// depth-to-alpha scale, c30 light scales (tone mapping, lightmap, cubemap, gamma),
+// c31 flashlight screen scale (the stock shaders set that one on every draw, it is
+// saved but left alone). Read back from the arrays above - both follow every write -
+// so what is restored is exactly what the engine last sent.
+//-----------------------------------------------------------------------------
+static const int HL2RPM_ENGINE_PSREG_FIRST = 29;
+static int s_nEngineConstantRestores[2] = { 0, 0 };
+
+void HL2RPM_SaveEngineConstants( IShaderDynamicAPI *pShaderAPI, HL2RPM_EngineConstants_t &saved )
+{
+	saved.m_bValid = ( pShaderAPI == s_pAPI && s_pArray[0] != NULL && ArraySlot( pShaderAPI, s_nSlot[0] ) == s_pArray[0] );
+	if ( saved.m_bValid )
+		memcpy( saved.m_flValues, &s_pArray[0][HL2RPM_ENGINE_PSREG_FIRST], sizeof( saved.m_flValues ) );
+}
+
+void HL2RPM_RestoreEngineConstants( IShaderDynamicAPI *pShaderAPI, const HL2RPM_EngineConstants_t &saved )
+{
+	if ( !saved.m_bValid || pShaderAPI != s_pAPI || ArraySlot( pShaderAPI, s_nSlot[0] ) != s_pArray[0] )
+		return;
+
+	// c29: the engine itself re-sends the fog colour while a pass is drawn (when the fog mode
+	// of its snapshot asks for it) - after the shader set its constants. Such a value is the
+	// newer one and stays; it keeps the depth scale in w, the data of a shader doesn't.
+	const float *pFog = s_pArray[0][29].Base();
+	if ( memcmp( pFog, saved.m_flValues[0], sizeof( saved.m_flValues[0] ) ) != 0 &&
+		memcmp( &pFog[3], &saved.m_flValues[0][3], sizeof( float ) ) != 0 )
+	{
+		pShaderAPI->SetPixelShaderConstant( 29, saved.m_flValues[0], 1, true );
+		s_nEngineConstantRestores[0]++;
+	}
+
+	// c30: only ever sent when the tone mapping scale changes
+	if ( memcmp( s_pArray[0][30].Base(), saved.m_flValues[1], sizeof( saved.m_flValues[1] ) ) != 0 )
+	{
+		pShaderAPI->SetPixelShaderConstant( 30, saved.m_flValues[1], 1, true );
+		s_nEngineConstantRestores[1]++;
+	}
+}
+
 CON_COMMAND( mat_hl2rpm_psconstants, "Shows whether the shader API has room for pixel shader constants above c31" )
 {
+	// (only while the shader API still uses our arrays: it frees them when it re-creates its
+	// own on a map change, until the next draw replaces those)
+	if ( s_pAPI && s_pArray[0] && ArraySlot( s_pAPI, s_nSlot[0] ) == s_pArray[0] )
+	{
+		const Vector4D &fog = s_pArray[0][29];
+		const Vector4D &scale = s_pArray[0][30];
+		Msg( "engine constants: c29 fog %.3f %.3f %.3f depth scale %.5f (handed back %d times), c30 light scales %.3f %.3f %.3f %.3f (handed back %d times)\n",
+			fog.x, fog.y, fog.z, fog.w, s_nEngineConstantRestores[0], scale.x, scale.y, scale.z, scale.w, s_nEngineConstantRestores[1] );
+	}
 	if ( s_pAPI )
 		Msg( "shader API pixel shader constants: %d (engine allocates %d), arrays at +0x%x, +0x%x, replaced %d time(s)\n",
 			HL2RPM_PS_CONSTANTS, s_nEngineCount, s_nSlot[0], s_nSlot[1], s_nReplaced );

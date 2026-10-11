@@ -114,6 +114,7 @@ enum GfxSetting_e
 	GFX_BOUNCE,				// r_deferred_bounce 0/1
 	GFX_WATER,				// r_deferred_water_views 0/1
 	GFX_AA,					// r_deferred_aa 0 none / 1 FXAA / 2 TAA
+	GFX_PBR,				// r_deferred_pbr 0/1
 
 	GFX_SETTING_COUNT
 };
@@ -131,6 +132,7 @@ static const char *s_pszGfxConVars[GFX_SETTING_COUNT] =
 	"r_deferred_bounce",
 	"r_deferred_water_views",
 	"r_deferred_aa",
+	"r_deferred_pbr",
 };
 
 static const char *s_pszGfxLabels[GFX_SETTING_COUNT] =
@@ -146,6 +148,7 @@ static const char *s_pszGfxLabels[GFX_SETTING_COUNT] =
 	"#HL2RPM_Gfx_Bounce",
 	"#HL2RPM_Gfx_WaterReflect",
 	"#HL2RPM_Gfx_AA",
+	"#HL2RPM_Gfx_PBR",
 };
 
 static const GfxChoiceList_t s_GfxChoices[GFX_SETTING_COUNT] =
@@ -161,6 +164,7 @@ static const GfxChoiceList_t s_GfxChoices[GFX_SETTING_COUNT] =
 	CHOICES( s_OnOffChoices ),
 	CHOICES( s_OnOffChoices ),
 	CHOICES( s_AAChoices ),
+	CHOICES( s_OnOffChoices ),
 };
 
 // Overall presets. The costs that matter most on the GPU are the sun shadow
@@ -168,12 +172,12 @@ static const GfxChoiceList_t s_GfxChoices[GFX_SETTING_COUNT] =
 // and the cloud raymarch resolution.
 static const float s_flGfxPresets[GFX_PRESET_COUNT][GFX_SETTING_COUNT] =
 {
-	//	sun	lamp clouds shafts rain wet	ssao soft bounce water aa
-	{	0,	1,	1,	0,	0.5f,	0,	0,	0,	0,	0,	0	},	// very low
-	{	1,	2,	1,	1,	0.5f,	1,	0,	0,	1,	0,	2	},	// low
-	{	2,	3,	2,	1,	1.0f,	1,	1,	1,	1,	1,	2	},	// medium
-	{	3,	4,	2,	2,	1.0f,	1,	1,	1,	1,	1,	2	},	// high
-	{	5,	5,	3,	3,	1.5f,	1,	1,	1,	1,	1,	2	},	// ultra
+	//	sun	lamp clouds shafts rain wet	ssao soft bounce water aa	pbr
+	{	0,	1,	1,	0,	0.5f,	0,	0,	0,	0,	0,	0,	0	},	// very low
+	{	1,	2,	1,	1,	0.5f,	1,	0,	0,	1,	0,	2,	1	},	// low
+	{	2,	3,	2,	1,	1.0f,	1,	1,	1,	1,	1,	2,	1	},	// medium
+	{	3,	4,	2,	2,	1.0f,	1,	1,	1,	1,	1,	2,	1	},	// high
+	{	5,	5,	3,	3,	1.5f,	1,	1,	1,	1,	1,	2,	1	},	// ultra
 };
 
 // ---------------------------------------------------------------------------
@@ -285,6 +289,37 @@ static const GfxPageDesc_t s_EffectsPage =
 };
 
 // ---------------------------------------------------------------------------
+// Controls of the page.
+//
+// Any key typed while the Options dialog has the focus goes to GameUI's
+// Frame::OnKeyTyped -> FocusNavGroup::FindPanelByHotkey -> PropertySheet::HasHotkey,
+// which runs  _activePage->GetChild( i )->HasHotkey( key )  without a NULL check.
+// Panel::GetChild is ipanel()->GetPanel( child, <module of the caller> ): for panels
+// created by client.dll it returned NULL inside GameUI, so pressing ESC (or any other
+// key) with one of our pages active crashed in GameUI.dll (NULL read at GameUI+0x10a6ff).
+// The direct children of the page therefore answer GameUI's module name: GameUI gets
+// the panel and calls its virtual HasHotkey, which is all it does with it.
+// (During construction the base class' GetModuleName is still in effect, so the page
+// registers the child as its own as usual.)
+// ---------------------------------------------------------------------------
+static const char s_szGameUIModule[] = "GameUI";	// what GameUI's panels answer (IPanel::GetPanel compares it)
+
+template< class T >
+class CGameUIVisible : public T
+{
+public:
+	template< class A1, class A2, class A3 >
+	CGameUIVisible( A1 a1, A2 a2, A3 a3 ) : T( a1, a2, a3 ) {}
+	template< class A1, class A2, class A3, class A4 >
+	CGameUIVisible( A1 a1, A2 a2, A3 a3, A4 a4 ) : T( a1, a2, a3, a4 ) {}
+
+	virtual const char *GetModuleName() { return s_szGameUIModule; }
+};
+
+typedef CGameUIVisible< Label > CGfxLabel;
+typedef CGameUIVisible< ComboBox > CGfxComboBox;
+
+// ---------------------------------------------------------------------------
 // The page
 // ---------------------------------------------------------------------------
 class CHL2RPMGraphicsPage : public PropertyPage
@@ -297,6 +332,10 @@ public:
 	virtual void OnResetData();
 	virtual void OnApplyChanges();
 	virtual void PerformLayout();
+
+	// nothing here has a hotkey; the base class walks the children through GetChild,
+	// which no longer returns them to client.dll (see CGameUIVisible)
+	virtual Panel *HasHotkey( wchar_t key ) { return NULL; }
 
 	// GameUI's options sheet fades pages in: it sets the new page's alpha to 0 and
 	// animates it with GameUI's AnimationController, which can't resolve panels of
@@ -335,17 +374,19 @@ CHL2RPMGraphicsPage::CHL2RPMGraphicsPage( Panel *pParent, const GfxPageDesc_t &d
 	m_bLoading = true;
 	m_flLoadedRestartValue = -1.0f;
 
-	m_pPresetLabel = new Label( this, "PresetLabel", m_Desc.pszPresetLabel );
-	m_pPreset = new ComboBox( this, "PresetCombo", GFX_PRESET_COUNT + 1, false );
+	m_pPresetLabel = new CGfxLabel( this, "PresetLabel", m_Desc.pszPresetLabel );
+	m_pPreset = new CGfxComboBox( this, "PresetCombo", GFX_PRESET_COUNT + 1, false );
+	m_pPreset->AddActionSignalTarget( this );
 	for ( int i = 0; i < GFX_PRESET_COUNT; i++ )
 		m_pPreset->AddItem( s_pszPresetLabels[i], new KeyValues( "preset", "index", i ) );
 	m_pPreset->AddItem( "#HL2RPM_Gfx_Q_Custom", new KeyValues( "preset", "index", GFX_PRESET_CUSTOM ) );
 
 	for ( int s = 0; s < m_Desc.nSettings; s++ )
 	{
-		m_pLabels[s] = new Label( this, VarArgs( "Label%d", s ), m_Desc.ppszLabels[s] );
+		m_pLabels[s] = new CGfxLabel( this, VarArgs( "Label%d", s ), m_Desc.ppszLabels[s] );
 		const GfxChoiceList_t &list = m_Desc.pChoices[s];
-		m_pCombos[s] = new ComboBox( this, VarArgs( "Combo%d", s ), list.nChoices, false );
+		m_pCombos[s] = new CGfxComboBox( this, VarArgs( "Combo%d", s ), list.nChoices, false );
+		m_pCombos[s]->AddActionSignalTarget( this );
 		for ( int c = 0; c < list.nChoices; c++ )
 			m_pCombos[s]->AddItem( list.pChoices[c].pszLabel, new KeyValues( "choice", "index", c ) );
 	}
@@ -364,11 +405,11 @@ CHL2RPMGraphicsPage::CHL2RPMGraphicsPage( Panel *pParent, const GfxPageDesc_t &d
 	wchar_t wszText[512];
 	const wchar_t *pwszPrefix = g_pVGuiLocalize->Find( "#HL2RPM_Gfx_GPU" );
 	V_snwprintf( wszText, ARRAYSIZE( wszText ), L"%ls %ls", pwszPrefix ? pwszPrefix : L"GPU:", wszGPU );
-	m_pGPULabel = new Label( this, "GPULabel", wszText );
+	m_pGPULabel = new CGfxLabel( this, "GPULabel", wszText );
 
-	m_pNoteLabel = new Label( this, "NoteLabel", "#HL2RPM_Gfx_RestartNote" );
+	m_pNoteLabel = new CGfxLabel( this, "NoteLabel", "#HL2RPM_Gfx_RestartNote" );
 	m_pNoteLabel->SetVisible( false );
-	m_pHintLabel = new Label( this, "HintLabel", m_Desc.pszHint );
+	m_pHintLabel = new CGfxLabel( this, "HintLabel", m_Desc.pszHint );
 
 	LoadFromConVars();
 	m_bLoading = false;
@@ -578,7 +619,7 @@ public:
 			return;
 		}
 
-		Panel *pPanel = ipanel()->GetPanel( hDialog, "GameUI" );
+		Panel *pPanel = ipanel()->GetPanel( hDialog, s_szGameUIModule );
 		if ( !pPanel )
 			return;
 

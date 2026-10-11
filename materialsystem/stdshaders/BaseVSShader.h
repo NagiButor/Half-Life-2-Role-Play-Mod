@@ -38,13 +38,36 @@ extern ConVar mat_specular_disable_on_missing;
 //-----------------------------------------------------------------------------
 void HL2RPM_EnsurePixelShaderConstants( IShaderDynamicAPI *pShaderAPI );
 
+//-----------------------------------------------------------------------------
+// HL2RPM: c29-c31 belong to the engine (fog colour, light scales, flashlight scale).
+// It sends c30 only when its tone mapping scale changes, so a shader of this DLL
+// that keeps its own data there (the cascade constants of the deferred passes
+// run from c2 to c33) would leave that data to the stock shaders drawn next:
+// the VGUI's UnlitGeneric multiplies by c30.x (black interface), water and
+// particles read their light and cubemap scales from it. Every draw of a shader
+// of this DLL hands the three registers back the way it found them.
+//-----------------------------------------------------------------------------
+struct HL2RPM_EngineConstants_t
+{
+	float m_flValues[3][4];
+	bool m_bValid;
+};
+void HL2RPM_SaveEngineConstants( IShaderDynamicAPI *pShaderAPI, HL2RPM_EngineConstants_t &saved );
+void HL2RPM_RestoreEngineConstants( IShaderDynamicAPI *pShaderAPI, const HL2RPM_EngineConstants_t &saved );
+
 #undef SHADER_DRAW
 #define SHADER_DRAW \
 	void OnDrawElements( IMaterialVar **params, IShaderShadow* pShaderShadow, IShaderDynamicAPI* pShaderAPI, VertexCompressionType_t vertexCompression, CBasePerMaterialContextData **pContextDataPtr ) \
 	{ \
+		HL2RPM_EngineConstants_t engineConstants; \
 		if ( pShaderAPI ) \
+		{ \
 			HL2RPM_EnsurePixelShaderConstants( pShaderAPI ); \
+			HL2RPM_SaveEngineConstants( pShaderAPI, engineConstants ); \
+		} \
 		OnDrawElements_HL2RPM( params, pShaderShadow, pShaderAPI, vertexCompression, pContextDataPtr ); \
+		if ( pShaderAPI ) \
+			HL2RPM_RestoreEngineConstants( pShaderAPI, engineConstants ); \
 	} \
 	void OnDrawElements_HL2RPM( IMaterialVar **params, IShaderShadow* pShaderShadow, IShaderDynamicAPI* pShaderAPI, VertexCompressionType_t vertexCompression, CBasePerMaterialContextData **pContextDataPtr )
 

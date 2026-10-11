@@ -792,6 +792,11 @@ static inline unsigned long BuildEngineDrawWorldListFlags( unsigned nDrawFlags )
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
+// HL2RPM: the deferred views that must not draw the ropes with their opaque entities (the
+// G-buffer and shadow passes: the rope shader is a forward one; the main composite: it draws them
+// after the weather pass - see CBaseWorldViewDeferred::DrawExecute)
+bool g_bDeferredHoldRopes = false;
+
 static void SetClearColorToFogColor()
 {
 	unsigned char ucFogColor[3];
@@ -4589,7 +4594,8 @@ void CRendering3dView::DrawOpaqueRenderables( ERenderDepthMode DepthMode )
 			//
 			// Ropes and particles
 			//
-			RopeManager()->DrawRenderCache( bShadowDepth );
+			if ( !g_bDeferredHoldRopes )
+				RopeManager()->DrawRenderCache( bShadowDepth );
 			g_pParticleSystemMgr->DrawRenderCache( bShadowDepth );
 
 			return;
@@ -4730,7 +4736,8 @@ void CRendering3dView::DrawOpaqueRenderables( ERenderDepthMode DepthMode )
 	//
 	// Ropes and particles
 	//
-	RopeManager()->DrawRenderCache( DepthMode );
+	if ( !g_bDeferredHoldRopes )
+		RopeManager()->DrawRenderCache( DepthMode );
 	g_pParticleSystemMgr->DrawRenderCache( DepthMode );
 }
 
@@ -4814,7 +4821,7 @@ void CRendering3dView::DrawDetailPropsInAllLeaves()
 //-----------------------------------------------------------------------------
 // Renders all translucent entities in the render list
 //-----------------------------------------------------------------------------
-static inline void DrawTranslucentRenderable( IClientRenderable *pEnt, bool twoPass, bool bShadowDepth, bool bIgnoreDepth )
+static inline void DrawTranslucentRenderable( IClientRenderable *pEnt, int twoPass, bool bShadowDepth, bool bIgnoreDepth )
 {
 	// Determine blending amount and tell engine
 	float blend = (float)( pEnt->GetFxBlend() / 255.0f );
@@ -4822,6 +4829,12 @@ static inline void DrawTranslucentRenderable( IClientRenderable *pEnt, bool twoP
 	// Totally gone
 	if ( blend <= 0.0f )
 		return;
+
+	// HL2RPM: the opaque meshes of this model were drawn in the opaque passes of the deferred
+	// view, unfaded (CClientRenderablesList::ENTRY_OPAQUE_PARTS_DRAWN): only its translucent
+	// meshes are left, and with any blend below 1 studiorender would take every mesh for one
+	if ( twoPass & CClientRenderablesList::ENTRY_OPAQUE_PARTS_DRAWN )
+		blend = 1.0f;
 
 	if ( pEnt->IgnoresZBuffer() != bIgnoreDepth )
 		return;
@@ -4900,7 +4913,7 @@ void CRendering3dView::DrawTranslucentRenderablesNoWorld( bool bInSkybox )
 			UpdateScreenEffectTexture();
 		}
 
-		DrawTranslucentRenderable( pRenderable, pEntities[iCurTranslucentEntity].m_TwoPass != 0, bShadowDepth, false );
+		DrawTranslucentRenderable( pRenderable, pEntities[iCurTranslucentEntity].m_TwoPass, bShadowDepth, false );
 		--iCurTranslucentEntity;
 	}
 
@@ -4937,7 +4950,7 @@ void CRendering3dView::DrawNoZBufferTranslucentRenderables( void )
 			UpdateScreenEffectTexture();
 		}
 
-		DrawTranslucentRenderable( pRenderable, pEntities[iCurTranslucentEntity].m_TwoPass != 0, bShadowDepth, true );
+		DrawTranslucentRenderable( pRenderable, pEntities[iCurTranslucentEntity].m_TwoPass, bShadowDepth, true );
 		--iCurTranslucentEntity;
 	}
 
@@ -5120,7 +5133,7 @@ void CRendering3dView::DrawTranslucentRenderables( bool bInSkybox, bool bShadowD
 					}
 
 					// Then draw the translucent renderable
-					DrawTranslucentRenderable( pRenderable, (pEntities[iCurTranslucentEntity].m_TwoPass != 0), bShadowDepth, false );
+					DrawTranslucentRenderable( pRenderable, pEntities[iCurTranslucentEntity].m_TwoPass, bShadowDepth, false );
 				}
 
 				// Draw all remaining props in this leaf
@@ -5171,7 +5184,7 @@ void CRendering3dView::DrawTranslucentRenderables( bool bInSkybox, bool bShadowD
 						pRenderContext.SafeRelease();
 					}
 
-					DrawTranslucentRenderable( pRenderable, (pEntities[iCurTranslucentEntity].m_TwoPass != 0), bShadowDepth, false );
+					DrawTranslucentRenderable( pRenderable, pEntities[iCurTranslucentEntity].m_TwoPass, bShadowDepth, false );
 				}
 			}
 
@@ -5224,6 +5237,44 @@ void CRendering3dView::EnableWorldFog( void )
 	{
 		pRenderContext->FogMode( MATERIAL_FOG_NONE );
 	}
+}
+
+
+//-----------------------------------------------------------------------------
+// HL2RPM: the weather's height fog is added to the lit opaque scene by a screen pass
+// (weather_post_ps30). What is drawn after it - water, particles, glass, translucent
+// models - had none: crisp, saturated shapes in a foggy scene. For those the fog the
+// shaders apply themselves is set to the weather's (denser of the two when the map has
+// fog of its own), in the weather's fog color.
+//-----------------------------------------------------------------------------
+bool CRendering3dView::EnableWorldFogWithWeather( void )
+{
+	float flStart, flEnd, flMaxDensity;
+	float fogColor[3];
+	if ( !WeatherRender_GetForwardFog( flStart, flEnd, flMaxDensity ) || !WeatherRender_GetSkyboxFogColor( fogColor ) )
+		return false;
+
+	fogparams_t *pFogParams = NULL;
+	C_BasePlayer *pbp = C_BasePlayer::GetLocalPlayer();
+	if ( pbp )
+		pFogParams = pbp->GetFogParams();
+
+	if ( GetFogEnable( pFogParams ) )
+	{
+		if ( fog_override.GetInt() )
+			GetFogColor( pFogParams, fogColor );
+		flStart = MIN( flStart, GetFogStart( pFogParams ) );
+		flEnd = MIN( flEnd, GetFogEnd( pFogParams ) );
+		flMaxDensity = MAX( flMaxDensity, GetFogMaxDensity( pFogParams ) );
+	}
+
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->FogMode( MATERIAL_FOG_LINEAR );
+	pRenderContext->FogColor3fv( fogColor );
+	pRenderContext->FogStart( flStart );
+	pRenderContext->FogEnd( flEnd );
+	pRenderContext->FogMaxDensity( flMaxDensity );
+	return true;
 }
 
 
