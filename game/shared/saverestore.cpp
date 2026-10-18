@@ -1145,7 +1145,8 @@ void CSave::WriteFunction( datamap_t *pRootMap, const char *pname, inputfunc_t *
 	const char *functionName = UTIL_FunctionToName( pRootMap, *data );
 	if ( !functionName )
 	{
-		Warning( "Invalid function pointer in entity!\n" );
+		// HL2RPM: which entity and which field (a think / touch function missing from its datadesc)
+		Warning( "Invalid function pointer in entity! (%s, %s)\n", pRootMap ? pRootMap->dataClassName : "?", pname ? pname : "?" );
 		Assert(0);
 		functionName = "BADFUNCTIONPOINTER";
 	}

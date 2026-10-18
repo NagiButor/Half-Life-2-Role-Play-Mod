@@ -52,6 +52,10 @@ public:
 	// HL2RPM: the deferred view draws the (alpha tested) detail sprites with the opaque
 	// geometry, ahead of the weather pass, and turns their drawing with the translucents off
 	virtual void SuppressTranslucentSprites( bool bSuppress ) = 0;
+
+	// HL2RPM: the detail sprites around the eye into the current (shadow) view, turned to the eye as
+	// it sees them - the shadows of the grass are those of the grass that is seen
+	virtual void RenderSpriteShadowCasters( const Vector &vecEye, float flMaxDist ) = 0;
 };
 
 

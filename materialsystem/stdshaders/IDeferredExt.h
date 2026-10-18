@@ -225,8 +225,8 @@ struct giData_t
 	Vector4D vecDims[2];	// xyz probes per axis (0: the grid is off), w probe spacing (units)
 	Vector4D vecAtlas;		// x 1 / atlas width, y 1 / atlas height, z lookup offset along the normal (x spacing), w debug
 	Vector4D vecParams0;	// x sun bounce scale, y sky bounce scale, z 1 / cells over which the near grid fades into the far one, w sky light left without sky in sight
-	Vector4D vecParams1;	// x leak tolerance (x spacing), y probe offset in its cell, z sky light boost (daylight), w indirect sun boost indoors
-	Vector4D vecParams2;	// x sky in sight at the camera (0 closed room .. 1 open), yzw unused
+	Vector4D vecParams1;	// x leak tolerance (x spacing), y probe offset in its cell, z sky light boost (daylight, the whole sky in sight), w indirect sun boost indoors
+	Vector4D vecParams2;	// x sky in sight at the camera (0 closed room .. 1 open), y exponent of the sky's response (part in sight ^ y), z desaturation of the sky light, w sky light boost of what reaches a room (bounced, the least of it)
 	Vector4D vecBlurH;		// xy step (screen uv), z depth tolerance, w GI uv scale
 	Vector4D vecBlurV;
 	Vector4D vecApply;		// x on, y debug, z unused, w GI uv scale (lighting pass)
@@ -236,15 +236,42 @@ struct giData_t
 // through its openings), so it can be as strong as a real sky: the maps' ambient was tuned for
 // the flat sky light of before (a few % of the sun - the shade outdoors was nearly black).
 // Daylight only: the night keeps its sky.
-inline float GetGISkyBoost( const giData_t &gi, const weatherData_t &w )
+inline float GetGISkyBoostFor( float flBoost, const giData_t &gi, const weatherData_t &w )
 {
-	if ( !gi.bEnabled || gi.vecParams1.z <= 1.0f )
+	if ( !gi.bEnabled || flBoost <= 1.0f )
 		return 1.0f;
 	// world brightness compared to the day (1 by day, a few % at night)
 	const float flWorld = w.bEnabled ? w.vecSkyZenith.w : 1.0f;
 	float flDay = ( flWorld - 0.05f ) / 0.45f;
 	flDay = ( flDay < 0.0f ) ? 0.0f : ( ( flDay > 1.0f ) ? 1.0f : flDay );
-	return 1.0f + ( gi.vecParams1.z - 1.0f ) * flDay;
+	return 1.0f + ( flBoost - 1.0f ) * flDay;
+}
+
+inline float GetGISkyBoost( const giData_t &gi, const weatherData_t &w )
+{
+	return GetGISkyBoostFor( gi.vecParams1.z, gi, w );
+}
+
+// HL2RPM: how much more the sky light that gets into a room - bounced around in it, and the least
+// of it where no sky is in sight - is boosted than the open sky's (the GI shader's interior terms)
+inline float GetGISkyIndoorFactor( const giData_t &gi, const weatherData_t &w )
+{
+	const float flOpen = GetGISkyBoost( gi, w );
+	const float flIn = ( gi.vecParams2.w > 0.0f ) ? GetGISkyBoostFor( gi.vecParams2.w, gi, w ) : flOpen;
+	return flIn / flOpen;
+}
+
+// HL2RPM: the sky light the GI and the light passes use: x the sky boost above, less of its color
+// (r_deferred_gi_sky_desat: a point is lit by the whole sky, its pale horizon too)
+inline Vector4D GetGISkyLight( const Vector4D &amb, const giData_t &gi, const weatherData_t &w )
+{
+	const float flBoost = GetGISkyBoost( gi, w );
+	const float flDesat = gi.bEnabled ? gi.vecParams2.z : 0.0f;
+	const float flLum = amb.x * 0.299f + amb.y * 0.587f + amb.z * 0.114f;
+	Vector4D out = amb;
+	for ( int i = 0; i < 3; i++ )
+		out[i] = ( amb[i] + ( flLum - amb[i] ) * flDesat ) * flBoost;
+	return out;
 }
 
 // HL2RPM: post-processing of the final frame (deferred_postfx.cpp in the client): eye

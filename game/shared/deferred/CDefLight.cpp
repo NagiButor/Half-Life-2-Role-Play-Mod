@@ -53,6 +53,9 @@ BEGIN_DATADESC( CDeferredLight )
 #endif
 
 	DEFINE_FIELD( m_bSwitchedOn, FIELD_BOOLEAN ),
+	// (the think of a lamp switched by the time of day: without it every save of a map with such a
+	// lamp wrote "Invalid function pointer in entity!" and its load "Failed to find function")
+	DEFINE_THINKFUNC( TimegateThink ),
 	DEFINE_INPUTFUNC( FIELD_VOID, "TurnOn", InputTurnOn ),
 	DEFINE_INPUTFUNC( FIELD_VOID, "TurnOff", InputTurnOff ),
 	DEFINE_INPUTFUNC( FIELD_VOID, "Toggle", InputToggle ),

@@ -507,6 +507,9 @@ void DeferredPostFX_DrawDoF( const CViewSetup &view )
 	rect.width = vw;
 	rect.height = vh;
 	pRenderContext->CopyRenderTargetToTextureEx( pFrame, 0, &rect, &rect );
+	// (the shader binds "the frame buffer copy": make it this copy - whatever refracted last
+	// (a weapon, a particle) may have left the slot pointing at _rt_PowerOfTwoFB)
+	pRenderContext->SetFrameBufferCopyTexture( pFrame, 0 );
 	pRenderContext->DrawScreenSpaceRectangle( g_pMatDoF, vx, vy, vw, vh,
 		vx, vy, vx + vw - 1, vy + vh - 1, fbw, fbh );
 }
@@ -567,7 +570,8 @@ void DeferredPostFX_Draw( const CViewSetup &view )
 	}
 	else
 		data.vecExposure.Init( r_hl2rpm_exposure_key.GetFloat(), 0.0f, 1.0f, 1.0f );
-	data.vecAdapt.Init( flRateUp, flRateDown, s_bResetAdaptation ? 1.0f : 0.0f, 0.0f );
+	// (w: how fast the sun's visibility follows - hl2rpm_lum_ps30, pass 2)
+	data.vecAdapt.Init( flRateUp, flRateDown, s_bResetAdaptation ? 1.0f : 0.0f, 1.0f - expf( -flDt / 0.1f ) );
 	s_bResetAdaptation = false;
 
 	data.vecBloom.Init( bBloom ? r_hl2rpm_bloom_strength.GetFloat() : 0.0f, bBloom ? r_hl2rpm_lensdirt.GetFloat() : 0.0f,
@@ -589,94 +593,33 @@ void DeferredPostFX_Draw( const CViewSetup &view )
 		UTIL_StringToVector( vecTint.Base(), r_hl2rpm_tint.GetString() );
 	data.vecTint.Init( vecTint.x, vecTint.y, vecTint.z, (float)vw / vh );
 
-	// lens flare of the sun: where it is on screen, and whether anything solid is in the way
-	// (a trace - what the clouds and the exposure leave of it, the shader reads from the bloom)
+	// The sun on screen - the lens flare and the glare: where it is, and how much of it and of the
+	// sky right around it is in sight. That is counted on the GPU, in the depth of the G-buffer
+	// (hl2rpm_lum_ps30, pass 2: sky where nothing was drawn) and smoothed there over a tenth of a
+	// second: leaves, the trunks of trees, poles, wires hide the sun as they hide the sky. The traces
+	// of before hit only what has collision - the glare came through every crown and most props.
 	{
-		static float s_flSunSeen = 0.0f;
-		float flTarget = 0.0f;
 		Vector2D vecSun( 0.5f, 0.5f );
 		Vector vecSunDir( 0, 0, 1 );
 		const C_WeatherSystem *pWeather = GetWeatherSystem();
-		if ( bLens && r_hl2rpm_flare.GetFloat() > 0.0f && pWeather && pWeather->IsActive()
-			&& WeatherRender_GetSunScreenPos( vecSun, vecSunDir ) )
+		const bool bSun = bLens && pWeather && pWeather->IsActive() && WeatherRender_GetSunScreenPos( vecSun, vecSunDir );
+		float flOnScreen = 0.0f, flNear = 0.0f;
+		if ( bSun )
 		{
-			// on screen, fading out toward its edges
+			// the flare: on screen, fading out toward its edges; the glare: the sun may be a little
+			// outside of the frame - the skirt of the glow reaches in
 			const float flOff = Max( fabsf( vecSun.x - 0.5f ), fabsf( vecSun.y - 0.5f ) );
-			const float flOnScreen = clamp( ( 0.5f - flOff ) / 0.06f, 0.0f, 1.0f );
-			if ( flOnScreen > 0.0f )
-			{
-				trace_t tr;
-				UTIL_TraceLine( view.origin, view.origin + vecSunDir * 30000.0f, MASK_OPAQUE, NULL, COLLISION_GROUP_NONE, &tr );
-				if ( tr.fraction >= 1.0f || ( tr.surface.flags & ( SURF_SKY | SURF_SKY2D ) ) )
-					flTarget = flOnScreen;
-
-				if ( r_hl2rpm_flare_debug.GetBool() )
-				{
-					static float s_flNextPrint = 0.0f;
-					if ( gpGlobals->realtime >= s_flNextPrint )
-					{
-						s_flNextPrint = gpGlobals->realtime + 0.5f;
-						Msg( "[flare] sun at %.3f %.3f, on screen %.2f, trace fraction %.3f surface %s flags 0x%x -> %.2f\n",
-							vecSun.x, vecSun.y, flOnScreen, tr.fraction, tr.surface.name ? tr.surface.name : "-", (int)tr.surface.flags, flTarget );
-					}
-				}
-			}
+			flOnScreen = clamp( ( 0.5f - flOff ) / 0.06f, 0.0f, 1.0f );
+			flNear = clamp( ( 0.68f - flOff ) / 0.16f, 0.0f, 1.0f );
 		}
-		// (a moment to appear and to go: no popping when the sun passes a pole)
-		const float flStep = flDt / 0.12f;
-		s_flSunSeen = ( flTarget > s_flSunSeen ) ? Min( flTarget, s_flSunSeen + flStep ) : Max( flTarget, s_flSunSeen - flStep );
-		data.vecFlare.Init( vecSun.x, vecSun.y, s_flSunSeen * r_hl2rpm_flare.GetFloat(), r_hl2rpm_flare_threshold.GetFloat() );
+		data.vecFlare.Init( vecSun.x, vecSun.y, flOnScreen * r_hl2rpm_flare.GetFloat(), r_hl2rpm_flare_threshold.GetFloat() );
 
-		// The glare: how much of the sun is in sight - its center, six points around it 1.3
-		// degrees out (the disk and the brightest of the sky around it) and six more 4 degrees
-		// out (the aureole): the glow fades while the sun goes behind an edge and a little of it
-		// stays while the sun stands just behind one; a single trace switched it. The two rings
-		// take turns, a frame each (the result is smoothed anyway). The sun may be a little
-		// outside of the frame: the skirt of the glow reaches in.
-		static float s_flGlareSeen = 0.0f;
-		static float s_flRingSeen[2] = { 0.0f, 0.0f };
-		static int s_iRingFrame = 0;
-		float flGlareTarget = 0.0f;
+		// the glare's light: the global light as the weather leaves it (dim behind clouds, red at
+		// sunset, the moon's at night), no brighter than a clear noon
 		Vector vecGlareColor( 0, 0, 0 );
 		const float flGlare = bLens ? r_hl2rpm_glare.GetFloat() : 0.0f;
-		Vector2D vecSunG( 0.5f, 0.5f );
-		Vector vecSunDirG( 0, 0, 1 );
-		if ( flGlare > 0.0f && pWeather && pWeather->IsActive() && WeatherRender_GetSunScreenPos( vecSunG, vecSunDirG ) )
+		if ( bSun && flGlare > 0.0f && flNear > 0.0f )
 		{
-			const float flOff = Max( fabsf( vecSunG.x - 0.5f ), fabsf( vecSunG.y - 0.5f ) );
-			const float flNear = clamp( ( 0.68f - flOff ) / 0.16f, 0.0f, 1.0f );
-			if ( flNear > 0.0f )
-			{
-				Vector vecRight, vecUp;
-				VectorVectors( vecSunDirG, vecRight, vecUp );
-				const int iRing = ( s_iRingFrame++ ) & 1;
-				const float flRing = tanf( DEG2RAD( iRing ? 4.0f : 1.3f ) );
-				float flCenter = 0.0f, flSeen = 0.0f;
-				for ( int i = 0; i < 7; i++ )
-				{
-					Vector vecDir = vecSunDirG;
-					if ( i > 0 )
-					{
-						const float a = ( i - 1 + iRing * 0.5f ) * ( 2.0f * M_PI_F / 6.0f );
-						vecDir += ( vecRight * cosf( a ) + vecUp * sinf( a ) ) * flRing;
-					}
-					trace_t tr;
-					UTIL_TraceLine( view.origin, view.origin + vecDir * 30000.0f, MASK_OPAQUE, NULL, COLLISION_GROUP_NONE, &tr );
-					if ( tr.fraction >= 1.0f || ( tr.surface.flags & ( SURF_SKY | SURF_SKY2D ) ) )
-					{
-						if ( i == 0 )
-							flCenter = 1.0f;
-						else
-							flSeen += 1.0f / 6.0f;
-					}
-				}
-				s_flRingSeen[ iRing ] = flSeen;
-				// (the disk itself counts most; the aureole alone leaves a third)
-				flGlareTarget = ( 0.3f * flCenter + 0.35f * s_flRingSeen[0] + 0.35f * s_flRingSeen[1] ) * flNear;
-			}
-
-			// its light: the global light as the weather leaves it (dim behind clouds, red at
-			// sunset, the moon's at night), no brighter than a clear noon
 			const lightData_Global_t light = GetGlobalLight() ? GetGlobalLight()->GetState() : lightData_Global_t();
 			if ( light.bEnabled )
 			{
@@ -684,17 +627,22 @@ void DeferredPostFX_Draw( const CViewSetup &view )
 				const float flMax = Max( vecGlareColor.x, Max( vecGlareColor.y, vecGlareColor.z ) );
 				if ( flMax > 1.0f )
 					vecGlareColor *= 1.0f / flMax;
+				vecGlareColor *= flGlare * flNear;
 			}
 		}
-		const float flGlareStep = flDt / 0.18f;
-		s_flGlareSeen = ( flGlareTarget > s_flGlareSeen ) ? Min( flGlareTarget, s_flGlareSeen + flGlareStep ) : Max( flGlareTarget, s_flGlareSeen - flGlareStep );
-		const float flGlareScale = s_flGlareSeen * flGlare;
-		data.vecGlare.Init( vecGlareColor.x * flGlareScale, vecGlareColor.y * flGlareScale, vecGlareColor.z * flGlareScale, 0.0f );
-		// (the shader takes the sun's place from the flare's constants)
-		if ( flGlareScale > 0.0f )
+		// (w: uv per radian of the screen around the sun, vertically - 0 = no sun to look for)
+		const Vector2D vecScale = WeatherRender_GetSunScreenScale();
+		data.vecGlare.Init( vecGlareColor.x, vecGlareColor.y, vecGlareColor.z, bSun ? vecScale.y : 0.0f );
+
+		if ( r_hl2rpm_flare_debug.GetBool() )
 		{
-			data.vecFlare.x = vecSunG.x;
-			data.vecFlare.y = vecSunG.y;
+			static float s_flNextPrint = 0.0f;
+			if ( gpGlobals->realtime >= s_flNextPrint || gpGlobals->realtime < s_flNextPrint - 1.0f )
+			{
+				s_flNextPrint = gpGlobals->realtime + 0.5f;
+				Msg( "[flare] sun %s at %.3f %.3f (uv per radian %.2f %.2f), on screen %.2f, near %.2f\n", bSun ? "in front" : "behind",
+					vecSun.x, vecSun.y, vecScale.x, vecScale.y, flOnScreen, flNear );
+			}
 		}
 	}
 
@@ -722,6 +670,9 @@ void DeferredPostFX_Draw( const CViewSetup &view )
 	rect.width = vw;
 	rect.height = vh;
 	pRenderContext->CopyRenderTargetToTextureEx( pFrame, 0, &rect, &rect );
+	// (the shader binds "the frame buffer copy": make it this copy - whatever refracted last
+	// (a weapon, a particle) may have left the slot pointing at _rt_PowerOfTwoFB)
+	pRenderContext->SetFrameBufferCopyTexture( pFrame, 0 );
 
 	// metering: blocks -> average -> adapted (into a temporary, then copied back)
 	pRenderContext->PushRenderTargetAndViewport( g_tex_LumBlocks, 0, 0, LUM_BLOCKS_X, LUM_BLOCKS_Y );

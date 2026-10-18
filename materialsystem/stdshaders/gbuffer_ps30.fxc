@@ -144,7 +144,8 @@ PS_OUTPUT main( const PS_INPUT In )
 	// (the gradients of the texture coordinate as it came: the shifted one is out of a loop)
 	const float2 vecUVdx = ddx( In.vTexCoord.xy );
 	const float2 vecUVdy = ddy( In.vTexCoord.xy );
-	const float2 vecUV = ParallaxOcclusionUV( sPomHeight, In.vTexCoord.xy, In.vecViewTS, g_vecPOM );
+	float flPomHit;
+	const float2 vecUV = ParallaxOcclusionUV( sPomHeight, In.vTexCoord.xy, In.vecViewTS, g_vecPOM, flPomHit );
 #	define SAMPLE_UV( _s ) tex2Dgrad( _s, vecUV, vecUVdx, vecUVdy )
 #else
 #	define SAMPLE_UV( _s ) tex2D( _s, In.vTexCoord.xy )

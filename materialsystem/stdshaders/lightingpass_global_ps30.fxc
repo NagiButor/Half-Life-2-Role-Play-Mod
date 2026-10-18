@@ -61,7 +61,13 @@ const float4 g_vecGIApply					: register( c72 );	// x on, y debug (ambient only)
 const float4 g_matWorldToScreen[4]			: register( c73 );	// world -> screen texture coords of this view (rows, c73 - c76)
 const float4 g_vecContact					: register( c77 );	// x length (units), y thickness (units), z max distance from the eye (units), w strength (0 = off)
 const float4 g_vecPBR						: register( c78 );	// HL2RPM (PBR): x the sun's reflection (0 = off), y, z what a surface mirrors of the light around it, looking down / up, w least roughness for the sun
-const float4 g_vecPBRWet					: register( c79 );	// HL2RPM (PBR): x how wet the ground is (rain; 0 = dry), y the roughness of a wet surface
+const float4 g_vecPBRWet					: register( c79 );
+// HL2RPM: the sun light through foliage ($litface): x 1 / the depth in the crown (world units) over
+// which it halves, y the most of it that comes through; z how bright a leaf glows seen against the
+// sun (0 = not at all), w the width of that glow (an exponent of the cosine to the sun). The leaves
+// are flagged in the caster depth (sShadowRaw: + 2, shadowpass_ps30): light comes through them, not
+// through walls, roofs and trunks
+const float4 g_vecFoliage					: register( c80 );
 
 // Density of the cloud column above a point, looking toward the light.
 // Uses the same weather map / shape noise as the volumetric clouds so the
@@ -168,7 +174,7 @@ bool InsideCascade( float3 uvz )
 }
 
 // filtered sun shadow from cascade c
-float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBias, float3 footX, float3 footY, int c, bool bDebug )
+float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBias, float3 footX, float3 footY, int c, bool bDebug, float flFoliage )
 {
 	const float4 tile = g_vecUVTransform[c];		// atlas offset / scale of this cascade
 	const float2 atlasTexel = g_vecFilterConfig_A[c].xy;
@@ -204,6 +210,7 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 	if ( bDebug && g_vecPCSS.w > 2.5f && g_vecPCSS.w < 4.5f )
 	{
 		float raw = tex2Dlod( sShadowRaw, float4( atlasUV, 0, 0 ) ).x;
+		raw = frac( raw * 0.5f ) * 2.0f;	// (a leaf: + 2)
 		return ( g_vecPCSS.w > 3.5f ) ? frac( raw * 20.0f ) : saturate( ( raw - uvz.z ) / ( 4.0f * oneTexelDepth ) + 0.5f );
 	}
 
@@ -214,6 +221,8 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 	const float maxPenumbra = min( g_vecPCSS.y, g_vecPCSS.z / ( 2.0f * g_vecSlopeData[c].z ) );
 	const float maxScale = min( sqrt( 1.0f + 0.75f * maxPenumbra * maxPenumbra ), 2.0f );
 	float scale = 1.0f;
+	// HL2RPM: the light that comes through leaves (see the end)
+	float leak = 0.0f;
 	[branch]
 	if ( maxScale > 1.15f && g_vecPCSS.w > 0.5f )
 	{
@@ -222,14 +231,19 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 		const float searchRadius = 1.5f * maxScale + 1.0f;
 		float blockers = 0.0f;
 		float blockerSum = 0.0f;
+		float leafBlockers = 0.0f;	// (x 2)
 		[unroll]
 		for ( int b = 0; b < 16; b++ )
 		{
 			float2 o = g_vecPCSSBlockerDisk[b].xy * searchRadius;
-			float d = tex2Dlod( sShadowRaw, float4( clamp( atlasUV + o * atlasTexel, tileMin, tileMax ), 0, 0 ) ).x;
+			const float raw = tex2Dlod( sShadowRaw, float4( clamp( atlasUV + o * atlasTexel, tileMin, tileMax ), 0, 0 ) ).x;
+			// (a leaf: + 2. The depth is 0 .. 1, the flagged depth 2 .. 3. This decoding and the count
+			// of leaves through raw - d are the forms that still fit the temp registers - X4505)
+			const float d = frac( raw * 0.5f ) * 2.0f;
 			float isBlocker = step( d, uvz.z + dot( o, dzdTexel ) - oneTexelDepth ) * g_vecPCSSBlockerDisk[b].z;
 			blockers += isBlocker;
 			blockerSum += d * isBlocker;
+			leafBlockers += ( raw - d ) * isBlocker;
 		}
 		if ( bDebug && abs( g_vecPCSS.w - 2.0f ) < 0.5f )
 			return blockers / 10.0f;	// r_csm_pcss 2: how many blockers the search found
@@ -244,8 +258,13 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 		else
 		{
 			// penumbra radius (texels) from the caster distance: the sun's angular radius
-			const float penumbra = ( uvz.z - blockerSum / blockers ) * g_vecPCSS.x / oneTexelDepth;
+			const float casterDistance = uvz.z - blockerSum / blockers;
+			const float penumbra = casterDistance * g_vecPCSS.x / oneTexelDepth;
 			scale = clamp( sqrt( 1.0f + 0.75f * penumbra * penumbra ), 1.0f, maxScale );
+			// (a leaf in the shade of the leaves between it and the sun: a crown lets light through, the
+			// less the deeper in - by how far the casters are, in world units - and only as much of it
+			// as the blockers are leaves: a wall, a roof, a trunk stop it)
+			leak = flFoliage * ( 0.5f * leafBlockers / blockers ) * exp2( -casterDistance * ( g_vecSlopeData[c].z / g_vecSlopeData[c].x ) * g_vecFoliage.x );
 		}
 	}
 	else if ( bDebug && abs( g_vecPCSS.w - 2.0f ) < 0.5f )
@@ -319,11 +338,12 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 		}
 		shadow /= dot( Wx, 1.0f ) * dot( Wy, 1.0f );
 	}
-	return shadow;
+	// (what the leaves let through lights the shaded part)
+	return shadow + ( 1.0f - shadow ) * leak * g_vecFoliage.y;
 }
 
 // flNormal: the geometric normal (see main), NdotL: its dot with the direction to the sun
-float SunShadowPCSS( float3 worldPos, float3 flNormal, float NdotL, float extraBias, float3 footX, float3 footY, out int outCascade )
+float SunShadowPCSS( float3 worldPos, float3 flNormal, float NdotL, float extraBias, float3 footX, float3 footY, out int outCascade, float flFoliage )
 {
 	int c = -1;
 	float3 uvz = 0;
@@ -342,7 +362,7 @@ float SunShadowPCSS( float3 worldPos, float3 flNormal, float NdotL, float extraB
 	if ( c < 0 )
 		return 1.0f;
 
-	float shadow = SunShadowCascade( uvz, flNormal, NdotL, extraBias, footX, footY, c, true );
+	float shadow = SunShadowCascade( uvz, flNormal, NdotL, extraBias, footX, footY, c, true, flFoliage );
 
 	// a narrow band at the rim of the cascade fades into the next one, filtered the same way
 	float2 centered = abs( uvz.xy * 2.0f - 1.0f );
@@ -352,7 +372,7 @@ float SunShadowPCSS( float3 worldPos, float3 flNormal, float NdotL, float extraB
 	{
 		float3 uvzNext = SunShadowUVZ( worldPos, flNormal, NdotL, c + 1 );
 		if ( InsideCascade( uvzNext ) )
-			shadow = lerp( shadow, SunShadowCascade( uvzNext, flNormal, NdotL, extraBias, footX, footY, c + 1, false ), blendFactor );
+			shadow = lerp( shadow, SunShadowCascade( uvzNext, flNormal, NdotL, extraBias, footX, footY, c + 1, false, flFoliage ), blendFactor );
 	}
 
 	return shadow;
@@ -525,7 +545,7 @@ PS_OUTPUT main( const PS_INPUT In )
 			const float bodyBias = ( abs( flNormalCtrl.a * 255.0f - 254.0f ) < 0.5f ) ? g_vecShadowExtra.x : 0.0f;
 
 			int csmCascadeIndex = 0;
-			float shadowMult = SunShadowPCSS( worldPos, shadowNormal, shadowNdotL, bodyBias, footX, footY, csmCascadeIndex );
+			float shadowMult = SunShadowPCSS( worldPos, shadowNormal, shadowNdotL, bodyBias, footX, footY, csmCascadeIndex, litface ? 1.0f : 0.0f );
 			if ( g_flCSMColorize > 0.5f )
 			{
 				float3 cascadeColor = float3( 1, 0, 1 );
@@ -713,10 +733,25 @@ PS_OUTPUT main( const PS_INPUT In )
 		* lerp( g_vecPBR.y, g_vecPBR.z, saturate( flMirrorUp * 0.5f + 0.5f ) )
 		* EnvFresnel( flNormal, vecV, flRoughness );
 
+	// HL2RPM: the light through a thin thing - a leaf, a blade of grass, a curtain ($litface) - seen
+	// against the sun: it glows, in its own color (the composite multiplies by the albedo), as
+	// bright as the sun light that reaches it - that is, as lit as the shadow maps leave it (through
+	// the rest of the crown: c80 x, y) - and the more the closer the view is to the sun (a broad
+	// lobe and a narrow one). Lit from the front its light is the light of the sun as on anything.
+	float transmit = 0.0f;
+	[branch]
+	if ( litface && g_vecFoliage.z > 0.0f )
+	{
+		const float litFront = max( lerp( viewFwdDot, viewFwdDot * 0.5f + 0.5f, half_lambert ), 0.05f );
+		const float reach = saturate( lightAmount / litFront );
+		const float toSun = saturate( dot( -vecV, g_vecLightVec_Forward.xyz ) );
+		transmit = reach * g_vecFoliage.z * ( pow( toSun, g_vecFoliage.w ) + 2.0f * pow( toSun, g_vecFoliage.w * 6.0f ) );
+	}
+
 	// HL2RPM: sky light + direct light (the old lerp *replaced* the sky light with the
 	// sun wherever it was lit, so lit areas under a weak overcast sun got darker than shadow)
 	// (lightAmount already contains saturate( litDot ) * sun visibility * shadows)
-	float4 lighting = float4( ambient + g_light_diffuse * lightAmount, flSpecular * lightAmount + flEnv );
+	float4 lighting = float4( ambient + g_light_diffuse * ( lightAmount + transmit ), flSpecular * lightAmount + flEnv );
 
 	Out.vColor_0 = WriteLighting( lighting );
 

@@ -20,6 +20,8 @@ struct defParms_composite
 	int iEnvmap;
 	int iEnvmapMask;
 	int iEnvmapMask2;
+	// (its alpha: the envmap mask of $normalmapalphaenvmapmask)
+	int iBumpmap;
 	int iBlendmodulate;
 	int iBlendmodulate2;
 	int iBlendmodulate3;

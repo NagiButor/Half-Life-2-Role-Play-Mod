@@ -110,8 +110,19 @@ static ConVar r_deferred_gi_normal_offset( "r_deferred_gi_normal_offset", "0.4",
 	"GI: probe lookup off the surface along its normal (x probe spacing)", true, 0.0f, true, 1.0f );
 static ConVar r_deferred_gi_leak_tolerance( "r_deferred_gi_leak_tolerance", "4", 0,
 	"GI: how much farther than its free distance a probe may still light a point (units at a spacing of 64)", true, 0.0f, true, 64.0f );
-static ConVar r_deferred_gi_sky_boost( "r_deferred_gi_sky_boost", "4", FCVAR_ARCHIVE,
-	"GI: sky light by day x this - the GI occludes it, the maps' ambient was tuned for the flat sky light (a few % of the sun)", true, 1.0f, true, 16.0f );
+// HL2RPM: the sky light by how much of the sky a point sees (deferred_gi_ps30, SkyResponse). The
+// maps' ambient was tuned for a flat sky light of a few % of the sun; the old linear boost (x 4) that
+// lit the rooms made the open shade as bright as a sunlit wall and pale blue.
+static ConVar r_deferred_gi_sky_open( "r_deferred_gi_sky_open", "1.8", FCVAR_ARCHIVE,
+	"GI: sky light by day x this where the whole sky is in sight (the GI occludes it; less sky in sight gets relatively more, r_deferred_gi_sky_gamma)", true, 1.0f, true, 16.0f );
+static ConVar r_deferred_gi_sky_gamma( "r_deferred_gi_sky_gamma", "0.5", FCVAR_ARCHIVE,
+	"GI: the sky light of a point as ( part of the sky in sight ) ^ this (1 = linear; less = rooms brighter against the open)", true, 0.2f, true, 1.0f );
+static ConVar r_deferred_gi_sky_indoor( "r_deferred_gi_sky_indoor", "4", 0,
+	"GI: the sky light that reaches a room - bounced inside it, and the least of it where no sky is in sight - x this by day (what lit the rooms before the open sky was toned down)", true, 1.0f, true, 16.0f );
+static ConVar r_deferred_gi_sky_desat( "r_deferred_gi_sky_desat", "0.3", FCVAR_ARCHIVE,
+	"GI: how much of its color the sky light loses (the whole sky lights a point - its pale horizon too - not the deep blue zenith)", true, 0.0f, true, 1.0f );
+// (the old name, still in configs: unused)
+static ConVar r_deferred_gi_sky_boost( "r_deferred_gi_sky_boost", "4", FCVAR_HIDDEN, "Obsolete: r_deferred_gi_sky_open, r_deferred_gi_sky_gamma" );
 static ConVar r_deferred_gi_sun_refresh( "r_deferred_gi_sun_refresh", "1.5", 0,
 	"GI: redo a probe's sun bounce when the sun has moved this many degrees", true, 0.1f, true, 45.0f );
 static ConVar r_deferred_gi_spacing( "r_deferred_gi_spacing", "64", 0,
@@ -2282,8 +2293,8 @@ void DeferredGI_Render( const CViewSetup &view, const lightData_Global_t &global
 	}
 	data.vecAtlas.Init( 1.0f / GI_ATLAS_W, 1.0f / GI_ATLAS_H, r_deferred_gi_normal_offset.GetFloat(), (float)iDebug );
 	data.vecParams0.Init( r_deferred_gi_bounce.GetFloat(), r_deferred_gi_skybounce.GetFloat(), 1.0f / r_deferred_gi_fade_cells.GetFloat(), r_deferred_gi_min.GetFloat() );
-	data.vecParams1.Init( r_deferred_gi_leak_tolerance.GetFloat() / 64.0f, GI_OFFSET, r_deferred_gi_sky_boost.GetFloat(), r_deferred_gi_indoor_boost.GetFloat() );
-	data.vecParams2.Init( s_flCameraSky, 0.0f, 0.0f, 0.0f );
+	data.vecParams1.Init( r_deferred_gi_leak_tolerance.GetFloat() / 64.0f, GI_OFFSET, r_deferred_gi_sky_open.GetFloat(), r_deferred_gi_indoor_boost.GetFloat() );
+	data.vecParams2.Init( s_flCameraSky, r_deferred_gi_sky_gamma.GetFloat(), r_deferred_gi_sky_desat.GetFloat(), r_deferred_gi_sky_indoor.GetFloat() );
 	data.vecBlurH.Init( 1.0f / w, 0.0f, 0.04f, flUVScale );
 	data.vecBlurV.Init( 0.0f, 1.0f / h, 0.04f, flUVScale );
 	data.vecApply.Init( 1.0f, ( iDebug == 1 || iDebug >= 3 ) ? 1.0f : 0.0f, 0.0f, flUVScale );

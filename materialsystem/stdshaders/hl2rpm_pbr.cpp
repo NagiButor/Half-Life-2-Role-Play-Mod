@@ -238,12 +238,27 @@ static pbrSurface_t Classify( const char *pszSurfaceProp, const char *pszName, b
 //-----------------------------------------------------------------------------
 // The relief of the brush materials
 //-----------------------------------------------------------------------------
+// (a value that is no number - "r_deferred_pom scale" typed for r_deferred_pom_scale - read as 0 and
+// turned the relief off for good: it was saved so. Such a value means "on".)
+static void OnPOMChanged( IConVar *pVar, const char *pszOldValue, float flOldValue );
 static ConVar r_deferred_pom( "r_deferred_pom", "1", FCVAR_ARCHIVE,
-	"Parallax occlusion mapping: brush materials with a bump map get a relief (the stones of a pavement overlap the gaps, the mortar sinks between the bricks)" );
+	"Parallax occlusion mapping: brick, stone and tile materials get a relief (the stones of a pavement overlap the gaps, the mortar sinks between the bricks); 0 = off. The depth: r_deferred_pom_scale",
+	OnPOMChanged );
+static void OnPOMChanged( IConVar *pVar, const char *pszOldValue, float flOldValue )
+{
+	const char *pszValue = r_deferred_pom.GetString();
+	if ( pszValue[0] && !V_isdigit( pszValue[0] ) && pszValue[0] != '-' && pszValue[0] != '.' )
+	{
+		Msg( "r_deferred_pom is 0 or 1 (\"%s\" taken for 1); the depth of the relief is r_deferred_pom_scale\n", pszValue );
+		r_deferred_pom.SetValue( 1 );
+	}
+}
 static ConVar r_deferred_pom_scale( "r_deferred_pom_scale", "1.0", FCVAR_ARCHIVE,
 	"Parallax occlusion mapping: scale of the depth of all reliefs", true, 0.0f, true, 4.0f );
 static ConVar r_deferred_pom_distance( "r_deferred_pom_distance", "1100", 0,
 	"Parallax occlusion mapping: the distance at which the relief is gone (it fades over the far half)", true, 64.0f, true, 8192.0f );
+static ConVar r_deferred_pom_occlusion( "r_deferred_pom_occlusion", "0.35", 0,
+	"Parallax occlusion mapping: how much darker the bottom of a relief is (the mortar, the gaps between the stones)", true, 0.0f, true, 1.0f );
 
 struct pbrRelief_t
 {
@@ -311,12 +326,19 @@ void PBR_GetReliefConstants( float flMaterialDepth, bool bReflectionView, float 
 		return;
 	const float flEnd = r_deferred_pom_distance.GetFloat();
 	const float flStart = flEnd * 0.5f;
-	// (a quarter of what the table says. The table is depth as a game would exaggerate it; a stock
+	// (0.4 of what the table says. The table is depth as a game would exaggerate it; a stock
 	// texture is 128 units a repeat, and 0.02 of that is mortar sunk 7 cm deep: at any angle the
-	// bricks closed over it and their sides were stretched into fur. This is 1 - 2 cm.)
-	pOut4[0] = flMaterialDepth * 0.25f * r_deferred_pom_scale.GetFloat();
+	// bricks closed over it and their sides were stretched into fur. This is 2 - 3 cm; the march
+	// takes more steps at a glancing angle, and the bottom of the relief is shaded.)
+	pOut4[0] = flMaterialDepth * 0.4f * r_deferred_pom_scale.GetFloat();
 	pOut4[1] = 1.0f / ( flEnd - flStart );
 	pOut4[2] = flEnd / ( flEnd - flStart );
+	pOut4[3] = r_deferred_pom_occlusion.GetFloat();
+}
+
+float PBR_GetReliefOcclusion()
+{
+	return r_deferred_pom_occlusion.GetFloat();
 }
 
 //-----------------------------------------------------------------------------
@@ -332,6 +354,10 @@ static ConVar r_deferred_treesway_calm( "r_deferred_treesway_calm", "0.16", 0,
 	"Wind sway: the part left on a day without wind", true, 0.0f, true, 2.0f );
 static ConVar r_deferred_treesway_leaves( "r_deferred_treesway_leaves", "0.55", 0,
 	"Wind sway: the shiver of the leaves (units)", true, 0.0f, true, 8.0f );
+static ConVar r_deferred_treesway_branches( "r_deferred_treesway_branches", "6", 0,
+	"Wind sway: how far the branches swing (units at 100 units out from the trunk in a strong wind); the trunk itself only leans a little", true, 0.0f, true, 64.0f );
+static ConVar r_deferred_treesway_trunk( "r_deferred_treesway_trunk", "0.4", 0,
+	"Wind sway: how far a trunk leans (units at 100 units of height in a strong wind)", true, 0.0f, true, 16.0f );
 
 bool PBR_TreeSwayEnabled()
 {
@@ -352,9 +378,12 @@ void PBR_SetTreeSwayConstants( IShaderDynamicAPI *pShaderAPI, int iMode )
 		flWind[0] = flWind[1] = 0.0f;
 	flWind[2] = pShaderAPI->CurrentTime();
 	flWind[3] = ( iMode >= 2 && r_deferred_treesway.GetBool() ) ? r_deferred_treesway_leaves.GetFloat() : 0.0f;
-	const float flParams[4] = { 1.6f * r_deferred_treesway_strength.GetFloat(),
+	// (the trunk hardly moves - it only leans in a strong wind; what moves are the branches, the
+	// more the farther out from the trunk: a material of leaves and branches, $treesway 2)
+	const float flStrength = r_deferred_treesway_strength.GetFloat();
+	const float flParams[4] = { r_deferred_treesway_trunk.GetFloat() * flStrength,
 		r_deferred_treesway.GetBool() ? r_deferred_treesway_calm.GetFloat() : 0.0f,
-		r_deferred_treesway_speed.GetFloat(), 0.0f };
+		r_deferred_treesway_speed.GetFloat(), ( iMode >= 2 ) ? r_deferred_treesway_branches.GetFloat() * flStrength : 0.0f };
 	pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_8, flWind );
 	pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_9, flParams );
 }
@@ -369,6 +398,26 @@ static ConVar r_deferred_transmission_power( "r_deferred_transmission_power", "3
 static ConVar r_deferred_transmission_tint( "r_deferred_transmission_tint", "0.65", 0,
 	"Light through leaves: how much of the leaf's own color the light takes on the way through", true, 0.0f, true, 1.0f );
 
+// (the leaves are flagged in the sun's caster depth - shadowpass_ps30 - so the light comes through
+// the leaves of a crown only, never through a wall or a roof shading a bush)
+static ConVar r_deferred_foliage_light( "r_deferred_foliage_light", "0.7", FCVAR_ARCHIVE,
+	"The sun through the leaves: the most of it that reaches a leaf in the shade of other leaves of its crown (0 = leaves shade like walls)", true, 0.0f, true, 1.0f );
+static ConVar r_deferred_foliage_light_depth( "r_deferred_foliage_light_depth", "100", 0,
+	"The sun through the leaves: the depth in a crown (units) over which the light halves", true, 1.0f, true, 1000.0f );
+
+static ConVar r_deferred_transmission_glow( "r_deferred_transmission_glow", "2.0", 0,
+	"Light through leaves: how bright a leaf the sun reaches glows seen against the sun (x r_deferred_transmission)", true, 0.0f, true, 8.0f );
+static ConVar r_deferred_transmission_composite( "r_deferred_transmission_composite", "0.3", 0,
+	"Light through leaves: the old boost of the composite (multiplies all of a leaf's light toward the sun) - its color only now", true, 0.0f, true, 1.0f );
+
+void PBR_GetFoliageLightConstants( float *pOut4 )
+{
+	pOut4[0] = 1.0f / r_deferred_foliage_light_depth.GetFloat();
+	pOut4[1] = r_deferred_transmission.GetFloat() > 0.0f ? r_deferred_foliage_light.GetFloat() : 0.0f;
+	pOut4[2] = r_deferred_transmission.GetFloat() * r_deferred_transmission_glow.GetFloat();
+	pOut4[3] = r_deferred_transmission_power.GetFloat();
+}
+
 void PBR_GetTransmissionConstants( float flMaterial, float *pTransmit4, float *pSunDir4 )
 {
 	pTransmit4[0] = pTransmit4[1] = pTransmit4[2] = pTransmit4[3] = 0.0f;
@@ -378,7 +427,9 @@ void PBR_GetTransmissionConstants( float flMaterial, float *pTransmit4, float *p
 	const lightData_Global_t &light = GetDeferredExt()->GetLightData_Global();
 	if ( flMaterial <= 0.0f || !light.bEnabled )
 		return;
-	pTransmit4[0] = flMaterial * r_deferred_transmission.GetFloat() * 1.6f;
+	// (the glow itself is the sun pass's now - lightingpass_global_ps30 adds the light through a leaf
+	// to the light buffer; this boost only deepens its color toward the leaf's own)
+	pTransmit4[0] = flMaterial * r_deferred_transmission.GetFloat() * 1.6f * r_deferred_transmission_composite.GetFloat();
 	pTransmit4[2] = r_deferred_transmission_tint.GetFloat();
 	pSunDir4[0] = light.vecLight.x;
 	pSunDir4[1] = light.vecLight.y;
@@ -392,7 +443,9 @@ void InitParmsPBR( const pbrParms_t &info, IMaterialVar **params, const char *ps
 
 	// what the author said about its reflections: a cubemap and how strong (masked or not)
 	const bool bBump = info.iBumpmap >= 0 && params[ info.iBumpmap ]->IsDefined();
-	const bool bNormalAlphaMask = BoolParm( params, info.iNormalAlphaEnvmapMask );
+	// ($normalmapalphaenvmapmask is a material flag: the parameter of that name stays empty)
+	const bool bNormalAlphaMask = BoolParm( params, info.iNormalAlphaEnvmapMask )
+		|| ( params[ FLAGS ]->GetIntValue() & MATERIAL_VAR_NORMALMAPALPHAENVMAPMASK ) != 0;
 	bool bGlossMask = bBump && bNormalAlphaMask;
 	if ( info.iEnvmap >= 0 && params[ info.iEnvmap ]->IsDefined() )
 	{

@@ -27,6 +27,8 @@ struct defParms_shadow
 
 	// HL2RPM: the wind in a tree (hl2rpm_sway_fxc.h)
 	int iTreeSway;
+	// HL2RPM: a leaf ($litface): flagged in the sun's caster depth, the light shines through it
+	int iLitface;
 
 	// config
 	bool bModel;

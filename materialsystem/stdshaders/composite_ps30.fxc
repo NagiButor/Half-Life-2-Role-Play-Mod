@@ -108,6 +108,10 @@ const float4 g_vecPOM					: register( c32 );
 // color the light takes on its way through;  xyz the direction to the sun / the moon
 const float4 g_vecTransmit				: register( c33 );
 const float4 g_vecTransmitSun			: register( c34 );
+// HL2RPM: where the $envmap mask comes from: x, y scale and bias of the base alpha (no mask
+// texture), z 1 = the mask texture's alpha instead of its red (the bump map of
+// $normalmapalphaenvmapmask)
+const float4 g_vecEnvMask				: register( c35 );
 
 #if ENVMAP
 sampler sEnvmap								: register( s3 );
@@ -218,7 +222,8 @@ PS_OUTPUT main( const PS_INPUT In )
 	// its gradients - those of the coordinate as it came: the shifted one is out of a loop.
 	const float2 vecUVdx = ddx( In.vTexCoord.xy );
 	const float2 vecUVdy = ddy( In.vTexCoord.xy );
-	const float2 vecUV = ParallaxOcclusionUV( sPomHeight, In.vTexCoord.xy, In.vecViewTS, g_vecPOM );
+	float flPomHit;
+	const float2 vecUV = ParallaxOcclusionUV( sPomHeight, In.vTexCoord.xy, In.vecViewTS, g_vecPOM, flPomHit );
 	// HL2RPM: with TAA the frame is the average of jittered frames - a box filter of a pixel on
 	// top of the texture filtering: textures looked soft. The albedo is sampled a little sharper
 	// then (a negative mip bias, c23.w - here as smaller gradients); TAA resolves what that
@@ -350,6 +355,11 @@ PS_OUTPUT main( const PS_INPUT In )
 	float4 flLighting = ReadLighting( tex2Dlod( sLightAccum, float4( screenPos, 0, 0 ) ) );
 #endif
 
+	// HL2RPM: the bottom of the relief (the mortar between the bricks, the gaps between the
+	// stones) is reached by less of the light around than the faces: darker by its depth
+	// (g_vecPOM.w; the sun's own shadow in the grooves is not traced - this stands for both)
+	flLighting *= 1.0f - g_vecPOM.w * ( 1.0f - flPomHit );
+
 	// HL2RPM: right at a lamp the light is many times what a lit surface of the day gets - the
 	// maps' lamps were set for lightmaps, which hold no more than twice "white": a patch of pure
 	// white on the ground under every strong lamp, white characters standing in it. A soft limit
@@ -409,9 +419,12 @@ PS_OUTPUT main( const PS_INPUT In )
 		SAMPLE_UV( sEnvmapMask2 ),
 		flBlendfactor );
 #endif
-	flSpecularFactor = vecEnvmapmaskColor.r;
+	// (the mask texture's red, or its alpha when it is the bump map of $normalmapalphaenvmapmask)
+	flSpecularFactor = lerp( vecEnvmapmaskColor.r, vecEnvmapmaskColor.a, g_vecEnvMask.z );
 #else
-	flSpecularFactor = flAlbedoSample.a;
+	// the alpha of the base texture: 1 - alpha with $basealphaenvmapmask (as the stock shaders
+	// have it - "reversing alpha blows!"), no mask at all without (x scale, y bias)
+	flSpecularFactor = saturate( flAlbedoSample.a * g_vecEnvMask.x + g_vecEnvMask.y );
 #endif
 
 #if RIMLIGHT
@@ -509,9 +522,13 @@ PS_OUTPUT main( const PS_INPUT In )
 	// what comes through it is the light on its far side, in the leaf's own color once more. The
 	// light passes light such a surface from both sides ($litface); here, looking toward the sun,
 	// it is brighter and more saturated - the more the closer to the sun's direction.
+	// Two lobes: a wide one (the crown lit from behind) and a narrow, bright one right around the
+	// sun - the leaves in front of it glow. (The sun light that reaches a leaf in the shade of the
+	// rest of its crown - it comes through - the sun pass gives: lightingpass_global_ps30 c80.)
 	{
 		const float3 vecRay = normalize( In.vWorldPos - g_vecOrigin );
-		const float flThrough = pow( saturate( dot( vecRay, g_vecTransmitSun.xyz ) ), g_vecTransmit.y );
+		const float flCos = saturate( dot( vecRay, g_vecTransmitSun.xyz ) );
+		const float flThrough = pow( flCos, g_vecTransmit.y ) + 2.5f * pow( flCos, g_vecTransmit.y * 6.0f );
 		Out.vColor_0.xyz *= 1.0f + g_vecTransmit.x * flThrough * lerp( 1.0f, flAlbedoSample.rgb * 2.2f, g_vecTransmit.z );
 	}
 

@@ -110,14 +110,19 @@ BEGIN_VS_SHADER( DEFERRED_GI, "" )
 			pShaderAPI->SetPixelShaderConstant( 8, gi.vecGrid[1].Base(), 1, true );
 			pShaderAPI->SetPixelShaderConstant( 9, gi.vecDims[1].Base(), 1, true );
 			// x sky visibility uv scale (0 = none), y indoor ambient of the sky visibility, z height of the sun
-			const float flEstimate[4] = { bAO ? ao.vecApply.w : 0.0f, ao.vecApply.y, clamp( light.vecLight.z, 0.0f, 1.0f ), 0.0f };
+			const float flEstimate[4] = { bAO ? ao.vecApply.w : 0.0f, ao.vecApply.y, clamp( light.vecLight.z, 0.0f, 1.0f ),
+				( gi.vecParams2.y > 0.0f ) ? gi.vecParams2.y : 1.0f };
 			pShaderAPI->SetPixelShaderConstant( 10, flEstimate, 1, true );
 
 			// the sun / moon fades out at the horizon like in the global light pass
 			const float flSunUp = clamp( ( light.vecLight.z + 0.02f ) / 0.08f, 0.0f, 1.0f );
-			const float flBoost = GetGISkyBoost( gi, GetDeferredExt()->GetWeatherData() );
-			const float flAmbHigh[4] = { light.ambh.x * flBoost, light.ambh.y * flBoost, light.ambh.z * flBoost, gi.vecParams0.w };
-			const float flAmbLow[4] = { light.ambl.x * flBoost, light.ambl.y * flBoost, light.ambl.z * flBoost, gi.vecParams0.y };
+			const Vector4D ambh = GetGISkyLight( light.ambh, gi, GetDeferredExt()->GetWeatherData() );
+			const Vector4D ambl = GetGISkyLight( light.ambl, gi, GetDeferredExt()->GetWeatherData() );
+			// (the interior terms - the least sky light without sky in sight, the sky light bounced in a
+			// room - keep the boost the rooms were lit with; only the open sky is toned down)
+			const float flIndoor = GetGISkyIndoorFactor( gi, GetDeferredExt()->GetWeatherData() );
+			const float flAmbHigh[4] = { ambh.x, ambh.y, ambh.z, Min( gi.vecParams0.w * flIndoor, 0.9f ) };
+			const float flAmbLow[4] = { ambl.x, ambl.y, ambl.z, gi.vecParams0.y * flIndoor };
 			// (w: 1 / cells over which the near grid fades into the far one)
 			const float flSun[4] = { light.diff.x * gi.vecParams0.x * flSunUp, light.diff.y * gi.vecParams0.x * flSunUp,
 				light.diff.z * gi.vecParams0.x * flSunUp, gi.vecParams0.z };

@@ -9,6 +9,7 @@
 | `fgd/` | `E:\XBLAH's modding tool\tools\FGDs\Mapbase` (Hammer++ грузит их оттуда) |
 | `crashtools/` | `E:\Steam\steamapps\sourcemods\hl2rpm\crashtools` |
 | `resource/` | `E:\Steam\steamapps\sourcemods\hl2rpm\resource` — локализация мода (`hl2rpm_<язык>.txt`, UTF-16LE **с BOM**) и `gamemenu.res` |
+| `scripts/` | `E:\Steam\steamapps\sourcemods\hl2rpm\scripts` — `hl2rpm_pbr.txt` (из чего сделаны материалы, PBR), `hl2rpm_relief.txt` (исключения рельефа материалов без карты нормалей), `HudLayout.res` |
 | `tools/` | скрипты-генераторы и dev-утилиты (оригиналы, рабочих копий нет) — см. ниже |
 | `claude_skills/` | `E:\SourceModding\HL2RPMSOURCE\.claude\skills` — навыки Claude Code: `hl2rpm-hammer` (VMF/BSP, компиляция карт), `hl2rpm-playtest` (запуск и проверка мода), `hl2rpm-dialogs` (диалоги, квесты, лут) |
 
@@ -29,6 +30,7 @@
 | `crawl_stats.py <папка> <префикс> <out.png>` | вторая разность по времени (≈0 при плавном движении) — «ёрзанье» теней при ходе солнца, «песок» на облаках; кадры писать в `tga` |
 | `vpk_list.py <dir.vpk> [фильтр] [--extract папка]` | список/распаковка файлов из VPK |
 | `make_gi_test.py <out.vmf>` | генерирует тестовую карту `gi_test` для непрямого света: комнаты с окнами / глухая / с люком в крыше / с воротами (использует `vmf.py` и `new_test_map.py` из навыка `hl2rpm-hammer`; компилировать `compile_map.ps1`) |
+| `pom/` | исследование рельефа (POM) из текстур без карт нормалей: `vtf.py` (чтение VTF, DXT1/3/5 → numpy), `relief_proto.py` (знак рельефа по яркости против высоты из настоящих карт нормалей на 174 стоковых материалах), `relief_proto4.py`/`relief_proto7.py` (детектор светлой сетки швов по связности), `relief_sheet.py` (листы «текстура + высота» материалов без нормалей), `relief_dump.py <материал> [inv]` (высота, освещённый рельеф и нормали одной текстуры). Путь к распакованным VPK — `R` в `relief_proto.py` |
 | `make_water_test.py <out.vmf>` | генерирует тестовую карту `water_test`: ряд бассейнов из стоковых материалов воды (мутная, прозрачная, морская, канализация, дешёвая...) со ступенями глубины 16/64/128/256 ед.; солнце карты совпадает с солнцем deferred в 13:00 - для сравнения с `-nodeferred` |
 
 Собранные DLL/PDB, шейдеры `.vcs` мода, карты и прочие ресурсы в git не кладутся —

@@ -4,7 +4,9 @@
 //   PASS 0: mean log luminance of blocks of the frame -> 32x18 target
 //   PASS 1: center weighted mean of the blocks -> 1x1
 //   PASS 2: the adapted value -> 1x1 (faster toward a brighter scene, slower
-//           into the dark like the eye; the client copies it back for the next frame)
+//           into the dark like the eye; the client copies it back for the next frame);
+//           in b how much of the sun and of the sky right around it is in sight (the
+//           lens flare and the glare of hl2rpm_postfx_ps30), smoothed the same way
 //
 //=============================================================================//
 
@@ -17,8 +19,47 @@ sampler sSrc			: register( s0 );
 sampler sPrev			: register( s1 );	// PASS 2: the adapted value of the last frame
 
 // PASS 0: xy one block of the frame (uv); PASS 1: xy texel size, zw blocks in x / y;
-// PASS 2: x rate toward brighter, y toward darker, z reset (take the current value)
+// PASS 2: x rate toward brighter, y toward darker, z reset (take the current value), w rate of
+// the sun's visibility
 const float4 g_vecLum	: register( c0 );
+
+#if PASS == 2
+sampler sDepth			: register( s2 );	// the G-buffer's depth of the frame (0 = sky)
+// xy the sun's place on screen (uv), z uv per radian there (vertically; 0 = no sun in front),
+// w the aspect of the frame (width / height)
+const float4 g_vecSun	: register( c1 );
+
+// sky (nothing drawn) at a place of the frame; a little outside of it, the edge's
+float SkyAt( float2 uv )
+{
+	return ( tex2Dlod( sDepth, float4( saturate( uv ), 0, 0 ) ).x < 0.1 ) ? 1.0 : 0.0;
+}
+
+// How much of the sun is in sight: its disk (0.27 degrees; the center and 8 points at 0.35), the
+// sky around it at 1.3 degrees and the aureole at 4 - the glow fades while the sun goes behind an
+// edge or into a crown, and a little of it stays while it stands just behind one. Leaves, poles,
+// trunks and wires hide it as they hide the sky: they are in the depth buffer.
+float SunVisibility()
+{
+	if ( g_vecSun.z <= 0.0 )
+		return 0.0;
+	const float2 scale = float2( g_vecSun.z / g_vecSun.w, g_vecSun.z );
+	float disk = SkyAt( g_vecSun.xy );
+	float ring = 0.0;
+	float aureole = 0.0;
+	[unroll]
+	for ( int i = 0; i < 8; i++ )
+	{
+		const float a = i * 0.78539816;
+		const float2 d = float2( cos( a ), sin( a ) );
+		const float2 e = float2( cos( a + 0.39269908 ), sin( a + 0.39269908 ) );
+		disk += SkyAt( g_vecSun.xy + d * ( 0.0061 * scale ) );
+		ring += SkyAt( g_vecSun.xy + e * ( 0.0227 * scale ) );
+		aureole += SkyAt( g_vecSun.xy + d * ( 0.0698 * scale ) );
+	}
+	return disk * ( 0.45 / 9.0 ) + ring * ( 0.3 / 8.0 ) + aureole * ( 0.25 / 8.0 );
+}
+#endif
 
 struct PS_INPUT
 {
@@ -63,9 +104,11 @@ float4 main( const PS_INPUT In ) : COLOR
 	return float4( s / max( ws, 1e-4 ), 0, 0, 1 );
 #else
 	const float cur = tex2D( sSrc, float2( 0.5, 0.5 ) ).r;
-	const float prev = tex2D( sPrev, float2( 0.5, 0.5 ) ).r;
-	const float rate = ( cur > prev ) ? g_vecLum.x : g_vecLum.y;
-	const float v = ( g_vecLum.z > 0.5 ) ? cur : lerp( prev, cur, rate );
-	return float4( v, cur, 0, 1 );
+	const float4 prev = tex2D( sPrev, float2( 0.5, 0.5 ) );
+	const float rate = ( cur > prev.r ) ? g_vecLum.x : g_vecLum.y;
+	const float v = ( g_vecLum.z > 0.5 ) ? cur : lerp( prev.r, cur, rate );
+	const float sun = SunVisibility();
+	const float sunSeen = ( g_vecLum.z > 0.5 ) ? sun : lerp( prev.b, sun, g_vecLum.w );
+	return float4( v, cur, sunSeen, 1 );
 #endif
 }

@@ -112,6 +112,12 @@ Compare A/B in the same run (e.g. `r_csm_pcss 1` then `0`, `r_weather_cloud_temp
 `r_weather_cloud_wind_scale 0` to freeze the clouds) and look at a 3-4x zoom of
 consecutive frames, not only the numbers.
 
+**Pixel A/B of stills** (a setting's effect as a difference image): freeze everything that moves
+by itself first - `r_deferred_treesway 0` (trees *and* grass), `r_deferred_taa_jitter 0`,
+`r_weather_motes 0`, `r_weather_cloud_wind_scale 0` - and shoot A, B, A again: the A/A
+difference is the noise floor (~3 levels), anything above it in B-A is the setting. Without
+the freeze swaying grass alone gives a mean difference of ~8 levels.
+
 ### Old / stock maps
 
 EP1/EP2 maps (`E:\SourceModding\UsefulStuff\Source sdk 2013 HL2 unpacked vpk\episodic|ep2\maps`)

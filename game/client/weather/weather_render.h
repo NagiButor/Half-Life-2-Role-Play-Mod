@@ -54,6 +54,9 @@ void WeatherRender_Motes( const CViewSetup &view );		// dust motes in the sun's 
 // where the sun (or the moon) is in the main view this frame (screen uv, y down) and its
 // direction; false when it is behind the camera or there is no weather
 bool WeatherRender_GetSunScreenPos( Vector2D &vecScreen, Vector &vecDir );
+// HL2RPM: how far one radian of angle moves on screen there (uv, x and y) - the sky around the sun
+// is looked up in the depth buffer (deferred_postfx.cpp)
+Vector2D WeatherRender_GetSunScreenScale();
 void WeatherRender_Lightning( const CViewSetup &view );	// visible channel of a strike
 void WeatherRender_SunShafts( const CViewSetup &view, ITexture *pTarget );
 

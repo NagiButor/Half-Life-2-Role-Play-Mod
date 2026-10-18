@@ -134,8 +134,14 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 	const bool bPhongFresnel = PARM_SET( info.iPhongFresnel );
 
 	const bool bEnvmap = PARM_TEX( info.iEnvmap );
-	const bool bEnvmapMask = bEnvmap && PARM_TEX( info.iEnvmapMask );
-	const bool bEnvmapMask2 = bEnvmapMask && PARM_TEX( info.iEnvmapMask2 );
+	// HL2RPM: the envmap mask as the stock shaders take it - a mask texture, the bump map's alpha
+	// ($normalmapalphaenvmapmask) or 1 - the base texture's alpha ($basealphaenvmapmask; see c35).
+	// The base alpha as it was (not inverted, and for every material without a mask texture) made
+	// the dull parts mirror: white Metrocops, a blue APC mirroring the light around them.
+	const bool bNormalAlphaEnvmapMask = bEnvmap && !PARM_TEX( info.iEnvmapMask ) && IS_FLAG_SET( MATERIAL_VAR_NORMALMAPALPHAENVMAPMASK )
+		&& PARM_VALID( info.iBumpmap ) && PARM_TEX( info.iBumpmap );
+	const bool bEnvmapMask = bEnvmap && ( PARM_TEX( info.iEnvmapMask ) || bNormalAlphaEnvmapMask );
+	const bool bEnvmapMask2 = bEnvmapMask && !bNormalAlphaEnvmapMask && PARM_TEX( info.iEnvmapMask2 );
 	const bool bEnvmapFresnel = bEnvmap && PARM_SET( info.iEnvmapFresnel );
 	const bool bEnvmapCorrection = !info.bModel && bEnvmap && info.iEnvmapParallax != -1 && !params[info.iEnvmapParallax]->MatrixIsIdentity();
 
@@ -165,9 +171,6 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 
 	AssertMsgOnce( !(bTranslucent || bAlphatest) || !bAlbedo2,
 		"blended albedo not supported by gbuffer pass!" );
-
-	AssertMsgOnce( IS_FLAG_SET( MATERIAL_VAR_NORMALMAPALPHAENVMAPMASK ) == false,
-		"Normal map sampling should stay out of composition pass." );
 
 	AssertMsgOnce( !PARM_TEX( info.iSelfIllumMask ) || !bEnvmapMask,
 		"Can't use separate selfillum mask with envmap mask - use SELFILLUM_ENVMAPMASK_ALPHA instead." );
@@ -359,7 +362,7 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 				}
 
 				if ( bEnvmapMask )
-					tmpBuf.BindTexture( pShader, SHADER_SAMPLER4, info.iEnvmapMask );
+					tmpBuf.BindTexture( pShader, SHADER_SAMPLER4, bNormalAlphaEnvmapMask ? info.iBumpmap : info.iEnvmapMask );
 
 				if ( bAlbedo2 )
 				{
@@ -546,6 +549,13 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 				? PARM_FLOAT( info.iTransmission ) : 0.0f, flTransmit, flTransmitSun );
 			pShaderAPI->SetPixelShaderConstant( 33, flTransmit, 1, true );
 			pShaderAPI->SetPixelShaderConstant( 34, flTransmitSun, 1, true );
+
+			// where the envmap mask comes from (composite_ps30 c35): x, y scale and bias of the base
+			// alpha, z the mask texture's alpha instead of its red
+			float flEnvMask[4] = { 0.0f, 1.0f, bNormalAlphaEnvmapMask ? 1.0f : 0.0f, 0.0f };
+			if ( !bEnvmapMask && IS_FLAG_SET( MATERIAL_VAR_BASEALPHAENVMAPMASK ) )
+				flEnvMask[0] = -1.0f;
+			pShaderAPI->SetPixelShaderConstant( 35, flEnvMask, 1, true );
 		}
 		if ( iTreeSway > 0 )
 			PBR_SetTreeSwayConstants( pShaderAPI, iTreeSway );

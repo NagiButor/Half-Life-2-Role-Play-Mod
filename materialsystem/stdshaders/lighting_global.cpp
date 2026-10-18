@@ -1,5 +1,6 @@
 
 #include "deferred_includes.h"
+#include "hl2rpm_pbr.h"
 
 #include "defconstruct_vs30.inc"
 #include "lightingpass_global_ps30.inc"
@@ -178,13 +179,8 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA, data.diff.Base(), 1, true );
 			// HL2RPM: the sky light as strong as a real sky's while the GI probes occlude it
-			const float flSkyBoost = GetGISkyBoost( GetDeferredExt()->GetGIData(), GetDeferredExt()->GetWeatherData() );
-			Vector4D ambh = data.ambh, ambl = data.ambl;
-			for ( int i = 0; i < 3; i++ )
-			{
-				ambh[i] *= flSkyBoost;
-				ambl[i] *= flSkyBoost;
-			}
+			const Vector4D ambh = GetGISkyLight( data.ambh, GetDeferredExt()->GetGIData(), GetDeferredExt()->GetWeatherData() );
+			const Vector4D ambl = GetGISkyLight( data.ambl, GetDeferredExt()->GetGIData(), GetDeferredExt()->GetWeatherData() );
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 1, ambh.Base(), 1, true );
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 2, MakeHalfAmbient( ambl, ambh ).Base(), 1, true );
 
@@ -255,6 +251,11 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 			const float flWetness = wetWeather.bEnabled ? clamp( wetWeather.vecRainParams.y, 0.0f, 1.0f ) * r_deferred_pbr_wet.GetFloat() : 0.0f;
 			float flPBRWet[4] = { flWetness, r_deferred_pbr_wet_roughness.GetFloat(), 0.0f, 0.0f };
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 21, flPBRWet, 1, true );
+
+			// HL2RPM: the sun through the leaves of a crown (c80)
+			float flFoliage[4];
+			PBR_GetFoliageLightConstants( flFoliage );
+			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 22, flFoliage, 1, true );
 		}
 
 		Draw();

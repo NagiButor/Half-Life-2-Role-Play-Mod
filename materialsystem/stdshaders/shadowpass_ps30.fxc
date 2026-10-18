@@ -23,6 +23,10 @@ sampler sAlbedo4						: register( s3 );
 #if ALPHATEST
 const float g_flAlphaRef				: register( c0 );
 #endif
+// HL2RPM: x added to the caster depth (R32F color target of the sun atlas): 2 for the casters the
+// light shines through - leaves ($litface) - 0 for the rest; the blocker search of the sun pass
+// (lightingpass_global_ps30) lets light through the leaves only, not through walls
+const float4 g_vecCasterFlags			: register( c1 );
 
 
 struct PS_INPUT
@@ -138,7 +142,7 @@ float depth;
 	// atlas; the other shadow maps have a null color target). The rasterized depth itself,
 	// unbiased: the same value the lookups compute for a receiver (a slope bias here blew
 	// up for faces edge-on to a low sun and lost their long shadows).
-	Out.vColor_0 = float4( rawDepth, rawDepth, rawDepth, 1 );
+	Out.vColor_0 = float4( rawDepth + g_vecCasterFlags.x, rawDepth, rawDepth, 1 );
 #if SHADOW_MODE == DEFERRED_SHADOW_MODE_DPSM
 	Out.flDepth = depth;
 #endif

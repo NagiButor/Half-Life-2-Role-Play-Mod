@@ -183,6 +183,31 @@ static bool IsClothMaterial( const char *pszName )
 
 static ConVar r_deferred_pom_auto( "r_deferred_pom_auto", "1", 0,
 	"Parallax occlusion mapping: brush materials get a height map made of their bump map (takes effect as materials load)" );
+static ConVar r_deferred_pom_texture( "r_deferred_pom_texture", "1", FCVAR_ARCHIVE,
+	"Brick, stone and tile materials without a bump map get a relief and a bump map made of their texture (takes effect as materials load)" );
+
+//-----------------------------------------------------------------------------
+// HL2RPM: what a relief can be guessed for from the texture alone - masonry, paving, rock. Not
+// concrete, plaster, wood or metal: their dark spots are stains and rust, not dents.
+//-----------------------------------------------------------------------------
+static bool IsReliefMaterial( const char *pszName )
+{
+	if ( !pszName )
+		return false;
+	static const char *const s_pszKeys[] = { "brick", "stone", "cobble", "rock", "cliff", "tile", "pave", "paving", "rubble", "gravel", "boulder" };
+	static const char *const s_pszNot[] = { "marble", "glass", "metal", "wood", "tools/", "dev/" };
+	for ( const char *pszKey : s_pszNot )
+	{
+		if ( V_stristr( pszName, pszKey ) )
+			return false;
+	}
+	for ( const char *pszKey : s_pszKeys )
+	{
+		if ( V_stristr( pszName, pszKey ) )
+			return true;
+	}
+	return false;
+}
 
 // Copied from cdeferred_manager_client.cpp
 //-----------------------------------------------------------------------------
@@ -428,6 +453,14 @@ static void ShaderReplaceReplMat( const char *szNewShadername, IMaterial *pMat, 
 		msg->SetInt( "$selfillum", 1 );
 	}
 
+	// HL2RPM: where the envmap mask comes from - flags too, lost with them: the deferred composite
+	// took the base alpha of every material without a mask texture, and not inverted as the stock
+	// shaders have it - the dull parts mirrored, Metrocops were white and the APC blue
+	if ( pMat->GetMaterialVarFlag( MATERIAL_VAR_BASEALPHAENVMAPMASK ) )
+		msg->SetInt( "$basealphaenvmapmask", 1 );
+	if ( pMat->GetMaterialVarFlag( MATERIAL_VAR_NORMALMAPALPHAENVMAPMASK ) )
+		msg->SetInt( "$normalmapalphaenvmapmask", 1 );
+
 	// HL2RPM: $nofog was lost with the flags as well. The skybox Citadel's materials are
 	// $nofog (only its translucent top fades into the sky): the composite fogged the whole
 	// tower into a flat sky-colored silhouette.
@@ -452,6 +485,19 @@ static void ShaderReplaceReplMat( const char *szNewShadername, IMaterial *pMat, 
 			const char *pszHeight = DeferredPOM_GetHeightTexture( pszBump, msg->GetInt( "$ssbump", 0 ) != 0 );
 			if ( pszHeight )
 				msg->SetString( "$pom_heightmap", pszHeight );
+		}
+		// no bump map: masonry gets a relief and a bump map made of its texture (scripts/hl2rpm_relief.txt
+		// names the exceptions)
+		else if ( r_deferred_pom_texture.GetBool() && IsReliefMaterial( pszMatname ) )
+		{
+			const char *pszBase = msg->GetString( "$basetexture", "" );
+			const char *pszHeight = NULL, *pszNormal = NULL;
+			if ( pszBase[0] && DeferredPOM_GetTextureRelief( pszBase, DeferredPOM_GetReliefRule( pszMatname ), &pszHeight, &pszNormal ) )
+			{
+				msg->SetString( "$bumpmap", pszNormal );
+				msg->SetString( "$pom_heightmap", pszHeight );
+				msg->SetInt( "$pom_texturerelief", 1 );
+			}
 		}
 	}
 

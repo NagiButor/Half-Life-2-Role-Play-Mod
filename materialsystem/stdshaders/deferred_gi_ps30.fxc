@@ -58,13 +58,23 @@ const float4 g_vecSun			: register( c6 );	// rgb sun light x bounce scale, w 1 /
 const float4 g_vecGI2			: register( c7 );	// x leak tolerance (x spacing), y probe offset in its cell (probe i sits at ( i + y ) * spacing), z unused, w indirect sun boost indoors
 const float4 g_vecGridFar		: register( c8 );	// far grid, as c1
 const float4 g_vecDimsFar		: register( c9 );	// far grid, as c2 (xyz 0: off)
-const float4 g_vecEstimate		: register( c10 );	// x sky visibility uv scale (0 = none), y its indoor ambient, z height of the sun (0..1)
+const float4 g_vecEstimate		: register( c10 );	// x sky visibility uv scale (0 = none), y its indoor ambient, z height of the sun (0..1), w the exponent of the sky's response
 
 struct PS_INPUT
 {
 	float2 vTexCoord			: TEXCOORD0;
 	float3 vecWorldRay			: TEXCOORD1;
 };
+
+// HL2RPM: the sky light of a point by how much of the sky it sees. Linear - with the sky light
+// boosted for the rooms to be lit at all - the open ground in the shade was as bright as a sunlit
+// wall and as blue as the sky: everything light colored turned pale blue. The open sky now gives
+// the light of a real one, and what sees little of it gets relatively more (the exponent < 1) -
+// the light that comes into a room by bouncing around in it.
+float SkyResponse( float v )
+{
+	return pow( saturate( v ), g_vecEstimate.w );
+}
 
 float Shape( float3 n )
 {
@@ -168,7 +178,7 @@ float4 GatherGrid( sampler sAtlas, float4 vecGrid, float4 vecDims, float3 P, flo
 
 	vecDebug = float4( sky, sun );
 	vecDebugSky = skyBounce;
-	const float3 light = g_vecAmbHigh.rgb * ( lerp( g_vecAmbHigh.w, 1.0, sky ) + skyBounce )
+	const float3 light = g_vecAmbHigh.rgb * ( lerp( g_vecAmbHigh.w, 1.0, SkyResponse( sky ) ) + skyBounce )
 		+ g_vecSun.rgb * sun;
 	return float4( light, edge * saturate( wsum * 16.0 ) );
 }
@@ -187,7 +197,7 @@ float3 Estimate( float2 uv, float3 N, out float4 vecDebug )
 	const float bounce = 0.25 * g_vecEstimate.z * ( ( 1.0 - hemi ) + 0.25 ) * open;
 
 	vecDebug = float4( sky, bounce.xxx );
-	return g_vecAmbHigh.rgb * lerp( g_vecAmbHigh.w, 1.0, sky )
+	return g_vecAmbHigh.rgb * lerp( g_vecAmbHigh.w, 1.0, SkyResponse( sky ) )
 		+ g_vecAmbLow.rgb * ( ( 1.0 - hemi ) * open * g_vecAmbLow.w )
 		+ g_vecSun.rgb * bounce;
 }

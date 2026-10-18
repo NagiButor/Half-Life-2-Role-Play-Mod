@@ -505,6 +505,9 @@ protected:
 	virtual bool	IsEyeInFogVolume() const { return false; }
 	void			DrawTranslucentModelsOpaqueParts( bool bComposite, bool bSkybox = false );
 	bool			DrawDetailSpritesOpaque();
+	// HL2RPM: the grass (detail sprites) into a shadow map - the nearest sun cascades
+	virtual bool	WantsDetailSpriteShadows() const { return false; }
+	void			DrawDetailSpriteShadowCasters();
 
 	// HL2RPM: shadow views skip casters whose angular size from the camera is below this
 	// (their shadow would be a couple of pixels) - 0 = keep everything
@@ -798,6 +801,8 @@ public:
 	// the first cascade keeps everything (contact shadows up close)
 	virtual float	GetShadowCasterCullRatio();
 
+	virtual bool	WantsDetailSpriteShadows() const;
+
 private:
 	int iCascadeIndex;
 };
@@ -842,6 +847,31 @@ static ConVar r_csm_caster_cull( "r_csm_caster_cull", "0.006", FCVAR_ARCHIVE,
 float COrthoShadowView::GetShadowCasterCullRatio()
 {
 	return ( iCascadeIndex > 0 ) ? r_csm_caster_cull.GetFloat() : 0.0f;
+}
+
+// HL2RPM: the grass of the detail props casts its shadow into the nearest cascades (their texels are
+// a fraction of a blade; farther the shadow of a tuft is a speck nobody sees)
+static ConVar r_deferred_detail_shadows( "r_deferred_detail_shadows", "2", FCVAR_ARCHIVE,
+	"Grass and the other detail sprites cast sun shadows: into this many of the nearest cascades (0 = none)", true, 0.0f, true, 4.0f );
+static ConVar r_deferred_detail_shadows_dist( "r_deferred_detail_shadows_dist", "1200", 0,
+	"Grass shadows: the sprites within this distance of the eye cast them", true, 64.0f, true, 8192.0f );
+
+bool COrthoShadowView::WantsDetailSpriteShadows() const
+{
+	return iCascadeIndex < r_deferred_detail_shadows.GetInt();
+}
+
+void CBaseWorldViewDeferred::DrawDetailSpriteShadowCasters()
+{
+	static ConVarRef r_DrawDetailProps( "r_DrawDetailProps" );
+	if ( r_DrawDetailProps.IsValid() && !r_DrawDetailProps.GetBool() )
+		return;
+	// (only sprites of a deferred material have a shadow pass)
+	IMaterial *pMat = DetailObjectSystem()->GetDetailSpriteMaterial();
+	const char *pszShader = ( pMat && pMat->IsPrecached() ) ? pMat->GetShaderName() : NULL;
+	if ( !pszShader || V_strnicmp( pszShader, "DEFERRED_", 9 ) != 0 )
+		return;
+	DetailObjectSystem()->RenderSpriteShadowCasters( MainViewOrigin(), r_deferred_detail_shadows_dist.GetFloat() );
 }
 
 class CDualParaboloidShadowView : public CBaseShadowView
@@ -1274,6 +1304,10 @@ void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, f
 	if ( m_bRenderablesListBuilt && m_pRenderablesList )
 		DrawOpaqueRenderablesDeferred( false );
 	g_bDeferredHoldRopes = false;
+
+	// HL2RPM: the shadows of the grass (the sun's nearest cascades)
+	if ( bShadowDepth && IsShadowMapView() && WantsDetailSpriteShadows() )
+		DrawDetailSpriteShadowCasters();
 
 	// HL2RPM: what belongs to the opaque scene but sits in the translucent lists - into the
 	// G-buffer, and composited before the weather pass
@@ -3263,6 +3297,9 @@ static void DrawDeferredFXAA( const CViewSetup &view )
 	rect.width = view.width;
 	rect.height = view.height;
 	pRenderContext->CopyRenderTargetToTextureEx( pFrame, 0, &rect, &rect );
+	// (the shader binds "the frame buffer copy": make it this copy - whatever refracted last
+	// (a weapon, a particle) may have left the slot pointing at _rt_PowerOfTwoFB)
+	pRenderContext->SetFrameBufferCopyTexture( pFrame, 0 );
 	pRenderContext->DrawScreenSpaceRectangle( s_pMatFXAA, view.x, view.y, view.width, view.height,
 		view.x, view.y, view.x + view.width - 1, view.y + view.height - 1,
 		pFrame->GetActualWidth(), pFrame->GetActualHeight() );

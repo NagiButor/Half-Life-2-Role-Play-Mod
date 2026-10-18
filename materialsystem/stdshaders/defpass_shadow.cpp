@@ -51,6 +51,8 @@ void DrawPassShadowPass( const defParms_shadow &info, CBaseVSShader *pShader, IM
 	const bool bBaseTexture2 = !bMultiBlend && bAlbedo2;
 	// HL2RPM: the wind (the shadow of a tree moves with it)
 	const int iTreeSway = ( bModel && PARM_VALID( info.iTreeSway ) && PARM_DEFINED( info.iTreeSway ) ) ? PARM_INT( info.iTreeSway ) : 0;
+	// HL2RPM: a leaf - the sun shines through it (see shadowpass_ps30, c1)
+	const bool bLeaf = PARM_VALID( info.iLitface ) && PARM_SET( info.iLitface );
 
 	SHADOW_STATE
 	{
@@ -194,6 +196,16 @@ void DrawPassShadowPass( const defParms_shadow &info, CBaseVSShader *pShader, IM
 
 		if ( iTreeSway > 0 )
 			PBR_SetTreeSwayConstants( pShaderAPI, iTreeSway );
+
+		// HL2RPM: the leaves are flagged in the caster depth of the sun cascades (+2; the rain map
+		// and the lamps' maps keep the plain depth - their readers know nothing of it). Set on
+		// every draw: a material is drawn into every kind of shadow map from the same commands.
+		{
+			const bool bSunCascade = shadowMode == DEFERRED_SHADOW_MODE_ORTHO &&
+				pShaderAPI->GetIntRenderingParameter( INT_RENDERPARM_DEFERRED_SHADOW_INDEX ) != DEFERRED_SHADOW_INDEX_RAIN;
+			const float vecCasterFlags[4] = { ( bLeaf && bSunCascade ) ? 2.0f : 0.0f, 0, 0, 0 };
+			pShaderAPI->SetPixelShaderConstant( 1, vecCasterFlags );
+		}
 
 		switch ( shadowMode )
 		{

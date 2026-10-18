@@ -83,6 +83,7 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 		p.iAlbedo = BASETEXTURE;
 		p.iAlphatestRef = ALPHATESTREFERENCE;
 		p.iTreeSway = TREESWAY;
+		p.iLitface = LITFACE;
 	}
 
 	void SetupParmsComposite( defParms_composite &p )
@@ -92,6 +93,7 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 
 		p.iEnvmap = ENVMAP;
 		p.iEnvmapMask = ENVMAPMASK;
+		p.iBumpmap = BUMPMAP;
 		p.iEnvmapTint = ENVMAPTINT;
 		p.iEnvmapContrast = ENVMAPCONTRAST;
 		p.iEnvmapSaturation = ENVMAPSATURATION;

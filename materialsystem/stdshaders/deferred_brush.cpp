@@ -65,6 +65,7 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 		// HL2RPM: the relief (parallax occlusion mapping) and the light through thin things
 		SHADER_PARAM( POM_HEIGHTMAP, SHADER_PARAM_TYPE_TEXTURE, "", "the height map of the relief (the client makes one of the bump map)" )
 		SHADER_PARAM( POM_SCALE, SHADER_PARAM_TYPE_FLOAT, "", "the depth of the relief in repeats of the texture; not set = by what the material is" )
+		SHADER_PARAM( POM_TEXTURERELIEF, SHADER_PARAM_TYPE_BOOL, "0", "the relief (and the bump map) are made of the texture itself: shallower" )
 		SHADER_PARAM( PBR_TRANSMISSION, SHADER_PARAM_TYPE_FLOAT, "0", "0 .. 1: how much light shines through (grass, cloth)" )
 
 	END_SHADER_PARAMS
@@ -116,6 +117,7 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 
 		p.iAlphatestRef = ALPHATESTREFERENCE;
 		p.iMultiblend = MULTIBLEND;
+		p.iLitface = LITFACE;
 	}
 
 	void SetupParmsComposite( defParms_composite &p )
@@ -127,6 +129,7 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 		p.iEnvmap = ENVMAP;
 		p.iEnvmapMask = ENVMAPMASK;
 		p.iEnvmapMask2 = ENVMAPMASK2;
+		p.iBumpmap = BUMPMAP;
 		p.iEnvmapTint = ENVMAPTINT;
 		p.iEnvmapContrast = ENVMAPCONTRAST;
 		p.iEnvmapSaturation = ENVMAPSATURATION;
@@ -202,7 +205,12 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 
 		// HL2RPM: the depth of the relief, by what the material is
 		if ( PARM_DEFINED( POM_HEIGHTMAP ) && !PARM_DEFINED( POM_SCALE ) )
-			params[ POM_SCALE ]->SetFloatValue( PBR_GetReliefDepth( pMaterialName ) );
+		{
+			// (a relief guessed from the texture is less sure of itself than one of a bump map: its
+			// slopes are of the texture's shading, stretched they smear the texture - shallower)
+			const bool bGuessed = PARM_DEFINED( POM_TEXTURERELIEF ) && params[ POM_TEXTURERELIEF ]->GetIntValue() != 0;
+			params[ POM_SCALE ]->SetFloatValue( PBR_GetReliefDepth( pMaterialName ) * ( bGuessed ? 0.6f : 1.0f ) );
+		}
 
 		const bool bDrawToGBuffer = DrawToGBuffer( params );
 

@@ -63,7 +63,8 @@ BEGIN_VS_SHADER( HL2RPM_LUM, "" )
 
 		SHADOW_STATE
 		{
-			SetupPostShadowState( pShaderShadow, 2 );
+			// (pass 2 also looks for the sky around the sun in the G-buffer's depth)
+			SetupPostShadowState( pShaderShadow, ( iPass == 2 ) ? 3 : 2 );
 
 			DECLARE_STATIC_VERTEX_SHADER( defconstruct_vs30 );
 			SET_STATIC_VERTEX_SHADER_COMBO( USEWORLDTRANSFORM, 0 );
@@ -119,7 +120,16 @@ BEGIN_VS_SHADER( HL2RPM_LUM, "" )
 				c0[0] = data.vecAdapt.x;
 				c0[1] = data.vecAdapt.y;
 				c0[2] = data.vecAdapt.z;
-				c0[3] = 0.0f;
+				c0[3] = data.vecAdapt.w;
+
+				// the sun: its place (uv), uv per radian around it (y; x from the aspect) - 0 = none
+				ITexture *pDepth = GetDeferredExt()->GetTexture_Depth();
+				if ( pDepth )
+					BindTexture( SHADER_SAMPLER2, pDepth );
+				else
+					pShaderAPI->BindStandardTexture( SHADER_SAMPLER2, TEXTURE_WHITE );
+				const float c1[4] = { data.vecFlare.x, data.vecFlare.y, pDepth ? data.vecGlare.w : 0.0f, Max( data.vecTint.w, 0.1f ) };
+				pShaderAPI->SetPixelShaderConstant( 1, c1, 1, true );
 			}
 			pShaderAPI->SetPixelShaderConstant( 0, c0, 1, true );
 		}

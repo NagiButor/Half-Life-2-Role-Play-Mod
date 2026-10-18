@@ -50,6 +50,7 @@ static ConVar r_weather_ssr( "r_weather_ssr", "1", FCVAR_ARCHIVE,
 	"Reflections of the surroundings in puddles and on wet surfaces (screen space): 0 = off, 1 = on, 2 = longer rays", true, 0, true, 2 );
 static ConVar r_weather_ssr_puddles( "r_weather_ssr_puddles", "1.0", 0, "Screen space reflections: strength in puddles", true, 0.0f, true, 1.0f );
 static ConVar r_weather_ssr_wet( "r_weather_ssr_wet", "0", 0, "Screen space reflections: strength on wet surfaces outside puddles (0 = only puddles: the film on rough ground reflects a blurred sky, little to see for ~1 ms)", true, 0.0f, true, 1.0f );
+static ConVar r_weather_ssr_debug( "r_weather_ssr_debug", "0", 0, "Dev: print the state of the screen space reflections of the wet ground (4 times a second)" );
 
 int WeatherRender_GetCloudQuality()
 {
@@ -208,6 +209,12 @@ static bool g_bRainMapValid = false;
 static bool s_bSunScreenValid = false;
 static Vector2D s_vecSunScreen( 0.5f, 0.5f );
 static Vector s_vecSunScreenDir( 0, 0, 1 );
+static Vector2D s_vecSunScreenScale( 1.0f, 1.0f );
+
+Vector2D WeatherRender_GetSunScreenScale()
+{
+	return s_vecSunScreenScale;
+}
 
 bool WeatherRender_GetSunScreenPos( Vector2D &vecScreen, Vector &vecDir )
 {
@@ -376,6 +383,8 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 				s_vecSunScreen.Init( vecClip.x / vecClip.w * 0.5f + 0.5f, -vecClip.y / vecClip.w * 0.5f + 0.5f );
 				s_vecSunScreenDir = vecLightDir;
 				s_bSunScreenValid = true;
+				// (the projection's x and y scales: 1 / tan of half the field of view)
+				s_vecSunScreenScale.Init( 0.5f * fabsf( matViewToProj[0][0] ), 0.5f * fabsf( matViewToProj[1][1] ) );
 			}
 		}
 	}
@@ -581,9 +590,10 @@ void WeatherRender_PostOpaque( const CViewSetup &view )
 	// (the water / glass views have other cameras)
 	CMatRenderContextPtr pRenderContext( materials );
 	int iSSRSteps = 0;
+	ITexture *pFB = NULL;
 	if ( bWet && r_weather_ssr.GetInt() > 0 && CurrentViewID() == VIEW_MAIN )
 	{
-		ITexture *pFB = materials->FindTexture( "_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET );
+		pFB = materials->FindTexture( "_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET );
 		if ( pFB && !pFB->IsError() )
 		{
 			Rect_t rect;
@@ -597,8 +607,34 @@ void WeatherRender_PostOpaque( const CViewSetup &view )
 	}
 	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_HL2RPM_SSR, iSSRSteps );
 
+	if ( r_weather_ssr_debug.GetBool() )
+	{
+		static float s_flNextSSRDebug = 0.0f;
+		if ( gpGlobals->realtime > s_flNextSSRDebug || gpGlobals->realtime < s_flNextSSRDebug - 2.0f )
+		{
+			s_flNextSSRDebug = gpGlobals->realtime + 0.25f;
+			Msg( "[ssr] frame %d: view id %d, steps %d, rect %d %d %d %d, origin %.0f %.0f %.0f\n", gpGlobals->framecount,
+				(int)CurrentViewID(), iSSRSteps, view.x, view.y, view.width, view.height, view.origin.x, view.origin.y, view.origin.z );
+		}
+	}
+
+	// The pass binds "the frame buffer copy" (TEXTURE_FRAME_BUFFER_FULL_TEXTURE_0) - and while a
+	// world view is drawn that is the refraction texture (_rt_PowerOfTwoFB, CBaseWorldViewDeferred::
+	// DrawExecute), not the copy just made: the reflections showed whatever was last copied there for
+	// something refracting. In the rain the drops refract - in the water's views too: the puddles
+	// mirrored the view under the water, the previous frame or nothing at all, from frame to frame
+	// and from place to place while walking ("the reflections flicker in the rain").
+	ITexture *pSavedCopy = NULL;
+	if ( iSSRSteps > 0 )
+	{
+		pSavedCopy = pRenderContext->GetFrameBufferCopyTexture( 0 );
+		pRenderContext->SetFrameBufferCopyTexture( pFB, 0 );
+	}
+
 	DrawLightPassFullscreen( g_pMatPost, view.width, view.height );
 
+	if ( iSSRSteps > 0 )
+		pRenderContext->SetFrameBufferCopyTexture( pSavedCopy, 0 );
 	pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_HL2RPM_SSR, 0 );
 }
 

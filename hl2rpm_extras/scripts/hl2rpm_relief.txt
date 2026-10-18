@@ -1,0 +1,29 @@
+// HL2RPM: the relief of brick, stone and tile materials that have no bump map.
+//
+// Such a material gets a relief (parallax occlusion mapping) and a bump map made of its texture:
+// what is lighter than its surroundings stands out, what is darker sinks - the mortar, the gaps
+// between the stones and the cracks hold dirt and shade. Measured on the stock materials that do
+// have bump maps, that holds for 95 % of them; light joints that connect across the whole texture
+// are recognised by themselves. The lines below name the exceptions:
+//
+//		"<text in the material's name>"		"<rule>"
+//
+// invert	light joints: what is lighter sinks (light mortar between dark bricks)
+// keep		what is lighter stands out, no guessing
+// none		no relief made of the texture (patterns that are not relief: a checkerboard, painted
+//			arches and stairs - the material stays flat as it was)
+//
+// The first line that fits a material wins. After a change: r_deferred_pom_reload_rules, then
+// mat_reloadallmaterials (or load the map again). r_deferred_pom_info 1 prints every relief made.
+"hl2rpm_relief"
+{
+	// light mortar between dark pieces
+	"brick/brickfloor001a"		"invert"
+	"tile/tilefloor003a"		"invert"
+
+	// not a relief: a checkerboard of tiles, arches and stairs painted on a flat wall
+	"tile/tilefloor001"			"none"
+	"tile/tilestair"			"none"
+	"stone/stonearch"			"none"
+	"stone/stonewall006c"		"none"
+}

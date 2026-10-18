@@ -79,4 +79,11 @@ void PBR_SetTreeSwayConstants( IShaderDynamicAPI *pShaderAPI, int iMode );
 //-----------------------------------------------------------------------------
 void PBR_GetTransmissionConstants( float flMaterial, float *pTransmit4, float *pSunDir4 );
 
+// HL2RPM: the sun light that comes through the leaves of a crown into its shade (the sun pass,
+// lightingpass_global_ps30 c80): x 1 / the depth in the crown over which it halves, y the most of it
+void PBR_GetFoliageLightConstants( float *pOut4 );
+
+// HL2RPM: the shading of the bottom of a relief (composite c32.w)
+float PBR_GetReliefOcclusion();
+
 #endif // HL2RPM_PBR_H

@@ -418,6 +418,9 @@ void DeferredTAA_Draw( const CViewSetup &view )
 	rect.width = vw;
 	rect.height = vh;
 	pRenderContext->CopyRenderTargetToTextureEx( pFrame, 0, &rect, &rect );
+	// (the shader binds "the frame buffer copy": make it this copy - whatever refracted last
+	// (a weapon, a particle) may have left the slot pointing at _rt_PowerOfTwoFB)
+	pRenderContext->SetFrameBufferCopyTexture( pFrame, 0 );
 
 	// frame + history -> the frame: the world reprojected, then what moves with the camera
 	// (stencil) from the same pixel; the result is the next frame's history

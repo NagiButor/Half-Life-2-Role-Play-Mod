@@ -16,7 +16,7 @@
 
 sampler sFrame			: register( s0 );	// the frame (after FXAA), gamma space
 sampler sBloom			: register( s1 );	// bloom, half resolution (top left of its target)
-sampler sLum			: register( s2 );	// adapted log luminance (1x1)
+sampler sLum			: register( s2 );	// adapted log luminance (1x1): r; b how much of the sun is in sight
 sampler sDirt			: register( s3 );	// lens dirt (r)
 
 const float4 g_vecTexel		: register( c0 );	// xy 1 / frame texture size, zw frame uv -> bloom uv scale
@@ -27,7 +27,7 @@ const float4 g_vecLens		: register( c4 );	// x vignette, y grain, z chromatic ab
 const float4 g_vecTint		: register( c5 );	// rgb color balance, w aspect ratio
 const float4 g_vecUV		: register( c6 );	// xy bloom uv offset, zw frame texture size (pixels)
 const float4 g_vecFlare		: register( c7 );	// lens flare of the sun: xy its place (uv), z strength (0 = off), w bloom brightness it starts at
-const float4 g_vecGlare		: register( c8 );	// glare of the sun: rgb its light x how much of it is in sight x strength (0 = off)
+const float4 g_vecGlare		: register( c8 );	// glare of the sun: rgb its light x strength (0 = off) - x what is in sight of it (sLum b)
 
 struct PS_INPUT
 {
@@ -74,9 +74,11 @@ float4 main( const PS_INPUT In ) : COLOR
 		c = saturate( ( c + ( n + s + e + w ) * wgt ) / ( 1.0 + 4.0 * wgt ) );
 	}
 
-	// eye adaptation
+	// eye adaptation (r), and how much of the sun is in sight (b, hl2rpm_lum_ps30)
 	float3 lin = PostToLinear( c );
-	const float exposure = PostExposure( tex2D( sLum, float2( 0.5, 0.5 ) ).r, g_vecExposure );
+	const float4 metering = tex2D( sLum, float2( 0.5, 0.5 ) );
+	const float exposure = PostExposure( metering.r, g_vecExposure );
+	const float sunSeen = saturate( metering.b );
 	lin *= exposure;
 
 	// bloom, and the lens dirt it lights up
@@ -85,15 +87,15 @@ float4 main( const PS_INPUT In ) : COLOR
 	lin += bloom * ( g_vecBloom.x + dirt * g_vecBloom.y );
 
 	// lens flare of the sun: what the bloom holds at its place (bright only while its disk
-	// is in sight: clouds, the exposure and anything in front of it decide; the client adds
-	// a trace against walls) comes back as ghosts along the line through the center of the
+	// is in sight: clouds, the exposure and anything in front of it decide; and how much of the
+	// sun the depth buffer leaves) comes back as ghosts along the line through the center of the
 	// frame and as a ring around the sun - reflections between the elements of a lens
 	[branch]
-	if ( g_vecFlare.z > 0.0 )
+	if ( g_vecFlare.z * sunSeen > 0.0 )
 	{
 		const float2 sunUV = g_vecFlare.xy;
 		const float3 sunBloom = tex2Dlod( sBloom, float4( min( sunUV * g_vecTexel.zw + g_vecUV.xy, g_vecBloom.zw ), 0, 0 ) ).rgb;
-		const float3 src = max( sunBloom - g_vecFlare.w, 0.0 ) * g_vecFlare.z;
+		const float3 src = max( sunBloom - g_vecFlare.w, 0.0 ) * ( g_vecFlare.z * sunSeen );
 		[branch]
 		if ( dot( src, 1.0 ) > 0.0005 )
 		{
@@ -137,16 +139,16 @@ float4 main( const PS_INPUT In ) : COLOR
 	// the disk that lies over whatever stands in front of it. Without it the edge of a roof or a
 	// tree crown cut the sun's light off as with a knife: the shafts in the air (the volumetric
 	// passes) have a foot of air to scatter in before a near wall and a street's length before
-	// the far one - "the light isn't there at the edge". The client says how much of the disk
-	// and of the sky right around it is in sight (traces), so it fades as the sun goes behind
-	// something and is gone behind a wall.
+	// the far one - "the light isn't there at the edge". It is as strong as the disk and the sky
+	// right around it are in sight (counted in the depth buffer, hl2rpm_lum_ps30): it fades as the
+	// sun goes behind something - a crown, a trunk, a wall - and is gone behind it.
 	[branch]
-	if ( dot( g_vecGlare.rgb, 1.0 ) > 0.002 )
+	if ( dot( g_vecGlare.rgb, 1.0 ) * sunSeen > 0.002 )
 	{
 		const float dg = length( ( uv - g_vecFlare.xy ) * float2( g_vecTint.w, 1.0 ) );
 		// (a tight core, a wide skirt)
 		const float glare = 0.6 * exp( -dg * dg * ( 1.0 / ( 0.05 * 0.05 ) ) ) + 0.16 * exp( -dg * ( 1.0 / 0.15 ) );
-		lin += g_vecGlare.rgb * ( glare * ( 0.85 + 0.5 * dirt ) );
+		lin += g_vecGlare.rgb * ( sunSeen * glare * ( 0.85 + 0.5 * dirt ) );
 	}
 
 	// soft shoulder: [ start, exposure ] -> [ start, 1 ] (identity at exposure 1)

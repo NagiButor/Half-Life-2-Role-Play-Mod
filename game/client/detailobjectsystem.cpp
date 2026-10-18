@@ -417,6 +417,7 @@ public:
 	// HL2RPM
 	IMaterial *GetDetailSpriteMaterial() { return m_DetailSpriteMaterial; }
 	void SuppressTranslucentSprites( bool bSuppress ) { m_bSuppressTranslucentSprites = bSuppress; }
+	void RenderSpriteShadowCasters( const Vector &vecEye, float flMaxDist );
 
 	// Method of ISpatialLeafEnumerator
 	bool EnumerateLeaf( int leaf, int context );
@@ -486,6 +487,16 @@ private:
 	CUtlVector<DetailPropSpriteDict_t>		m_DetailSpriteDictFlipped;
 	CUtlVector<DetailPropLightstylesLump_t>	m_DetailLighting;
 	FastSpriteX4_t *m_pFastSpriteData;
+
+	// HL2RPM: the leaves with fast sprites and the boxes their sprites stand in (RenderSpriteShadowCasters)
+	struct SpriteLeaf_t
+	{
+		int m_nLeaf;
+		Vector m_vecMins;
+		Vector m_vecMaxs;
+	};
+	CUtlVector< SpriteLeaf_t > m_SpriteLeaves;
+	void AddSpriteLeaf( int nLeaf, const Vector &vecMins, const Vector &vecMaxs );
 
 	// Necessary to get sprites to batch correctly
 	CMaterialReference m_DetailSpriteMaterial;
@@ -1593,6 +1604,7 @@ void CDetailObjectSystem::LevelInitPostEntity()
 
 void CDetailObjectSystem::LevelShutdownPreEntity()
 {
+	m_SpriteLeaves.Purge();
 	m_DetailObjects.Purge();
 	m_DetailObjectDict.Purge();
 	m_DetailSpriteDict.Purge();
@@ -1826,6 +1838,10 @@ void CDetailObjectSystem::UnserializeModels( CUtlBuffer& buf )
 	int nCurFastObject = 0;
 	int nNumFastObjectsInCurLeaf = 0;
 	FastSpriteX4_t *pCurFastSpriteOut = m_pFastSpriteData;
+	// HL2RPM: where the fast sprites of the leaf stand (their shadows: RenderSpriteShadowCasters)
+	m_SpriteLeaves.Purge();
+	Vector vecLeafMins, vecLeafMaxs;
+	ClearBounds( vecLeafMins, vecLeafMaxs );
 
 	bool bFlipped = true;
 	while ( --count >= 0 )
@@ -1849,6 +1865,8 @@ void CDetailObjectSystem::UnserializeModels( CUtlBuffer& buf )
 					pCurFastSpriteOut += pNew->m_nNumSIMDSprites;
 					ClientLeafSystem()->SetSubSystemDataInLeaf( 
 						detailObjectLeaf, CLSUBSYSTEM_DETAILOBJECTS, pNew );
+					AddSpriteLeaf( detailObjectLeaf, vecLeafMins, vecLeafMaxs );
+					ClearBounds( vecLeafMins, vecLeafMaxs );
 					// round to see boundary
 					nCurFastObject += ( 0 - nCurFastObject ) & 3;
 					nNumFastObjectsInCurLeaf = 0;
@@ -1864,6 +1882,7 @@ void CDetailObjectSystem::UnserializeModels( CUtlBuffer& buf )
 
 		if ( DetailObjectIsFastSprite( lump ) )
 		{
+			AddPointToBounds( lump.m_Origin, vecLeafMins, vecLeafMaxs );
 			for( int i =0 ; i < SPRITE_MULTIPLIER ; i++)
 			{
 				FastSpriteX4_t *pSpritex4 = m_pFastSpriteData +  (nCurFastObject >> 2 );
@@ -1934,6 +1953,7 @@ void CDetailObjectSystem::UnserializeModels( CUtlBuffer& buf )
 			pCurFastSpriteOut += pNew->m_nNumSIMDSprites;
 			ClientLeafSystem()->SetSubSystemDataInLeaf( 
 				detailObjectLeaf, CLSUBSYSTEM_DETAILOBJECTS, pNew );
+			AddSpriteLeaf( detailObjectLeaf, vecLeafMins, vecLeafMaxs );
 		}
 		ClientLeafSystem()->SetDetailObjectsInLeaf( detailObjectLeaf, 
 													firstDetailObject, detailObjectCount );
@@ -2213,6 +2233,9 @@ int CDetailObjectSystem::BuildOutSortedSprites( CFastDetailLeafSpriteList *pData
 	vecUp.DuplicateVector(Vector(0,0,1) );
 	FourVectors vecFwd;
 	vecFwd.DuplicateVector( viewForward );
+	// HL2RPM: no forward - no culling of what is behind the eye (the shadows of the grass,
+	// RenderSpriteShadowCasters; a zero dot product can be -0, which has the sign bit)
+	const bool bCullBehind = viewForward.LengthSqr() > 0.0f;
 
 	do
 	{
@@ -2221,7 +2244,10 @@ int CDetailObjectSystem::BuildOutSortedSprites( CFastDetailLeafSpriteList *pData
 		ofs -= vecViewPos;
 		fltx4 ofsDotFwd = ofs * vecFwd;
 		fltx4 distanceSquared = ofs * ofs;
-		nLastBfMask = TestSignSIMD( OrSIMD( ofsDotFwd, CmpGtSIMD( distanceSquared, maxsqdist ) ) );		//  cull
+		if ( bCullBehind )
+			nLastBfMask = TestSignSIMD( OrSIMD( ofsDotFwd, CmpGtSIMD( distanceSquared, maxsqdist ) ) );		//  cull
+		else
+			nLastBfMask = TestSignSIMD( CmpGtSIMD( distanceSquared, maxsqdist ) );
 		if ( nLastBfMask != 0xf )
 		{
 			FourVectors dx1;
@@ -2472,6 +2498,52 @@ void CDetailObjectSystem::RenderFastSprites( const Vector &viewOrigin, const Vec
 	pRenderContext->PopMatrix();
 }
 
+
+//-----------------------------------------------------------------------------
+// HL2RPM: the shadows of the grass. The sprites of the detail props are cards turned to the eye
+// (about the vertical): into the sun's shadow maps they go as the eye sees them - turned to the eye,
+// not to the sun - so the shadow on the ground is that of the tuft that is seen next to it. Those
+// within flMaxDist of the eye (that is where a shadow of a few units shows at all), in the leaves
+// the current view (a cascade) takes in, behind the eye too (no culling by its direction: the sun
+// behind the player throws the shadows of the grass at his feet forward).
+//-----------------------------------------------------------------------------
+void CDetailObjectSystem::AddSpriteLeaf( int nLeaf, const Vector &vecMins, const Vector &vecMaxs )
+{
+	if ( vecMins.x > vecMaxs.x )
+		return;
+	SpriteLeaf_t &leaf = m_SpriteLeaves[ m_SpriteLeaves.AddToTail() ];
+	leaf.m_nLeaf = nLeaf;
+	// (the sprites: half a width to the sides, their height up)
+	leaf.m_vecMins = vecMins - Vector( 64.0f, 64.0f, 8.0f );
+	leaf.m_vecMaxs = vecMaxs + Vector( 64.0f, 64.0f, 96.0f );
+}
+
+void CDetailObjectSystem::RenderSpriteShadowCasters( const Vector &vecEye, float flMaxDist )
+{
+	if ( m_SpriteLeaves.Count() == 0 || !m_pFastSortInfo || !m_pBuildoutBuffer || r_DrawDetailProps.GetInt() == 0 )
+		return;
+
+	const float flMaxDistSqr = flMaxDist * flMaxDist;
+	LeafIndex_t *pLeafList = (LeafIndex_t *)stackalloc( m_SpriteLeaves.Count() * sizeof( LeafIndex_t ) );
+	int nLeafCount = 0;
+	for ( int i = 0; i < m_SpriteLeaves.Count(); i++ )
+	{
+		const SpriteLeaf_t &leaf = m_SpriteLeaves[i];
+		Vector vecClosest;
+		CalcClosestPointOnAABB( leaf.m_vecMins, leaf.m_vecMaxs, vecEye, vecClosest );
+		if ( vecClosest.DistToSqr( vecEye ) > flMaxDistSqr )
+			continue;
+		// (outside of the shadow view's box)
+		if ( engine->CullBox( leaf.m_vecMins, leaf.m_vecMaxs ) )
+			continue;
+		pLeafList[ nLeafCount++ ] = leaf.m_nLeaf;
+	}
+	if ( nLeafCount == 0 )
+		return;
+
+	// (a zero forward: BuildOutSortedSprites culls nothing for standing behind the eye)
+	RenderFastSprites( vecEye, vec3_origin, vec3_origin, vec3_origin, nLeafCount, pLeafList );
+}
 
 //-----------------------------------------------------------------------------
 // Renders all translucent detail objects in a particular set of leaves
