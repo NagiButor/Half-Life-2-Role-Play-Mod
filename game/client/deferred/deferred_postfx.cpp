@@ -612,7 +612,11 @@ void DeferredPostFX_Draw( const CViewSetup &view )
 			flOnScreen = clamp( ( 0.5f - flOff ) / 0.06f, 0.0f, 1.0f );
 			flNear = clamp( ( 0.68f - flOff ) / 0.16f, 0.0f, 1.0f );
 		}
-		data.vecFlare.Init( vecSun.x, vecSun.y, flOnScreen * r_hl2rpm_flare.GetFloat(), r_hl2rpm_flare_threshold.GetFloat() );
+		// (at night the light is the moon: with the eye adapted to the dark its disk is as bright in
+		// the bloom as the sun - the ghosts and the ring of a full flare around a low moon looked
+		// like a bug; a trace of it stays)
+		const float flMoonFlare = bSun ? 1.0f - 0.95f * pWeather->GetNightFactor() : 1.0f;
+		data.vecFlare.Init( vecSun.x, vecSun.y, flOnScreen * r_hl2rpm_flare.GetFloat() * flMoonFlare, r_hl2rpm_flare_threshold.GetFloat() );
 
 		// the glare's light: the global light as the weather leaves it (dim behind clouds, red at
 		// sunset, the moon's at night), no brighter than a clear noon

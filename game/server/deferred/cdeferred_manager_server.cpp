@@ -192,18 +192,101 @@ static int WorldLightSort( const WorldLightCandidate_t *a, const WorldLightCandi
 	return ( a->flStrength > b->flStrength ) ? -1 : ( ( a->flStrength < b->flStrength ) ? 1 : 0 );
 }
 
+// HL2RPM: vrad cuts a light texture into the patches of its lightmap and stores a light for each:
+// a fluorescent fixture of map_v10 is 12 of them, a glowing sample panel of gfx_showcase hundreds -
+// as many overlapping deferred spot lights of the same reach (384 big red ones from that panel:
+// 7 fps around it). The patches of one surface (the same facing and style) within a cell of 128
+// units are one light: their light summed, at their light-weighted center.
+#define SURFACE_LIGHT_CELL 128.0f
+
+static void MergeSurfaceLights( const dworldlight_t *lights, int lightCount, CUtlVector<dworldlight_t> &merged )
+{
+	struct Cluster_t
+	{
+		int key[5];
+		Vector vecPos;
+		Vector vecNormal;
+		Vector vecIntensity;
+		float flWeight;
+		int iFirst;
+	};
+	CUtlVector<Cluster_t> clusters;
+	for ( int i = 0; i < lightCount; i++ )
+	{
+		const dworldlight_t &light = lights[i];
+		if ( light.type != emit_surface )
+			continue;
+		// (the facing: the dominant axis of the normal and its sign)
+		const int iAxis = ( fabsf( light.normal.x ) >= fabsf( light.normal.y ) && fabsf( light.normal.x ) >= fabsf( light.normal.z ) ) ? 0
+			: ( ( fabsf( light.normal.y ) >= fabsf( light.normal.z ) ) ? 1 : 2 );
+		const int key[5] = { (int)floorf( light.origin.x / SURFACE_LIGHT_CELL ), (int)floorf( light.origin.y / SURFACE_LIGHT_CELL ),
+			(int)floorf( light.origin.z / SURFACE_LIGHT_CELL ), iAxis * 2 + ( light.normal[iAxis] < 0.0f ? 1 : 0 ), light.style };
+		int iCluster = -1;
+		for ( int j = 0; j < clusters.Count(); j++ )
+		{
+			if ( !V_memcmp( clusters[j].key, key, sizeof( key ) ) )
+			{
+				iCluster = j;
+				break;
+			}
+		}
+		if ( iCluster < 0 )
+		{
+			iCluster = clusters.AddToTail();
+			Cluster_t &c = clusters[iCluster];
+			V_memcpy( c.key, key, sizeof( key ) );
+			c.vecPos.Init();
+			c.vecNormal.Init();
+			c.vecIntensity.Init();
+			c.flWeight = 0.0f;
+			c.iFirst = i;
+		}
+		Cluster_t &c = clusters[iCluster];
+		const float w = Max( Max( light.intensity.x, light.intensity.y ), Max( light.intensity.z, 1e-3f ) );
+		c.vecPos += light.origin * w;
+		c.vecNormal += light.normal * w;
+		c.vecIntensity += light.intensity;
+		c.flWeight += w;
+	}
+
+	merged.EnsureCapacity( clusters.Count() );
+	for ( int j = 0; j < clusters.Count(); j++ )
+	{
+		const Cluster_t &c = clusters[j];
+		dworldlight_t &l = merged[ merged.AddToTail( lights[ c.iFirst ] ) ];
+		l.origin = c.vecPos / c.flWeight;
+		l.normal = c.vecNormal;
+		if ( VectorNormalize( l.normal ) < 1e-3f )
+			l.normal = lights[ c.iFirst ].normal;
+		l.intensity = c.vecIntensity;
+	}
+}
+
 static void ConvertWorldLights( const dworldlight_t *lights, int lightCount, const CUtlVector<Vector> &skipPositions )
 {
 	if ( !r_deferred_convert_worldlights.GetBool() || !lights || lightCount <= 0 )
 		return;
 
-	CUtlVector<WorldLightCandidate_t> candidates;
+	// the point and spot lights as they are, the texture lights merged (all of them first: the
+	// candidates point into the list)
+	CUtlVector<dworldlight_t> all;
+	int nPatches = 0;
 	for ( int i = 0; i < lightCount; i++ )
 	{
-		const dworldlight_t &light = lights[i];
+		if ( lights[i].type == emit_point || lights[i].type == emit_spotlight )
+			all.AddToTail( lights[i] );
+		else if ( lights[i].type == emit_surface )
+			nPatches++;
+	}
+	const int nPointSpot = all.Count();
+	if ( r_deferred_convert_surfacelights.GetBool() )
+		MergeSurfaceLights( lights, lightCount, all );
+
+	CUtlVector<WorldLightCandidate_t> candidates;
+	for ( int i = 0; i < all.Count(); i++ )
+	{
+		const dworldlight_t &light = all[i];
 		const bool bSurface = light.type == emit_surface;
-		if ( light.type != emit_point && light.type != emit_spotlight && !( bSurface && r_deferred_convert_surfacelights.GetBool() ) )
-			continue;
 
 		// named lights still exist as entities and were converted with their I/O
 		bool bSkip = false;
@@ -347,8 +430,8 @@ static void ConvertWorldLights( const dworldlight_t *lights, int lightCount, con
 			nPoint++;
 	}
 
-	DevMsg( "CDeferredManagerServer: converted %d compiled lights (%d point, %d spot, %d texture) of %d candidates\n",
-		nPoint + nSpot + nSurface, nPoint, nSpot, nSurface, candidates.Count() );
+	DevMsg( "CDeferredManagerServer: converted %d compiled lights (%d point, %d spot, %d texture - %d patches of texture lights merged into %d) of %d candidates\n",
+		nPoint + nSpot + nSurface, nPoint, nSpot, nSurface, nPatches, all.Count() - nPointSpot, candidates.Count() );
 }
 
 extern bool g_bHL2RPMRestoringLevel;

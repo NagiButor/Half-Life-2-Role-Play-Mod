@@ -66,7 +66,19 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 		SHADER_PARAM( POM_HEIGHTMAP, SHADER_PARAM_TYPE_TEXTURE, "", "the height map of the relief (the client makes one of the bump map)" )
 		SHADER_PARAM( POM_SCALE, SHADER_PARAM_TYPE_FLOAT, "", "the depth of the relief in repeats of the texture; not set = by what the material is" )
 		SHADER_PARAM( POM_TEXTURERELIEF, SHADER_PARAM_TYPE_BOOL, "0", "the relief (and the bump map) are made of the texture itself: shallower" )
+		SHADER_PARAM( POM_HEIGHTMAP2, SHADER_PARAM_TYPE_TEXTURE, "", "a blend: the height map of the relief of its second layer" )
+		SHADER_PARAM( POM_TEXTURERELIEF2, SHADER_PARAM_TYPE_BOOL, "0", "a blend: the relief and $bumpmap2 are made of $basetexture2 (on its $basetexturetransform2)" )
+		SHADER_PARAM( BASETEXTURETRANSFORM2, SHADER_PARAM_TYPE_MATRIX, "center .5 .5 scale 1 1 rotate 0 translate 0 0", "$basetexture2 texcoord transform" )
+		// HL2RPM: the higher resolution versions of the textures (materials/hd, set by the client)
+		SHADER_PARAM( HDTEXTURE, SHADER_PARAM_TYPE_TEXTURE, "", "a higher resolution $basetexture (sampled with the same coordinates)" )
+		SHADER_PARAM( HDTEXTURE2, SHADER_PARAM_TYPE_TEXTURE, "", "a higher resolution $basetexture2" )
 		SHADER_PARAM( PBR_TRANSMISSION, SHADER_PARAM_TYPE_FLOAT, "0", "0 .. 1: how much light shines through (grass, cloth)" )
+
+		// HL2RPM: the detail texture of the stock material (composite: blend mode 0, "mod2x")
+		SHADER_PARAM( DETAIL, SHADER_PARAM_TYPE_TEXTURE, "", "detail texture" )
+		SHADER_PARAM( DETAILSCALE, SHADER_PARAM_TYPE_FLOAT, "4", "repeats of the detail texture per repeat of the base texture" )
+		SHADER_PARAM( DETAILBLENDFACTOR, SHADER_PARAM_TYPE_FLOAT, "1", "how much of the detail texture" )
+		SHADER_PARAM( DETAILBLENDMODE, SHADER_PARAM_TYPE_INTEGER, "0", "0 = mod2x (the only one done)" )
 
 	END_SHADER_PARAMS
 
@@ -95,6 +107,9 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 		p.iSSBump = SSBUMP;
 		p.iPomHeightmap = POM_HEIGHTMAP;
 		p.iPomScale = POM_SCALE;
+		p.iPomHeightmap2 = POM_HEIGHTMAP2;
+		p.iPomTextureRelief2 = POM_TEXTURERELIEF2;
+		p.iBaseTransform2 = BASETEXTURETRANSFORM2;
 
 		p.iMultiblend = MULTIBLEND;
 		p.iBlendmodulate = BLENDMODULATETEXTURE;
@@ -125,6 +140,8 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 		p.bModel = false;
 		p.iAlbedo = BASETEXTURE;
 		p.iAlbedo2 = BASETEXTURE2;
+		p.iAlbedoHD = HDTEXTURE;
+		p.iAlbedo2HD = HDTEXTURE2;
 
 		p.iEnvmap = ENVMAP;
 		p.iEnvmapMask = ENVMAPMASK;
@@ -147,6 +164,9 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 		p.iSpecular = PBR_SPECULAR;
 		p.iPomHeightmap = POM_HEIGHTMAP;
 		p.iPomScale = POM_SCALE;
+		p.iPomHeightmap2 = POM_HEIGHTMAP2;
+		p.iPomTextureRelief2 = POM_TEXTURERELIEF2;
+		p.iBaseTransform2 = BASETEXTURETRANSFORM2;
 		p.iTransmission = PBR_TRANSMISSION;
 
 		p.iBlendmodulate = BLENDMODULATETEXTURE;
@@ -158,6 +178,11 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 	p.iMultiblend = MULTIBLEND;
 
 		p.iFresnelRanges = FRESNELRANGES;
+
+		p.iDetail = DETAIL;
+		p.iDetailScale = DETAILSCALE;
+		p.iDetailBlendFactor = DETAILBLENDFACTOR;
+		p.iDetailBlendMode = DETAILBLENDMODE;
 
 		p.iEnvmapParallax = ENVMAPPARALLAX;
 		p.iEnvmapOrigin = ENVMAPORIGIN;

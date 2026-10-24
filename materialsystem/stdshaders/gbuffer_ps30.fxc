@@ -9,9 +9,7 @@
 // STATIC:		"POM"				"0..1"
 
 // SKIP:		$POM && !$BUMPMAP
-// SKIP:		$POM && $BUMPMAP2
 // SKIP:		$POM && $MULTIBLEND
-// SKIP:		$POM && $BLENDMODULATE
 
 // SKIP:		!$BUMPMAP2 && !$MULTIBLEND && $BLENDMODULATE
 // SKIP:		!$BUMPMAP && $BUMPMAP2
@@ -62,6 +60,12 @@ const float2 g_vecPassMarks				: register( c3 );
 // fade with the distance
 sampler sPomHeight						: register( s7 );
 const float4 g_vecPOM					: register( c4 );
+#if BUMPMAP2
+// HL2RPM: a blend: the height map of its second layer and the coordinates of that layer's relief
+// and bump map (made of $basetexture2: its $basetexturetransform2; else the same as the first's)
+sampler sPomHeight2						: register( s8 );
+const float4 g_vecLayer2Transform[2]	: register( c5 );
+#endif
 #endif
 
 #if BUMPMAP2
@@ -140,12 +144,25 @@ PS_OUTPUT main( const PS_INPUT In )
 {
 	PS_OUTPUT Out;
 
+#if BUMPMAP2
+	// (the blend of the two layers: needed by the relief before anything is sampled)
+	float flBlendfactor = In.vColor_0.w;
+#if BLENDMODULATE
+	flBlendfactor = GetModulatedBlend( flBlendfactor, tex2D( sBlendmodulate, In.vTexCoord.zw ).rg );
+#endif
+#endif
+
 #if POM
 	// (the gradients of the texture coordinate as it came: the shifted one is out of a loop)
 	const float2 vecUVdx = ddx( In.vTexCoord.xy );
 	const float2 vecUVdy = ddy( In.vTexCoord.xy );
 	float flPomHit;
+#if BUMPMAP2
+	const float2 vecUV = ParallaxOcclusionUVBlend( sPomHeight, sPomHeight2, flBlendfactor, g_vecLayer2Transform,
+		In.vTexCoord.xy, In.vecViewTS, g_vecPOM, flPomHit );
+#else
 	const float2 vecUV = ParallaxOcclusionUV( sPomHeight, In.vTexCoord.xy, In.vecViewTS, g_vecPOM, flPomHit );
+#endif
 #	define SAMPLE_UV( _s ) tex2Dgrad( _s, vecUV, vecUVdx, vecUVdy )
 #else
 #	define SAMPLE_UV( _s ) tex2D( _s, In.vTexCoord.xy )
@@ -167,10 +184,12 @@ PS_OUTPUT main( const PS_INPUT In )
 	float3 bumpNormal = bumpSample.rgb;
 
 #if BUMPMAP2
+#if POM
+	// (on the layer's own coordinates, shifted by the relief like the first's)
+	const float3 bumpNormal2 = tex2Dgrad( sBumpmap2, BlendLayer2UV( vecUV, g_vecLayer2Transform ),
+		BlendLayer2Grad( vecUVdx, g_vecLayer2Transform ), BlendLayer2Grad( vecUVdy, g_vecLayer2Transform ) ).rgb;
+#else
 	float3 bumpNormal2 = tex2D( sBumpmap2, In.vTexCoord.xy ).rgb;
-	float flBlendfactor = In.vColor_0.w;
-#if BLENDMODULATE
-	flBlendfactor = GetModulatedBlend( flBlendfactor, tex2D( sBlendmodulate, In.vTexCoord.zw ).rg );
 #endif
 	bumpNormal = lerp( bumpNormal, bumpNormal2, flBlendfactor );
 #endif

@@ -20,7 +20,6 @@
 // SKIP:		$BASETEXTURE2 && $MULTIBLEND
 // SKIP:		!$MODEL && $TREESWAY
 // SKIP:		$MODEL && $POM
-// SKIP:		$BASETEXTURE2 && $POM
 // SKIP:		$MULTIBLEND && $POM
 
 #include "common_vs_fxc.h"

@@ -58,3 +58,5 @@ config.cfg
 [Rr]elease*/
 *.pdb
 .vs/
+__pycache__/
+*.pyc

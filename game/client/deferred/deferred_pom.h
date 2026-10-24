@@ -29,6 +29,10 @@ int DeferredPOM_GetReliefRule( const char *pszMaterial );
 // ($pom_heightmap) and a normal map of it ($bumpmap). False = none (flat, unreadable, rule "none").
 bool DeferredPOM_GetTextureRelief( const char *pszBaseTexture, int iRule, const char **ppszHeight, const char **ppszNormal );
 
+// A flat relief - the top, facing straight out: the layer of a blend that has no relief of its own
+// next to one that has ($pom_heightmap / $bumpmap of that layer).
+bool DeferredPOM_GetFlatRelief( const char **ppszHeight, const char **ppszNormal );
+
 // (the textures and their regenerators; before the material system goes)
 void DeferredPOM_Shutdown();
 

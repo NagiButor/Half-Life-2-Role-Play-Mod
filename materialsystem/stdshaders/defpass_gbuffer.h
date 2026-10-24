@@ -38,6 +38,11 @@ struct defParms_gBuffer
 	// HL2RPM: the relief of a brush material (hl2rpm_pom_fxc.h), the wind in a tree (hl2rpm_sway_fxc.h)
 	int iPomHeightmap;
 	int iPomScale;
+	// HL2RPM: the relief of the second layer of a blend, and whether it is made of $basetexture2
+	// (then on its $basetexturetransform2)
+	int iPomHeightmap2;
+	int iPomTextureRelief2;
+	int iBaseTransform2;
 	int iTreeSway;
 
 	// blending

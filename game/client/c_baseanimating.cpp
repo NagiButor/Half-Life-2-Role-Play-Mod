@@ -3609,20 +3609,22 @@ void C_BaseAnimating::ProcessMuzzleFlashEvent()
 			el->color.exponent = 5;
 			*/ //Правка 
 
+			// HL2RPM: the flame of a shot is orange-yellow - (231 219 14) lit the room the deferred
+			// renderer gives this light to an acid yellow-green
 			dlight_t* dl = effects->CL_AllocDlight(index);
 			dl->origin = vAttachment + Vector(0, 0, 4);
-			dl->color.r = 231;
-			dl->color.g = 219;
-			dl->color.b = 14;
+			dl->color.r = 255;
+			dl->color.g = 178;
+			dl->color.b = 92;
 			dl->decay = dl->radius / 0.05f;
 			dl->die = gpGlobals->curtime + 0.05f;
 			dl->radius = random->RandomFloat(245.0f, 245.0f);
 
 			dlight_t* el = effects->CL_AllocElight(index);
 			el->origin = vAttachment;
-			el->color.r = 231;
-			el->color.g = 219;
-			el->color.b = 14;
+			el->color.r = 255;
+			el->color.g = 178;
+			el->color.b = 92;
 			el->radius = random->RandomFloat(260.0f, 260.0f);
 			el->decay = el->radius / 0.5f;
 			el->die = gpGlobals->curtime + 0.05f;

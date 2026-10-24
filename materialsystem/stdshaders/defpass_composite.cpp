@@ -39,6 +39,21 @@ static ConVar r_deferred_envmap_fallback( "r_deferred_envmap_fallback", "0.7", F
 // (set by the client when a map loads: 0 = the map has no cubemaps of its own)
 ConVar mat_hl2rpm_map_cubemaps( "mat_hl2rpm_map_cubemaps", "1", FCVAR_HIDDEN, "Set by the client: the loaded map has built cubemaps" );
 
+// HL2RPM: the stand-in of a missing cubemap is the light at the pixel - no more than the light of
+// the open sky (in the sun the light at the pixel is many times what a mirror shows around it:
+// milky "plastic" panes and sheens on brick and armor)
+static ConVar r_deferred_envmap_fallback_sky( "r_deferred_envmap_fallback_sky", "1.0", 0,
+	"$envmap without a cubemap: the most it mirrors, in units of the light of the open sky", true, 0.0f, true, 8.0f );
+
+// HL2RPM: the detail textures of the stock materials ($detail - the grain of concrete, plaster, brick
+// and metal up close; the deferred composite had none)
+static ConVar r_deferred_detail( "r_deferred_detail", "1", FCVAR_ARCHIVE, "Detail textures of the materials ($detail): the fine grain up close" );
+static ConVar r_deferred_detail_scale( "r_deferred_detail_scale", "1.0", 0, "Detail textures: scale of their strength", true, 0.0f, true, 2.0f );
+
+// HL2RPM: the rim light of the stock character materials ($rimlight): by the light at the pixel
+static ConVar r_deferred_rimlight( "r_deferred_rimlight", "0.25", 0,
+	"$rimlight: how strong, of the light at the pixel times $rimlightboost (the stock shaders take the ambient light only)", true, 0.0f, true, 4.0f );
+
 // HL2RPM: the light right at a lamp (composite_ps30)
 static ConVar r_deferred_light_limit( "r_deferred_light_limit", "2.5", FCVAR_ARCHIVE,
 	"The most light a surface takes, in units of the daylight (a soft limit: the ground under a strong lamp is bright, not a white patch)", true, 0.5f, true, 64.0f );
@@ -81,6 +96,12 @@ void InitPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 	if ( PARM_DEFINED( info.iAlbedo ) )
 		pShader->LoadTexture( info.iAlbedo );
 
+	if ( PARM_VALID( info.iAlbedoHD ) && PARM_DEFINED( info.iAlbedoHD ) )
+		pShader->LoadTexture( info.iAlbedoHD );
+
+	if ( PARM_VALID( info.iAlbedo2HD ) && PARM_DEFINED( info.iAlbedo2HD ) )
+		pShader->LoadTexture( info.iAlbedo2HD );
+
 	if ( PARM_DEFINED( info.iEnvmap ) )
 		pShader->LoadCubeMap( info.iEnvmap );
 
@@ -110,6 +131,12 @@ void InitPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 
 	if ( PARM_DEFINED( info.iPomHeightmap ) )
 		pShader->LoadTexture( info.iPomHeightmap );
+
+	if ( PARM_VALID( info.iPomHeightmap2 ) && PARM_DEFINED( info.iPomHeightmap2 ) )
+		pShader->LoadTexture( info.iPomHeightmap2 );
+
+	if ( PARM_DEFINED( info.iDetail ) )
+		pShader->LoadTexture( info.iDetail );
 }
 
 void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, IMaterialVar **params,
@@ -146,7 +173,11 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 	const bool bEnvmapCorrection = !info.bModel && bEnvmap && info.iEnvmapParallax != -1 && !params[info.iEnvmapParallax]->MatrixIsIdentity();
 
 	const bool bRimLight = PARM_SET( info.iRimlightEnable );
-	const bool bRimLightModLight = bRimLight && PARM_SET( info.iRimlightModLight );
+	// HL2RPM: the rim light of the stock shaders is the light around the model (its ambient cube)
+	// times $rimlightboost - here it was the tint alone, as bright in a dark room as in the sun:
+	// the vortigaunts (boost 3, exponent 10) were outlined in white like chrome. Always by the light
+	// at the pixel now (c8: tint x boost x r_deferred_rimlight).
+	const bool bRimLightModLight = bRimLight;
 	const bool bBlendmodulate = bAlbedo2 && PARM_TEX( info.iBlendmodulate );
 	const bool bBlendmodulate2 = bBlendmodulate && PARM_TEX( info.iBlendmodulate2 );
 	const bool bBlendmodulate3 = bBlendmodulate && PARM_TEX( info.iBlendmodulate3 );
@@ -165,9 +196,14 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 	const bool bPBR = !bTranslucent && info.iMetalness != -1;
 	// HL2RPM: the relief - the brush materials the G-buffer pass gives one (plain, bumped, with a
 	// height map); the wind in a tree
-	const bool bPOM = !bModel && !bIsDecal && !bTranslucent && !bAlbedo2 && !bMultiBlend
+	// (a blend: one for each layer - the client gives both or none)
+	const bool bPOM = !bModel && !bIsDecal && !bTranslucent && !bMultiBlend
 		&& PARM_VALID( info.iPomHeightmap ) && PARM_TEX( info.iPomHeightmap );
+	const bool bPOM2 = bPOM && bAlbedo2 && PARM_VALID( info.iPomHeightmap2 ) && PARM_TEX( info.iPomHeightmap2 );
 	const int iTreeSway = ( bModel && PARM_VALID( info.iTreeSway ) && PARM_DEFINED( info.iTreeSway ) ) ? PARM_INT( info.iTreeSway ) : 0;
+	// HL2RPM: the detail texture - only its blend mode 0 ("mod2x", nearly every stock material with one)
+	const bool bDetail = PARM_VALID( info.iDetail ) && PARM_TEX( info.iDetail )
+		&& ( !PARM_VALID( info.iDetailBlendMode ) || !PARM_DEFINED( info.iDetailBlendMode ) || PARM_INT( info.iDetailBlendMode ) == 0 );
 
 	AssertMsgOnce( !(bTranslucent || bAlphatest) || !bAlbedo2,
 		"blended albedo not supported by gbuffer pass!" );
@@ -294,6 +330,17 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER12, false );
 		}
 
+		// HL2RPM: a blend: the height map of its second layer (s14)
+		if ( bAlbedo2 && !bMultiBlend )
+		{
+			pShaderShadow->EnableTexture( SHADER_SAMPLER14, true );
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER14, false );
+		}
+
+		// HL2RPM: the detail texture (mod2x: read as it is stored, like the stock shaders do)
+		pShaderShadow->EnableTexture( SHADER_SAMPLER13, true );
+		pShaderShadow->EnableSRGBRead( SHADER_SAMPLER13, false );
+
 		pShaderShadow->VertexShaderVertexFormat( iVFmtFlags, iTexCoordNum, pTexCoordDim, iUserDataSize );
 
 		DECLARE_STATIC_VERTEX_SHADER( composite_vs30 );
@@ -343,8 +390,9 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 				tmpBuf.SetPixelShaderConstant1( 0, PARM_FLOAT( info.iAlphatestRef ) );
 			}
 
+			// (the higher resolution version of the texture, if the client found one: same coordinates)
 			if ( bAlbedo )
-				tmpBuf.BindTexture( pShader, SHADER_SAMPLER0, info.iAlbedo );
+				tmpBuf.BindTexture( pShader, SHADER_SAMPLER0, ( PARM_VALID( info.iAlbedoHD ) && PARM_TEX( info.iAlbedoHD ) ) ? info.iAlbedoHD : info.iAlbedo );
 			else
 				tmpBuf.BindStandardTexture( SHADER_SAMPLER0, TEXTURE_GREY );
 
@@ -395,7 +443,7 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 
 			if ( bAlbedo2 )
 			{
-				tmpBuf.BindTexture( pShader, SHADER_SAMPLER5, info.iAlbedo2 );
+				tmpBuf.BindTexture( pShader, SHADER_SAMPLER5, ( PARM_VALID( info.iAlbedo2HD ) && PARM_TEX( info.iAlbedo2HD ) ) ? info.iAlbedo2HD : info.iAlbedo2 );
 
 				if ( bBlendmodulate )
 				{
@@ -437,6 +485,27 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 
 			if ( bPOM )
 				tmpBuf.BindTexture( pShader, SHADER_SAMPLER12, info.iPomHeightmap );
+
+			if ( bDetail )
+				tmpBuf.BindTexture( pShader, SHADER_SAMPLER13, info.iDetail );
+			else
+				tmpBuf.BindStandardTexture( SHADER_SAMPLER13, TEXTURE_GREY );
+
+			// HL2RPM: a blend - the second layer's height map (white: the top, when it has none) and
+			// the coordinates of $basetexture2 and of that relief (c38, c40)
+			if ( bAlbedo2 && !bMultiBlend )
+			{
+				if ( bPOM2 )
+					tmpBuf.BindTexture( pShader, SHADER_SAMPLER14, info.iPomHeightmap2 );
+				else
+					tmpBuf.BindStandardTexture( SHADER_SAMPLER14, TEXTURE_WHITE );
+				float flBase2[8], flLayer2[8];
+				PBR_GetTextureTransformRows( params, PARM_VALID( info.iBaseTransform2 ) ? info.iBaseTransform2 : -1, flBase2 );
+				const bool bLayer2Base = PARM_VALID( info.iPomTextureRelief2 ) && PARM_SET( info.iPomTextureRelief2 );
+				PBR_GetTextureTransformRows( params, ( bLayer2Base && PARM_VALID( info.iBaseTransform2 ) ) ? info.iBaseTransform2 : -1, flLayer2 );
+				tmpBuf.SetPixelShaderConstant( 38, flBase2, 2 );
+				tmpBuf.SetPixelShaderConstant( 40, flLayer2, 2 );
+			}
 
 			tmpBuf.SetPixelShaderConstant1( 4, PARM_FLOAT( info.iPhongScale ) );
 
@@ -556,6 +625,29 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 			if ( !bEnvmapMask && IS_FLAG_SET( MATERIAL_VAR_BASEALPHAENVMAPMASK ) )
 				flEnvMask[0] = -1.0f;
 			pShaderAPI->SetPixelShaderConstant( 35, flEnvMask, 1, true );
+
+			// the light of the open sky (c36): the most a missing cubemap's stand-in shows
+			{
+				const lightData_Global_t &light = GetDeferredExt()->GetLightData_Global();
+				const float flSkyBoost = GetGISkyBoost( GetDeferredExt()->GetGIData(), GetDeferredExt()->GetWeatherData() );
+				float flSky[4] = { 1.0f, 1.0f, 1.0f, 0.0f };
+				if ( light.bEnabled )
+				{
+					for ( int i = 0; i < 3; i++ )
+						flSky[i] = ( light.ambh[i] * 0.75f + light.ambl[i] * 0.25f ) * flSkyBoost * r_deferred_envmap_fallback_sky.GetFloat();
+				}
+				pShaderAPI->SetPixelShaderConstant( 36, flSky, 1, true );
+			}
+
+			// the detail texture (c37): x its repeats per repeat of the base texture, y how much
+			float flDetail[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+			if ( bDetail && r_deferred_detail.GetBool() && !r_deferred_debug_lighting_only.GetBool() )
+			{
+				flDetail[0] = ( PARM_VALID( info.iDetailScale ) && PARM_DEFINED( info.iDetailScale ) ) ? PARM_FLOAT( info.iDetailScale ) : 4.0f;
+				flDetail[1] = ( ( PARM_VALID( info.iDetailBlendFactor ) && PARM_DEFINED( info.iDetailBlendFactor ) ) ? PARM_FLOAT( info.iDetailBlendFactor ) : 1.0f )
+					* r_deferred_detail_scale.GetFloat();
+			}
+			pShaderAPI->SetPixelShaderConstant( 37, flDetail, 1, true );
 		}
 		if ( iTreeSway > 0 )
 			PBR_SetTreeSwayConstants( pShaderAPI, iTreeSway );
@@ -614,7 +706,11 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 
 		if ( bRimLight )
 		{
-			pShaderAPI->SetPixelShaderConstant( 8, params[ info.iRimlightTint ]->GetVecValue() );
+			const float *pTint = params[ info.iRimlightTint ]->GetVecValue();
+			const float flBoost = ( ( PARM_VALID( info.iRimlightBoost ) && PARM_DEFINED( info.iRimlightBoost ) ) ? PARM_FLOAT( info.iRimlightBoost ) : 1.0f )
+				* r_deferred_rimlight.GetFloat();
+			const float flRim[4] = { pTint[0] * flBoost, pTint[1] * flBoost, pTint[2] * flBoost, 0.0f };
+			pShaderAPI->SetPixelShaderConstant( 8, flRim );
 		}
 
 		if ( bSelfIllum )

@@ -18,6 +18,7 @@
 #include "fx_quad.h"
 #include "fx_line.h"
 #include "fx_water.h"
+#include "deferred/deferred_firelight.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -191,6 +192,10 @@ void C_BaseExplosionEffect::Create( const Vector &position, float force, float s
 
 	CreateDebris();
 	//FIXME: CreateDynamicLight();
+	// HL2RPM: the deferred renderer lights the explosion itself - a flash fading into its glow
+	// (deferred_firelight.cpp); force is the magnitude: ~100 for a barrel, 125 a grenade
+	if ( DeferredFireLights_Enabled() && !( m_fFlags & TE_EXPLFLAG_NODLIGHTS ) )
+		DeferredFireLights_AddFlash( m_vecOrigin, force / 100.0f );
 	CreateMisc();
 }
 

@@ -15,6 +15,10 @@ struct defParms_composite
 	// textures
 	int iAlbedo;
 	int iAlbedo2;
+	// HL2RPM: a higher resolution version of the base texture(s) the client found in materials/hd -
+	// sampled instead of them; $basetexture keeps the size the brushes are mapped with
+	int iAlbedoHD;
+	int iAlbedo2HD;
 	int iAlbedo3;
 	int iAlbedo4;
 	int iEnvmap;
@@ -38,6 +42,7 @@ struct defParms_composite
 	int iRimlightAlbedoScale;
 	int iRimlightTint;
 	int iRimlightModLight;
+	int iRimlightBoost;
 
 	// alpha
 	int iAlphatestRef;
@@ -52,8 +57,18 @@ struct defParms_composite
 	// HL2RPM: the relief of a brush material, the wind in a tree, the light through a leaf
 	int iPomHeightmap;
 	int iPomScale;
+	// HL2RPM: a blend: the relief of its second layer (made of $basetexture2: on its coordinates) and
+	// the coordinates of $basetexture2 ($basetexturetransform2)
+	int iPomHeightmap2;
+	int iPomTextureRelief2;
+	int iBaseTransform2;
 	int iTreeSway;
 	int iTransmission;
+	// HL2RPM: the detail texture ($detail, $detailscale, $detailblendfactor, $detailblendmode)
+	int iDetail;
+	int iDetailScale;
+	int iDetailBlendFactor;
+	int iDetailBlendMode;
 
 	// self illum
 	int iSelfIllumTint;

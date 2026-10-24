@@ -42,6 +42,10 @@
 
 void PostToolMessage( HTOOLHANDLE hEntity, KeyValues *msg );
 
+// HL2RPM: set by the deferred renderer while it draws the view models into the G-buffer
+// (viewrender_deferred.cpp, DrawViewModels)
+bool g_bViewModelGBufferPass = false;
+
 void FormatViewModelAttachment( Vector &vOrigin, bool bInverse )
 {
 	// Presumably, SetUpView has been called so we know our FOV and render origin.
@@ -325,7 +329,9 @@ int C_BaseViewModel::DrawModel( int flags )
 			m_nOldAnimationParity = m_nAnimationParity;
 		}
 		// Tell the weapon itself that we've rendered, in case it wants to do something
-		if ( pWeapon )
+		// HL2RPM: not while the deferred renderer draws the view model into the G-buffer - what
+		// the weapon draws then (the glow sprites of the stunstick) went into the normals
+		if ( pWeapon && !g_bViewModelGBufferPass )
 		{
 			pWeapon->ViewModelDrawn( this );
 		}

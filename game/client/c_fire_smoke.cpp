@@ -15,6 +15,7 @@
 #include "iefx.h"
 #include "dlight.h"
 #include "tier0/icommandline.h"
+#include "deferred/deferred_firelight.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -384,7 +385,9 @@ void C_EntityFlame::Simulate( void )
 
 #ifdef HL2_EPISODIC 
 
-	if ( IsEffectActive(EF_BRIGHTLIGHT) || IsEffectActive(EF_DIMLIGHT) )
+	// HL2RPM: with the deferred renderer the flames (burning_character) are a light of their own
+	// (deferred_firelight.cpp) - this one would double it
+	if ( ( IsEffectActive(EF_BRIGHTLIGHT) || IsEffectActive(EF_DIMLIGHT) ) && !DeferredFireLights_Enabled() )
 	{
 		dlight_t *dl = effects->CL_AllocDlight ( index );
 		dl->origin = GetAbsOrigin();

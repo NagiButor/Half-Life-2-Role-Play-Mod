@@ -1,8 +1,6 @@
 // ALL SKIP STATEMENTS THAT AFFECT THIS SHADER!!!
 // $POM && !$BUMPMAP
-// $POM && $BUMPMAP2
 // $POM && $MULTIBLEND
-// $POM && $BLENDMODULATE
 // !$BUMPMAP2 && !$MULTIBLEND && $BLENDMODULATE
 // !$BUMPMAP && $BUMPMAP2
 // $MODEL && $BUMPMAP2
@@ -146,9 +144,7 @@ public:
 	{
 		Assert( m_bALPHATEST && m_bBUMPMAP && m_bNOCULL && m_bPHONGMAP && m_bBUMPMAP2 && m_bBLENDMODULATE && m_bMULTIBLEND && m_bPOM );
 		AssertMsg( !( m_nPOM && !m_nBUMPMAP ), "Invalid combo combination ( POM && !BUMPMAP )" );
-		AssertMsg( !( m_nPOM && m_nBUMPMAP2 ), "Invalid combo combination ( POM && BUMPMAP2 )" );
 		AssertMsg( !( m_nPOM && m_nMULTIBLEND ), "Invalid combo combination ( POM && MULTIBLEND )" );
-		AssertMsg( !( m_nPOM && m_nBLENDMODULATE ), "Invalid combo combination ( POM && BLENDMODULATE )" );
 		AssertMsg( !( !m_nBUMPMAP2 && ( !m_nMULTIBLEND && m_nBLENDMODULATE ) ), "Invalid combo combination ( !BUMPMAP2 && ( !MULTIBLEND && BLENDMODULATE ) )" );
 		AssertMsg( !( !m_nBUMPMAP && m_nBUMPMAP2 ), "Invalid combo combination ( !BUMPMAP && BUMPMAP2 )" );
 		AssertMsg( !( m_nBUMPMAP2 && m_nMULTIBLEND ), "Invalid combo combination ( BUMPMAP2 && MULTIBLEND )" );

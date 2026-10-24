@@ -47,7 +47,7 @@ static ConVar r_deferred_pom_size( "r_deferred_pom_size", "256", 0,
 static ConVar r_deferred_pom_info( "r_deferred_pom_info", "0", 0, "Dev: print every height map as it is made" );
 static ConVar r_deferred_pom_texture_size( "r_deferred_pom_texture_size", "512", 0,
 	"Relief of materials without a bump map: the size of its height and normal maps (the joints of a 512 texture are a texel or two wide - at 256 they blur into slopes the march smears)" );
-static ConVar r_deferred_pom_texture_normal( "r_deferred_pom_texture_normal", "1.1", 0,
+static ConVar r_deferred_pom_texture_normal( "r_deferred_pom_texture_normal", "0.45", 0,
 	"Relief of materials without a bump map: the slope of the normal map made of it (per unit of height over one texel of a 256 map)", true, 0.0f, true, 16.0f );
 
 // ---- the procedural textures ----
@@ -120,6 +120,89 @@ struct PomEntry_t
 };
 
 static CUtlDict< PomEntry_t *, int > s_PomEntries;
+
+// ---- the cache on disk ----
+//
+// A relief made of a texture takes ~150 ms (an FFT of a 512 texture, the joints, a normal map), of
+// a bump map ~30: with every masonry, ground and wood material of a map that is seconds of a map
+// load. What was made once is kept in cache/pom of the mod (made again when the settings or this
+// code that make it change: the header names them).
+
+static ConVar r_deferred_pom_cache( "r_deferred_pom_cache", "1", 0, "Parallax occlusion mapping: keep the height and normal maps made of the textures in cache/pom (made once)" );
+
+// (bump when the making of a relief changes)
+#define POM_CACHE_VERSION 3
+
+static void CacheFileName( const char *pszKey, char *pszOut, int nSize )
+{
+	char szName[ MAX_PATH ];
+	V_strncpy( szName, pszKey, sizeof( szName ) );
+	for ( char *p = szName; *p; p++ )
+	{
+		if ( *p == '/' || *p == '\\' || *p == ':' )
+			*p = '#';
+	}
+	V_snprintf( pszOut, nSize, "cache/pom/%s.bin", szName );
+}
+
+static void CacheStamp( char *pszOut, int nSize )
+{
+	V_snprintf( pszOut, nSize, "HPOM %d %d %d %.3f", POM_CACHE_VERSION, r_deferred_pom_size.GetInt(),
+		r_deferred_pom_texture_size.GetInt(), r_deferred_pom_texture_normal.GetFloat() );
+}
+
+static bool LoadCache( const char *pszKey, CPomHeightRegen *pHeight, CPomNormalRegen *pNormal, int &nFlags )
+{
+	if ( !r_deferred_pom_cache.GetBool() )
+		return false;
+	char szFile[ MAX_PATH ], szStamp[ 64 ];
+	CacheFileName( pszKey, szFile, sizeof( szFile ) );
+	CacheStamp( szStamp, sizeof( szStamp ) );
+	CUtlBuffer buf;
+	if ( !filesystem->ReadFile( szFile, "MOD", buf ) )
+		return false;
+	char szFileStamp[ 64 ];
+	buf.GetString( szFileStamp, sizeof( szFileStamp ) );
+	if ( V_strcmp( szFileStamp, szStamp ) )
+		return false;
+	const int w = buf.GetInt(), h = buf.GetInt();
+	nFlags = buf.GetInt();
+	const bool bNormal = buf.GetInt() != 0;
+	if ( !buf.IsValid() || w < 1 || h < 1 || w > 4096 || h > 4096 || bNormal != ( pNormal != NULL ) )
+		return false;
+	pHeight->m_nWidth = w;
+	pHeight->m_nHeight = h;
+	pHeight->m_Bits.SetCount( w * h );
+	buf.Get( pHeight->m_Bits.Base(), w * h );
+	if ( pNormal )
+	{
+		pNormal->m_nWidth = w;
+		pNormal->m_nHeight = h;
+		pNormal->m_Bits.SetCount( w * h * 4 );
+		buf.Get( pNormal->m_Bits.Base(), w * h * 4 );
+	}
+	return buf.IsValid();
+}
+
+static void SaveCache( const char *pszKey, const CPomHeightRegen *pHeight, const CPomNormalRegen *pNormal, int nFlags )
+{
+	if ( !r_deferred_pom_cache.GetBool() || pHeight->m_Bits.Count() == 0 )
+		return;
+	char szFile[ MAX_PATH ], szStamp[ 64 ];
+	CacheFileName( pszKey, szFile, sizeof( szFile ) );
+	CacheStamp( szStamp, sizeof( szStamp ) );
+	CUtlBuffer buf;
+	buf.PutString( szStamp );
+	buf.PutInt( pHeight->m_nWidth );
+	buf.PutInt( pHeight->m_nHeight );
+	buf.PutInt( nFlags );
+	buf.PutInt( pNormal ? 1 : 0 );
+	buf.Put( pHeight->m_Bits.Base(), pHeight->m_Bits.Count() );
+	if ( pNormal )
+		buf.Put( pNormal->m_Bits.Base(), pNormal->m_Bits.Count() );
+	filesystem->CreateDirHierarchy( "cache/pom", "MOD" );
+	filesystem->WriteFile( szFile, "MOD", buf );
+}
 
 // ---- the rules of scripts/hl2rpm_relief.txt ----
 
@@ -615,10 +698,6 @@ static bool BuildTextureRelief( const char *pszBase, int iRule, CPomHeightRegen 
 	if ( !NormalizeHeights( detail, 0.035f, pRegen, w, h ) )
 		return false;
 
-	// the normal map of the soft heights: of the steep ones below its bevels were narrow and steep -
-	// at a glancing view every joint was edged with a thin bright line of mirrored light
-	BuildNormalMap( pRegen, r_deferred_pom_texture_normal.GetFloat(), pNormalRegen );
-
 	// steeper sides: the shading of the texture changes over several texels where a brick ends -
 	// marched as a slope, that band is the texture stretched along the view ("fur"). Flat tops,
 	// flat joints, a short step between them.
@@ -628,6 +707,29 @@ static bool BuildTextureRelief( const char *pszBase, int iRule, CPomHeightRegen 
 		t = t * t * ( 3.0f - 2.0f * t );
 		pRegen->m_Bits[i] = (unsigned char)( t * 255.0f + 0.5f );
 	}
+
+	// the normal map of those heights, softened over a few texels: the faces of the bricks and
+	// stones flat, a bevel only where they step down to a joint. (Of the soft heights before every
+	// stain and spot inside a brick was a dent with a lit and a dark side - in a low sun the wall
+	// looked embossed, like moulded plastic.)
+	CPomHeightRegen soft;
+	soft.m_nWidth = w;
+	soft.m_nHeight = h;
+	soft.m_Bits.SetCount( w * h );
+	for ( int y = 0; y < h; y++ )
+	{
+		for ( int x = 0; x < w; x++ )
+		{
+			int nSum = 0;
+			for ( int dy = -1; dy <= 1; dy++ )
+			{
+				for ( int dx = -1; dx <= 1; dx++ )
+					nSum += pRegen->m_Bits[ ( ( y + dy + h ) % h ) * w + ( x + dx + w ) % w ] * ( ( dx == 0 ? 2 : 1 ) * ( dy == 0 ? 2 : 1 ) );
+			}
+			soft.m_Bits[ y * w + x ] = (unsigned char)( ( nSum + 8 ) / 16 );
+		}
+	}
+	BuildNormalMap( &soft, r_deferred_pom_texture_normal.GetFloat(), pNormalRegen );
 	return true;
 }
 
@@ -671,7 +773,13 @@ const char *DeferredPOM_GetHeightTexture( const char *pszBumpName, bool bSSBump 
 		RPM_CRUMB( "pom: height of %s", szKey );
 		const double flStart = Plat_FloatTime();
 		bool bFlippedGreen = false;
-		if ( BuildHeightMap( szKey, bSSBump, pEntry->pRegen, bFlippedGreen ) )
+		int nCacheFlags = 0;
+		const bool bCached = LoadCache( szKey, pEntry->pRegen, NULL, nCacheFlags );
+		const bool bBuilt = bCached || BuildHeightMap( szKey, bSSBump, pEntry->pRegen, bFlippedGreen );
+		if ( bBuilt && !bCached )
+			SaveCache( szKey, pEntry->pRegen, NULL, bFlippedGreen ? 1 : 0 );
+		bFlippedGreen = bCached ? ( nCacheFlags & 1 ) != 0 : bFlippedGreen;
+		if ( bBuilt )
 		{
 			ITexture *pTex = CreatePomTexture( pEntry->szTexture, pEntry->pRegen->m_nWidth, pEntry->pRegen->m_nHeight, IMAGE_FORMAT_I8, false, pEntry->pRegen );
 			if ( pTex )
@@ -682,8 +790,8 @@ const char *DeferredPOM_GetHeightTexture( const char *pszBumpName, bool bSSBump 
 			}
 		}
 		if ( r_deferred_pom_info.GetBool() )
-			Msg( "[pom] %s: %s%s, %.1f ms\n", szKey, pEntry->bOk ? "height map made" : "no relief (flat, missing or not powers of two)",
-				bFlippedGreen ? " (green points the other way)" : "", ( Plat_FloatTime() - flStart ) * 1000.0 );
+			Msg( "[pom] %s: %s%s%s, %.1f ms\n", szKey, pEntry->bOk ? "height map made" : "no relief (flat, missing or not powers of two)",
+				bFlippedGreen ? " (green points the other way)" : "", bCached ? " (cache)" : "", ( Plat_FloatTime() - flStart ) * 1000.0 );
 		idx = s_PomEntries.Insert( szKey, pEntry );
 	}
 
@@ -717,7 +825,13 @@ bool DeferredPOM_GetTextureRelief( const char *pszBaseTexture, int iRule, const 
 		const double flStart = Plat_FloatTime();
 		bool bInverted = false;
 		double flBuilt = flStart;
-		if ( BuildTextureRelief( szName, iRule, pEntry->pRegen, pEntry->pNormalRegen, bInverted ) )
+		int nCacheFlags = 0;
+		const bool bCached = LoadCache( szKey, pEntry->pRegen, pEntry->pNormalRegen, nCacheFlags );
+		const bool bMade = bCached || BuildTextureRelief( szName, iRule, pEntry->pRegen, pEntry->pNormalRegen, bInverted );
+		if ( bMade && !bCached )
+			SaveCache( szKey, pEntry->pRegen, pEntry->pNormalRegen, bInverted ? 1 : 0 );
+		bInverted = bCached ? ( nCacheFlags & 1 ) != 0 : bInverted;
+		if ( bMade )
 		{
 			flBuilt = Plat_FloatTime();
 			ITexture *pTex = CreatePomTexture( pEntry->szTexture, pEntry->pRegen->m_nWidth, pEntry->pRegen->m_nHeight, IMAGE_FORMAT_I8, false, pEntry->pRegen );
@@ -735,11 +849,56 @@ bool DeferredPOM_GetTextureRelief( const char *pszBaseTexture, int iRule, const 
 				pNormal->DecrementReferenceCount();
 		}
 		if ( r_deferred_pom_info.GetBool() )
-			Msg( "[pom] %s: %s%s, %.1f ms (textures %.1f)\n", szName, pEntry->bOk ? "relief made of the texture" : "no relief (flat, missing or not powers of two)",
-				bInverted ? " (light joints sink)" : "", ( Plat_FloatTime() - flStart ) * 1000.0, ( Plat_FloatTime() - flBuilt ) * 1000.0 );
+			Msg( "[pom] %s: %s%s%s, %.1f ms (textures %.1f)\n", szName, pEntry->bOk ? "relief made of the texture" : "no relief (flat, missing or not powers of two)",
+				bInverted ? " (light joints sink)" : "", bCached ? " (cache)" : "", ( Plat_FloatTime() - flStart ) * 1000.0, ( Plat_FloatTime() - flBuilt ) * 1000.0 );
 		idx = s_PomEntries.Insert( szKey, pEntry );
 	}
 
+	PomEntry_t *pEntry = s_PomEntries[ idx ];
+	if ( !pEntry->bOk )
+		return false;
+	*ppszHeight = pEntry->szTexture;
+	*ppszNormal = pEntry->szNormal;
+	return true;
+}
+
+bool DeferredPOM_GetFlatRelief( const char **ppszHeight, const char **ppszNormal )
+{
+	*ppszHeight = *ppszNormal = NULL;
+	int idx = s_PomEntries.Find( "flat" );
+	if ( idx == s_PomEntries.InvalidIndex() )
+	{
+		PomEntry_t *pEntry = new PomEntry_t;
+		V_strncpy( pEntry->szTexture, "_pom/flat", sizeof( pEntry->szTexture ) );
+		V_strncpy( pEntry->szNormal, "_pomn/flat", sizeof( pEntry->szNormal ) );
+		pEntry->pRegen = new CPomHeightRegen;
+		pEntry->pNormalRegen = new CPomNormalRegen;
+		pEntry->bOk = false;
+		// (the top of the relief, facing straight out)
+		pEntry->pRegen->m_nWidth = pEntry->pRegen->m_nHeight = 4;
+		pEntry->pRegen->m_Bits.SetCount( 16 );
+		pEntry->pNormalRegen->m_nWidth = pEntry->pNormalRegen->m_nHeight = 4;
+		pEntry->pNormalRegen->m_Bits.SetCount( 64 );
+		for ( int i = 0; i < 16; i++ )
+		{
+			pEntry->pRegen->m_Bits[i] = 255;
+			unsigned char *p = pEntry->pNormalRegen->m_Bits.Base() + i * 4;
+			p[0] = 128; p[1] = 128; p[2] = 255; p[3] = 255;
+		}
+		ITexture *pTex = CreatePomTexture( pEntry->szTexture, 4, 4, IMAGE_FORMAT_I8, false, pEntry->pRegen );
+		ITexture *pNormal = pTex ? CreatePomTexture( pEntry->szNormal, 4, 4, IMAGE_FORMAT_RGBA8888, false, pEntry->pNormalRegen ) : NULL;
+		if ( pTex && pNormal )
+		{
+			pEntry->tex.Init( pTex );
+			pEntry->texNormal.Init( pNormal );
+			pEntry->bOk = true;
+		}
+		if ( pTex )
+			pTex->DecrementReferenceCount();
+		if ( pNormal )
+			pNormal->DecrementReferenceCount();
+		idx = s_PomEntries.Insert( "flat", pEntry );
+	}
 	PomEntry_t *pEntry = s_PomEntries[ idx ];
 	if ( !pEntry->bOk )
 		return false;

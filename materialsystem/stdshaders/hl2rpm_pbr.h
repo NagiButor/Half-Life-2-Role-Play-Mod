@@ -86,4 +86,8 @@ void PBR_GetFoliageLightConstants( float *pOut4 );
 // HL2RPM: the shading of the bottom of a relief (composite c32.w)
 float PBR_GetReliefOcclusion();
 
+// HL2RPM: the two rows (x, y, -, translation) of a texture transform parameter for two shader
+// constants - $basetexturetransform2 of a blend; the identity for -1 or a parameter not set
+void PBR_GetTextureTransformRows( IMaterialVar **params, int iVar, float *pOut8 );
+
 #endif // HL2RPM_PBR_H

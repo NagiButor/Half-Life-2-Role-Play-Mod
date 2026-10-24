@@ -112,6 +112,14 @@ const float4 g_vecTransmitSun			: register( c34 );
 // texture), z 1 = the mask texture's alpha instead of its red (the bump map of
 // $normalmapalphaenvmapmask)
 const float4 g_vecEnvMask				: register( c35 );
+// HL2RPM: the light of the sky at an open point - what a missing cubemap's stand-in (the light at
+// the pixel) may not exceed: a mirror shows the surroundings, not the sun that lights the pixel
+const float4 g_vecEnvSky				: register( c36 );
+// HL2RPM: the detail texture of the material ($detail, blend mode 0: "mod2x" - the albedo times
+// twice the detail): the fine grain stock concrete, plaster, brick and metal get up close.
+// x repeats of it per repeat of the base texture, y how much (0 = none - a grey texture is bound)
+sampler sDetail							: register( s13 );
+const float4 g_vecDetail				: register( c37 );
 
 #if ENVMAP
 sampler sEnvmap								: register( s3 );
@@ -131,6 +139,12 @@ const float4x4 obbMatrix					: register( c12 );
 
 #if BASETEXTURE2
 sampler sAlbedo2							: register( s5 );
+// HL2RPM: the coordinates of the second texture of a blend ($basetexturetransform2: the stock
+// blends of the ground draw it 2 .. 8 times smaller - it was as large as the first, a blur), and
+// of its relief (made of that texture: the same; of its bump map: the first's); its height map
+const float4 g_vecBase2Transform[2]			: register( c38 );
+const float4 g_vecLayer2Transform[2]		: register( c40 );
+sampler sPomHeight2							: register( s14 );
 #endif
 
 #if BLENDMODULATE
@@ -223,7 +237,17 @@ PS_OUTPUT main( const PS_INPUT In )
 	const float2 vecUVdx = ddx( In.vTexCoord.xy );
 	const float2 vecUVdy = ddy( In.vTexCoord.xy );
 	float flPomHit;
+#if BASETEXTURE2
+	// (the blend of the two layers: the relief marches the blend of their heights)
+	float flBlendfactor = In.vColor_0.w;
+#if BLENDMODULATE
+	flBlendfactor = GetModulatedBlend( flBlendfactor, tex2D( sBlendmodulate, In.vTexCoord.zw ).rg );
+#endif
+	const float2 vecUV = ParallaxOcclusionUVBlend( sPomHeight, sPomHeight2, flBlendfactor, g_vecLayer2Transform,
+		In.vTexCoord.xy, In.vecViewTS, g_vecPOM, flPomHit );
+#else
 	const float2 vecUV = ParallaxOcclusionUV( sPomHeight, In.vTexCoord.xy, In.vecViewTS, g_vecPOM, flPomHit );
+#endif
 	// HL2RPM: with TAA the frame is the average of jittered frames - a box filter of a pixel on
 	// top of the texture filtering: textures looked soft. The albedo is sampled a little sharper
 	// then (a negative mip bias, c23.w - here as smaller gradients); TAA resolves what that
@@ -237,11 +261,8 @@ PS_OUTPUT main( const PS_INPUT In )
 	float4 flAlbedoSample = SAMPLE_ALBEDO( sAlbedo );
 
 #if BASETEXTURE2
-	float4 flAlbedoSample2 = SAMPLE_ALBEDO( sAlbedo2 );
-	float flBlendfactor = In.vColor_0.w;
-#if BLENDMODULATE
-	flBlendfactor = GetModulatedBlend( flBlendfactor, tex2D( sBlendmodulate, In.vTexCoord.zw ).rg );
-#endif
+	const float4 flAlbedoSample2 = tex2Dgrad( sAlbedo2, BlendLayer2UV( vecUV, g_vecBase2Transform ),
+		BlendLayer2Grad( vecAlbedoDx, g_vecBase2Transform ), BlendLayer2Grad( vecAlbedoDy, g_vecBase2Transform ) );
 	flAlbedoSample = lerp( flAlbedoSample, flAlbedoSample2, flBlendfactor );
 #endif
 
@@ -275,6 +296,12 @@ PS_OUTPUT main( const PS_INPUT In )
 	// (the coverage exactly as the G-buffer pass tests it: the base texture, no mip bias)
 	clip( SAMPLE_UV( sAlbedo ).a - g_flAlphaRef );
 #endif
+
+	// HL2RPM: the detail texture ($detail "mod2x", see c37), on the coordinate the relief shifted
+	{
+		const float3 vecDetail = tex2Dgrad( sDetail, vecUV * g_vecDetail.x, vecAlbedoDx * g_vecDetail.x, vecAlbedoDy * g_vecDetail.x ).rgb;
+		flAlbedoSample.rgb *= lerp( 1.0f, vecDetail * 2.0f, g_vecDetail.y );
+	}
 
 #if TRANSLUCENT
 	Out.vColor_0.w = flAlbedoSample.a;
@@ -454,7 +481,7 @@ PS_OUTPUT main( const PS_INPUT In )
 	// surface mirrors is about as bright and as colored as what lights it: the light at the pixel
 	// stands for its surroundings.
 	if ( g_vecPBR2.w > 0.0f )
-		flCubemap = flLighting.rgb * g_vecPBR2.w;
+		flCubemap = min( flLighting.rgb, g_vecEnvSky.rgb ) * g_vecPBR2.w;
 	flCubemap *= flSpecularFactor;
 	flCubemap *= g_flEnvmapTint;
 

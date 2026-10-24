@@ -213,6 +213,19 @@ lightData_Global_t CDeferredLightGlobal::GetState()
 		ambH += baseAmbH * twilight * twilightWarm;
 		ambL += baseAmbL * twilight * twilightWarm * 0.6f;
 
+		// HL2RPM: the sky after sunset (civil and nautical twilight) is still a big soft blue light.
+		// The day's sky light above is gone by -4.6 degrees and the night's - the moon and the night
+		// sky (C_WeatherSystem::ModifyGlobalLight) - is full only from -9: the dusk in between was
+		// darker than a moonlit night (three times, on map_v11). This one goes on from the day's sky
+		// light at sunset (the two make 0.86 of it there) to nothing with the sun 12 degrees down;
+		// ModifyGlobalLight keeps it all from going darker than a moonlit night.
+		float flDusk = DeferredSaturate( ( sunAltDeg + 12.0f ) / 12.0f );
+		flDusk = flDusk * flDusk * ( 3.0f - 2.0f * flDusk );
+		const float flTwilightSky = powf( flDusk, 1.2f ) * 0.75f * ( 1.0f - day );
+		const Vector twilightSky( 0.75f, 0.85f, 1.15f );
+		ambH += Vector( baseAmbH.x * twilightSky.x, baseAmbH.y * twilightSky.y, baseAmbH.z * twilightSky.z ) * flTwilightSky;
+		ambL += Vector( baseAmbL.x * twilightSky.x, baseAmbL.y * twilightSky.y, baseAmbL.z * twilightSky.z ) * ( flTwilightSky * 0.7f );
+
 		data.diff.Init( diff, 1.0f );
 		data.ambh.Init( ambH, 1.0f );
 		data.ambl.Init( ambL, 1.0f );

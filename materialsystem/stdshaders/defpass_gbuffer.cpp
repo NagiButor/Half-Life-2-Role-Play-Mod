@@ -53,6 +53,9 @@ void InitPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 	if ( PARM_DEFINED( info.iPomHeightmap ) )
 		pShader->LoadTexture( info.iPomHeightmap );
 
+	if ( PARM_DEFINED( info.iPomHeightmap2 ) )
+		pShader->LoadTexture( info.iPomHeightmap2 );
+
 #if DEFCFG_DEFERRED_SHADING == 1
 	if ( PARM_DEFINED( info.iAlbedo2 ) )
 		pShader->LoadTexture( info.iAlbedo2 );
@@ -100,9 +103,10 @@ void DrawPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 	const bool bTranslucent = IS_FLAG_SET( MATERIAL_VAR_TRANSLUCENT ) && bAlbedo && bIsDecal;
 	const bool bSSBump = bBumpmap && PARM_SET( info.iSSBump );
 
-	// HL2RPM: the relief - plain bumped brush materials with a height map (no blends); the wind
-	const bool bPOM = !bModel && !bIsDecal && bBumpmap && !bBumpmap2 && !bAlbedo2 && !bMultiBlend
-		&& PARM_TEX( info.iPomHeightmap );
+	// HL2RPM: the relief - bumped brush materials with a height map, and blends of two with one for
+	// each layer (the client gives a blend a second bump map then); the wind
+	const bool bPOM = !bModel && !bIsDecal && bBumpmap && !bMultiBlend && PARM_TEX( info.iPomHeightmap )
+		&& ( !bBumpmap2 || ( PARM_VALID( info.iPomHeightmap2 ) && PARM_TEX( info.iPomHeightmap2 ) ) );
 	const int iTreeSway = ( bModel && PARM_VALID( info.iTreeSway ) && PARM_DEFINED( info.iTreeSway ) ) ? PARM_INT( info.iTreeSway ) : 0;
 
 	Assert( !bIsDecal || bDeferredShading );
@@ -171,6 +175,11 @@ void DrawPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 		{
 			pShaderShadow->EnableTexture( SHADER_SAMPLER7, true );
 			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER7, false );
+			if ( bBumpmap2 )
+			{
+				pShaderShadow->EnableTexture( SHADER_SAMPLER8, true );
+				pShaderShadow->EnableSRGBRead( SHADER_SAMPLER8, false );
+			}
 		}
 
 		if ( bAlbedo2 || bBumpmap2 || bMultiBlendBump )
@@ -271,7 +280,18 @@ void DrawPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 				tmpBuf.BindTexture( pShader, SHADER_SAMPLER2, info.iPhongmap );
 
 			if ( bPOM )
+			{
 				tmpBuf.BindTexture( pShader, SHADER_SAMPLER7, info.iPomHeightmap );
+				if ( bBumpmap2 )
+				{
+					tmpBuf.BindTexture( pShader, SHADER_SAMPLER8, info.iPomHeightmap2 );
+					// the coordinates of the second layer's relief and bump map (gbuffer_ps30 c5, c6)
+					const bool bLayer2Base = PARM_VALID( info.iPomTextureRelief2 ) && PARM_SET( info.iPomTextureRelief2 );
+					float flRows[8];
+					PBR_GetTextureTransformRows( params, bLayer2Base ? info.iBaseTransform2 : -1, flRows );
+					tmpBuf.SetPixelShaderConstant( 5, flRows, 2 );
+				}
+			}
 
 			// HL2RPM (PBR): the gloss of the surface, 0 .. 62 (63 is reserved for the marks of
 			// the pass), of the second texture of a blend, and whether the alpha of the bump

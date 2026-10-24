@@ -32,6 +32,7 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 		SHADER_PARAM( RIMLIGHTALBEDOSCALE, SHADER_PARAM_TYPE_FLOAT, "0.0", "Albedo influence on rim light" )
 		SHADER_PARAM( RIMLIGHTTINT, SHADER_PARAM_TYPE_VEC3, "[1 1 1]", "Tint for rim lights" )
 		SHADER_PARAM( RIMLIGHT_MODULATE_BY_LIGHT, SHADER_PARAM_TYPE_BOOL, "0", "Modulate rimlight by lighting." )
+		SHADER_PARAM( RIMLIGHTBOOST, SHADER_PARAM_TYPE_FLOAT, "1.0", "Boost for the rim light (of the light around, as the stock shaders take it)" )
 
 		SHADER_PARAM( SELFILLUMTINT, SHADER_PARAM_TYPE_COLOR, "[1 1 1]", "Self-illumination tint" )
 		SHADER_PARAM( SELFILLUM_ENVMAPMASK_ALPHA, SHADER_PARAM_TYPE_BOOL, "0", "defines that self illum value comes from env map mask alpha" )
@@ -59,6 +60,12 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 		// through leaves
 		SHADER_PARAM( TREESWAY, SHADER_PARAM_TYPE_INTEGER, "0", "" )
 		SHADER_PARAM( PBR_TRANSMISSION, SHADER_PARAM_TYPE_FLOAT, "0", "0 .. 1: how much light shines through (leaves, cloth)" )
+
+		// HL2RPM: the detail texture of the stock material (composite: blend mode 0, "mod2x")
+		SHADER_PARAM( DETAIL, SHADER_PARAM_TYPE_TEXTURE, "", "detail texture" )
+		SHADER_PARAM( DETAILSCALE, SHADER_PARAM_TYPE_FLOAT, "4", "repeats of the detail texture per repeat of the base texture" )
+		SHADER_PARAM( DETAILBLENDFACTOR, SHADER_PARAM_TYPE_FLOAT, "1", "how much of the detail texture" )
+		SHADER_PARAM( DETAILBLENDMODE, SHADER_PARAM_TYPE_INTEGER, "0", "0 = mod2x (the only one done)" )
 
 	END_SHADER_PARAMS
 
@@ -104,6 +111,7 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 		p.iRimlightAlbedoScale = RIMLIGHTALBEDOSCALE;
 		p.iRimlightTint = RIMLIGHTTINT;
 		p.iRimlightModLight = RIMLIGHT_MODULATE_BY_LIGHT;
+		p.iRimlightBoost = RIMLIGHTBOOST;
 
 		p.iAlphatestRef = ALPHATESTREFERENCE;
 
@@ -120,6 +128,11 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 		p.iSelfIllumMask = SELFILLUMMASK;
 
 		p.iFresnelRanges = FRESNELRANGES;
+
+		p.iDetail = DETAIL;
+		p.iDetailScale = DETAILSCALE;
+		p.iDetailBlendFactor = DETAILBLENDFACTOR;
+		p.iDetailBlendMode = DETAILBLENDMODE;
 	}
 
 	bool DrawToGBuffer( IMaterialVar **params )

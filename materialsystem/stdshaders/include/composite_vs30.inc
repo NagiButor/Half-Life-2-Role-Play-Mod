@@ -6,7 +6,6 @@
 // $BASETEXTURE2 && $MULTIBLEND
 // !$MODEL && $TREESWAY
 // $MODEL && $POM
-// $BASETEXTURE2 && $POM
 // $MULTIBLEND && $POM
 // defined $LIGHTING_PREVIEW && defined $FASTPATH && $LIGHTING_PREVIEW && $FASTPATH
 // !$MODEL && $MORPHING_VTEX
@@ -154,7 +153,6 @@ public:
 		AssertMsg( !( m_nBASETEXTURE2 && m_nMULTIBLEND ), "Invalid combo combination ( BASETEXTURE2 && MULTIBLEND )" );
 		AssertMsg( !( !m_nMODEL && m_nTREESWAY ), "Invalid combo combination ( !MODEL && TREESWAY )" );
 		AssertMsg( !( m_nMODEL && m_nPOM ), "Invalid combo combination ( MODEL && POM )" );
-		AssertMsg( !( m_nBASETEXTURE2 && m_nPOM ), "Invalid combo combination ( BASETEXTURE2 && POM )" );
 		AssertMsg( !( m_nMULTIBLEND && m_nPOM ), "Invalid combo combination ( MULTIBLEND && POM )" );
 		AssertMsg( !( !m_nMODEL && m_nMORPHING_VTEX ), "Invalid combo combination ( !MODEL && MORPHING_VTEX )" );
 		AssertMsg( !( !m_nMODEL && m_nMORPHING_VTEX ), "Invalid combo combination ( !MODEL && MORPHING_VTEX )" );

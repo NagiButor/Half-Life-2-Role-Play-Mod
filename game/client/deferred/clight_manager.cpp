@@ -16,6 +16,7 @@
 #include "weather/c_weather_system.h"
 
 #include "deferred/deferred_dlight_bridge.h"
+#include "deferred/deferred_firelight.h"
 #include "deferred/deferred_bounce.h"
 #include "deferred/deferred_gi.h"
 #include "deferred/deferred_postfx.h"
@@ -117,6 +118,7 @@ void CLightingManager::LevelShutdownPostEntity()
 {
 	// HL2RPM: mirrored engine dynamic lights and the bounce lights belong to the level
 	DeferredDLights_Clear();
+	DeferredFireLights_Clear();
 	DeferredBounce_Clear();
 	DeferredGI_Reset();
 	DeferredPostFX_Reset();
@@ -169,6 +171,8 @@ void CLightingManager::LightSetup( const CViewSetup& setup )
 {
 	// HL2RPM: muzzle flashes, explosions, fires, flares... (engine dlights / elights)
 	DeferredDLights_Update( setup.origin );
+	// HL2RPM: the fires (particle systems of fire, env_fire, burning things) and explosions
+	DeferredFireLights_Update( setup.origin );
 	// HL2RPM: the light the lamps' surfaces throw back into the room
 	DeferredBounce_Update( setup.origin );
 

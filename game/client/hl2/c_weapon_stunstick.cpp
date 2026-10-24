@@ -444,7 +444,9 @@ void C_WeaponStunStick::DrawFirstPersonEffects(void)
 	{
 		Vector vAttachment; // Where should the dynamic light spawn?
 		QAngle tempAng; // Angles of the attachment position.
-		GetAttachment("Sparkrear", vAttachment, tempAng);
+		// HL2RPM: the head of the stick in the hands - the view model's attachment (the world
+		// model the weapon's own GetAttachment reads isn't where the stick is in first person)
+		UTIL_GetWeaponAttachment(this, m_BeamCenterAttachment, vAttachment, tempAng);
 
 		dlight_t* dl = effects->CL_AllocDlight(index); // Allocate a dynamic light.
 		dl->origin = vAttachment; // Position.

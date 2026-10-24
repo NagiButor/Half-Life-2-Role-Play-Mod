@@ -131,16 +131,26 @@ float SpecularGGX( float3 N, float3 V, float3 L, float roughness )
 	const float NV = abs( dot( N, V ) ) + 1e-3f;
 	const float d = NH * NH * ( a2 - 1.0f ) + 1.0f;
 	const float k = a * 0.5f;
-	const float flFresnel = min( 1.0f + ( 1.0f / PBR_F0_REF - 1.0f ) * pow( 1.0f - saturate( dot( V, H ) ), 5.0f ), PBR_FRESNEL_MAX );
+	// (the growth toward glancing angles is held back on rough surfaces - x 9 up to a roughness of
+	// 0.5, x 2 at 0.95: the stock materials have one roughness for the whole texture, and brick,
+	// plaster or cloth with the full growth shone like wet plastic wherever the sun grazed them)
+	const float flFresnelMax = lerp( PBR_FRESNEL_MAX, 2.0f, saturate( ( roughness - 0.5f ) * ( 1.0f / 0.45f ) ) );
+	const float flFresnel = min( 1.0f + ( 1.0f / PBR_F0_REF - 1.0f ) * pow( 1.0f - saturate( dot( V, H ) ), 5.0f ), flFresnelMax );
 	return min( a2 / ( d * d ) * 0.25f / ( ( NL * ( 1.0f - k ) + k ) * ( NV * ( 1.0f - k ) + k ) ), 96.0f ) * flFresnel;
 }
 
-// ...and of the light around a surface (pre-integrated: the rougher it is, the less of the
-// glancing angles' reflection is left)
+// ...and of the light around a surface, pre-integrated over its roughness (the split-sum
+// approximation of Karis, "Physically Based Shading on Mobile": F0 * A + B): a rough surface
+// mirrors less of its surroundings even from the front and keeps almost none of the growth
+// toward glancing angles - the old term (1 .. x 5 for brick) put a sheen of plastic on every
+// edge and silhouette of rough materials and characters. As a multiple of the reflection of a
+// non-metal of PBR_F0_REF seen from the front (the composite multiplies by the material's F0).
 float EnvFresnel( float3 N, float3 V, float roughness )
 {
-	return 1.0f + ( min( max( 1.0f - roughness, PBR_F0_REF ) * ( 1.0f / PBR_F0_REF ), PBR_FRESNEL_MAX ) - 1.0f )
-		* pow( 1.0f - saturate( dot( N, V ) ), 5.0f );
+	const float4 r = roughness * float4( -1.0f, -0.0275f, -0.572f, 0.022f ) + float4( 1.0f, 0.0425f, 1.04f, -0.04f );
+	const float a004 = min( r.x * r.x, exp2( -9.28f * saturate( dot( N, V ) ) ) ) * r.x + r.y;
+	const float2 AB = float2( -1.04f, 1.04f ) * a004 + r.zw;
+	return min( AB.x + AB.y * ( 1.0f / PBR_F0_REF ), PBR_FRESNEL_MAX );
 }
 
 #define ONEOVERTHREE 0.33333333333333333333333333333333

@@ -22,16 +22,16 @@
 
 	// floors people walk on are worn smoother than walls
 	"woodfloor"				"0.50 0 1.1"
-	"concretefloor"			"0.74 0 1.0"
-	"cobble"				"0.70 0 1.0"
-	"brickfloor"			"0.72 0 1.0"
-	"stonefloor"			"0.70 0 1.0"
+	"concretefloor"			"0.80 0 0.85"
+	"cobble"				"0.78 0 0.85"
+	"brickfloor"			"0.82 0 0.8"
+	"stonefloor"			"0.78 0 0.85"
 
 	// walls: raw, matte
-	"plasterwall"			"0.88 0 0.9"
-	"plasterceiling"		"0.90 0 0.9"
-	"brickwall"				"0.86 0 0.9"
-	"stonewall"				"0.84 0 0.9"
+	"plasterwall"			"0.90 0 0.7"
+	"plasterceiling"		"0.92 0 0.7"
+	"brickwall"				"0.88 0 0.75"
+	"stonewall"				"0.86 0 0.8"
 
 	// metals
 	"citadel_metal"			"0.35 0.70 1.0"

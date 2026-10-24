@@ -187,15 +187,29 @@ static ConVar r_deferred_pom_texture( "r_deferred_pom_texture", "1", FCVAR_ARCHI
 	"Brick, stone and tile materials without a bump map get a relief and a bump map made of their texture (takes effect as materials load)" );
 
 //-----------------------------------------------------------------------------
-// HL2RPM: what a relief can be guessed for from the texture alone - masonry, paving, rock. Not
-// concrete, plaster, wood or metal: their dark spots are stains and rust, not dents.
+// HL2RPM: what a relief can be guessed for from the texture alone (the material's or the texture's
+// name): masonry, paving, rock, and - since the user found the relief missing on most of what a
+// map is made of - concrete, plaster, wood and the facades of the building templates. Their small
+// dark spots are holes, joints, cracks and gaps between boards (what is larger - a stain - the
+// high pass of the relief leaves out; the depth of these is a few millimetres: PBR_GetReliefDepth).
+// Not painted metal (rust and paint are no dents), glass, polished stone - and not the loose ground
+// (dirt, grass, sand, gravel): its texture is noise, a relief of noise seen along the ground from a
+// standing height smeared the ground under the feet into streaks (the ground of map_v11; with a
+// bump map of its own - blends of the coast - it keeps a relief made of that).
 //-----------------------------------------------------------------------------
 static bool IsReliefMaterial( const char *pszName )
 {
 	if ( !pszName )
 		return false;
-	static const char *const s_pszKeys[] = { "brick", "stone", "cobble", "rock", "cliff", "tile", "pave", "paving", "rubble", "gravel", "boulder" };
-	static const char *const s_pszNot[] = { "marble", "glass", "metal", "wood", "tools/", "dev/" };
+	static const char *const s_pszKeys[] = { "brick", "stone", "cobble", "rock", "cliff", "tile", "pave", "paving", "rubble",
+		"boulder", "concrete", "cement", "asphalt", "road", "sidewalk", "curb", "wood", "plank", "board", "shingle", "roof",
+		"building_template", "storefront_template", "plaster", "stucco", "corrugated" };
+	static const char *const s_pszNot[] = { "marble", "glass", "metal", "tools/", "dev/", "water", "sky", "decal", "overlay", "sign",
+		"poster", "paint", "wallpaper", "carpet", "fabric", "lights/", "chrome", "mirror", "screen", "monitor",
+		"dirt", "grass", "sand", "gravel", "mud", "ground", "nature/" };
+	// (corrugated sheets: the light and dark of their folds is their shape)
+	if ( V_stristr( pszName, "corrugated" ) )
+		return true;
 	for ( const char *pszKey : s_pszNot )
 	{
 		if ( V_stristr( pszName, pszKey ) )
@@ -207,6 +221,96 @@ static bool IsReliefMaterial( const char *pszName )
 			return true;
 	}
 	return false;
+}
+
+// HL2RPM: the higher resolution versions of the stock world textures (see ShaderReplaceReplMat)
+static ConVar r_deferred_hd_textures( "r_deferred_hd_textures", "1", FCVAR_ARCHIVE,
+	"World materials use the higher resolution versions of their textures in materials/hd (takes effect as materials load)" );
+
+//-----------------------------------------------------------------------------
+// HL2RPM: the fine grain of a surface up close. Half the stock world materials have a detail
+// texture ($detail: noise, plaster, metal, rock, wood - the deferred composite draws it as the
+// stock shaders do, "mod2x"); the others are a 512 texture over 128 units, soft as soon as a wall
+// is a few steps away. They get the stock detail texture of what they are made of, weaker than the
+// stock materials use theirs (0.6 .. 0.8): the grain of the surface, not a pattern of its own.
+//-----------------------------------------------------------------------------
+static ConVar r_deferred_detail_auto( "r_deferred_detail_auto", "0.4", FCVAR_ARCHIVE,
+	"Brush materials without a detail texture get the stock one of what they are made of, this strong (0 = none; takes effect as materials load)", true, 0.0f, true, 1.0f );
+
+struct AutoDetail_t
+{
+	const char *pszKey;
+	const char *pszDetail;
+	float flScale;
+	float flStrength;
+};
+
+static const AutoDetail_t s_AutoDetails[] =
+{
+	// (what is no surface of a building: glass, water, tools, the sky, decals, light fixtures)
+	{ "glass",		NULL, 0, 0 },
+	{ "water",		NULL, 0, 0 },
+	{ "tools/",		NULL, 0, 0 },
+	{ "dev/",		NULL, 0, 0 },
+	{ "sky",		NULL, 0, 0 },
+	{ "decal",		NULL, 0, 0 },
+	{ "lights/",	NULL, 0, 0 },
+	{ "sign",		NULL, 0, 0 },
+	{ "poster",		NULL, 0, 0 },
+	{ "overlay",	NULL, 0, 0 },
+	{ "plaster",	"detail/plaster_detail_01", 6.8f, 1.0f },
+	{ "stucco",		"detail/plaster_detail_01", 6.8f, 1.0f },
+	{ "wallpaper",	"detail/plaster_detail_01", 6.8f, 0.6f },
+	{ "metal",		"detail/metal_detail_01", 4.3f, 1.0f },
+	{ "steel",		"detail/metal_detail_01", 4.3f, 1.0f },
+	{ "rust",		"detail/metal_detail_01", 4.3f, 1.0f },
+	{ "pipe",		"detail/metal_detail_01", 4.3f, 1.0f },
+	{ "wood",		"detail/wood_detail_01", 4.0f, 0.7f },
+	{ "plank",		"detail/wood_detail_01", 4.0f, 0.7f },
+	{ "rock",		"detail/rock_detail_01", 4.0f, 0.8f },
+	{ "cliff",		"detail/rock_detail_01", 4.0f, 0.8f },
+	{ "stone",		"detail/rock_detail_01", 6.0f, 0.6f },
+	{ "brick",		"detail/noise_detail_01", 7.7f, 1.0f },
+	{ "concrete",	"detail/noise_detail_01", 7.3f, 1.0f },
+	{ "cement",		"detail/noise_detail_01", 7.3f, 1.0f },
+	{ "asphalt",	"detail/noise_detail_01", 7.3f, 0.8f },
+	{ "road",		"detail/noise_detail_01", 7.3f, 0.8f },
+	{ "pavement",	"detail/noise_detail_01", 7.3f, 0.8f },
+	{ "cobble",		"detail/noise_detail_01", 7.3f, 0.8f },
+	{ "tile",		"detail/noise_detail_01", 7.3f, 0.5f },
+	{ "dirt",		"detail/rock_detail_01", 5.0f, 0.5f },
+	{ "mud",		"detail/rock_detail_01", 5.0f, 0.5f },
+	{ "ground",		"detail/rock_detail_01", 5.0f, 0.5f },
+	{ "gravel",		"detail/rock_detail_01", 5.0f, 0.6f },
+	{ "sand",		"detail/noise_detail_01", 7.3f, 0.6f },
+	{ "building_template", "detail/noise_detail_01", 7.3f, 0.8f },
+};
+
+static void ApplyAutoDetail( KeyValues *pMsg, const char *pszMatname )
+{
+	const float flStrength = r_deferred_detail_auto.GetFloat();
+	if ( flStrength <= 0.0f || !pszMatname || pMsg->FindKey( "$detail" ) )
+		return;
+	// (a cubemap patch of a map: "maps/<map>/concrete/..._x_y_z")
+	const char *pszName = pszMatname;
+	if ( !V_strnicmp( pszName, "maps/", 5 ) )
+	{
+		const char *pszSlash = strchr( pszName + 5, '/' );
+		if ( pszSlash )
+			pszName = pszSlash + 1;
+	}
+	for ( const AutoDetail_t &d : s_AutoDetails )
+	{
+		if ( !V_stristr( pszName, d.pszKey ) )
+			continue;
+		if ( !d.pszDetail )
+			return;
+		pMsg->SetString( "$detail", d.pszDetail );
+		pMsg->SetFloat( "$detailscale", d.flScale );
+		pMsg->SetFloat( "$detailblendfactor", d.flStrength * flStrength );
+		pMsg->SetInt( "$detailblendmode", 0 );
+		return;
+	}
 }
 
 // Copied from cdeferred_manager_client.cpp
@@ -474,29 +578,104 @@ static void ShaderReplaceReplMat( const char *szNewShadername, IMaterial *pMat, 
 	const bool bDeferredModel = !V_stricmp( szNewShadername, "DEFERRED_MODEL" );
 	const bool bDeferredBrush = !V_stricmp( szNewShadername, "DEFERRED_BRUSH" );
 
-	// HL2RPM: the relief of a plain bumped brush material - a height map made of its bump map
-	// (deferred_pom.cpp; a material that names a $pom_heightmap itself keeps its own)
-	if ( bDeferredBrush && !bDecal && !bAlphaBlending && r_deferred_pom_auto.GetBool() && !msg->FindKey( "$pom_heightmap" )
-		&& !msg->FindKey( "$basetexture2" ) && !msg->FindKey( "$bumpmap2" ) )
+	// HL2RPM: the grain of the surface up close (world materials only: a model's texture coordinates
+	// are an unwrap, a detail repeat of it would be any size)
+	if ( bDeferredBrush && !bDecal && !bAlphaBlending && !bVegetation )
+		ApplyAutoDetail( msg, pszMatname );
+
+	// HL2RPM: higher resolution versions of the stock world textures (materials/hd/<texture>.vtf, made
+	// by hl2rpm_extras/tools/hd_textures.py). Not in place of the stock files: the size of a brush
+	// texture's repeat is its file's resolution - a 1024 version of a 512 texture would draw every
+	// brick twice as large. $basetexture stays (and maps the brushes), the composite samples this.
+	// (only at the full texture quality: with mat_picmip 1 the HD version would load at the size of
+	// the stock one - memory and load time for nothing)
+	static ConVarRef s_mat_picmip( "mat_picmip" );
+	if ( bDeferredBrush && !bDecal && !bAlphaBlending && !bAlphaTesting && r_deferred_hd_textures.GetBool()
+		&& ( !s_mat_picmip.IsValid() || s_mat_picmip.GetInt() <= 0 ) )
 	{
-		const char *pszBump = msg->GetString( "$bumpmap", "" );
-		if ( pszBump[0] )
+		static const char *const s_pszLayers[][2] = { { "$basetexture", "$hdtexture" }, { "$basetexture2", "$hdtexture2" } };
+		for ( const auto &layer : s_pszLayers )
 		{
-			const char *pszHeight = DeferredPOM_GetHeightTexture( pszBump, msg->GetInt( "$ssbump", 0 ) != 0 );
-			if ( pszHeight )
-				msg->SetString( "$pom_heightmap", pszHeight );
+			const char *pszBase = msg->GetString( layer[0], "" );
+			if ( !pszBase[0] || msg->FindKey( layer[1] ) )
+				continue;
+			char szHD[ MAX_PATH ], szFile[ MAX_PATH ];
+			V_snprintf( szHD, sizeof( szHD ), "hd/%s", pszBase );
+			V_FixSlashes( szHD, '/' );
+			V_snprintf( szFile, sizeof( szFile ), "materials/%s.vtf", szHD );
+			if ( filesystem->FileExists( szFile, "GAME" ) )
+				msg->SetString( layer[1], szHD );
 		}
-		// no bump map: masonry gets a relief and a bump map made of its texture (scripts/hl2rpm_relief.txt
-		// names the exceptions)
-		else if ( r_deferred_pom_texture.GetBool() && IsReliefMaterial( pszMatname ) )
+	}
+
+	// HL2RPM: the relief of a brush material - a height map made of its bump map, or (none) of its
+	// texture with a bump map of that too (deferred_pom.cpp; scripts/hl2rpm_relief.txt names the
+	// exceptions; a material that names a $pom_heightmap itself keeps its own). A blend of two
+	// textures (WorldVertexTransition: the ground of the maps) gets one for each of them - its
+	// shaders march the blend of the two heights.
+	if ( bDeferredBrush && !bDecal && !bAlphaBlending && r_deferred_pom_auto.GetBool() && !msg->FindKey( "$pom_heightmap" )
+		&& !msg->GetInt( "$multiblend", 0 ) )
+	{
+		const int iRule = DeferredPOM_GetReliefRule( pszMatname );
+		const bool bTextureRelief = r_deferred_pom_texture.GetBool() && iRule != RELIEF_RULE_NONE;
+		// one layer: of its bump map or of its texture
+		struct Layer_t
 		{
-			const char *pszBase = msg->GetString( "$basetexture", "" );
-			const char *pszHeight = NULL, *pszNormal = NULL;
-			if ( pszBase[0] && DeferredPOM_GetTextureRelief( pszBase, DeferredPOM_GetReliefRule( pszMatname ), &pszHeight, &pszNormal ) )
+			const char *pszHeight;
+			const char *pszNormal;	// made of the texture (NULL: the bump map is the material's own)
+		};
+		auto MakeLayer = [&]( const char *pszBumpKey, const char *pszBaseKey, bool bSSBump ) -> Layer_t
+		{
+			Layer_t layer = { NULL, NULL };
+			const char *pszBump = msg->GetString( pszBumpKey, "" );
+			if ( pszBump[0] )
 			{
-				msg->SetString( "$bumpmap", pszNormal );
-				msg->SetString( "$pom_heightmap", pszHeight );
-				msg->SetInt( "$pom_texturerelief", 1 );
+				layer.pszHeight = DeferredPOM_GetHeightTexture( pszBump, bSSBump );
+				return layer;
+			}
+			const char *pszBase = msg->GetString( pszBaseKey, "" );
+			if ( bTextureRelief && pszBase[0] && ( IsReliefMaterial( pszMatname ) || IsReliefMaterial( pszBase ) ) )
+				DeferredPOM_GetTextureRelief( pszBase, iRule, &layer.pszHeight, &layer.pszNormal );
+			return layer;
+		};
+
+		const Layer_t layer1 = MakeLayer( "$bumpmap", "$basetexture", msg->GetInt( "$ssbump", 0 ) != 0 );
+		if ( !msg->FindKey( "$basetexture2" ) )
+		{
+			if ( layer1.pszHeight )
+			{
+				msg->SetString( "$pom_heightmap", layer1.pszHeight );
+				if ( layer1.pszNormal )
+				{
+					msg->SetString( "$bumpmap", layer1.pszNormal );
+					msg->SetInt( "$pom_texturerelief", 1 );
+				}
+			}
+		}
+		else
+		{
+			const Layer_t layer2 = MakeLayer( "$bumpmap2", "$basetexture2", false );
+			const char *pszFlatHeight = NULL, *pszFlatNormal = NULL;
+			if ( ( layer1.pszHeight || layer2.pszHeight ) && DeferredPOM_GetFlatRelief( &pszFlatHeight, &pszFlatNormal ) )
+			{
+				msg->SetString( "$pom_heightmap", layer1.pszHeight ? layer1.pszHeight : pszFlatHeight );
+				msg->SetString( "$pom_heightmap2", layer2.pszHeight ? layer2.pszHeight : pszFlatHeight );
+				if ( layer1.pszNormal )
+					msg->SetString( "$bumpmap", layer1.pszNormal );
+				// (the second layer's bump map needs one of the first: a flat one where it has none)
+				else if ( !msg->GetString( "$bumpmap", "" )[0] && layer2.pszHeight )
+					msg->SetString( "$bumpmap", pszFlatNormal );
+				if ( layer2.pszNormal )
+				{
+					msg->SetString( "$bumpmap2", layer2.pszNormal );
+					// (made of $basetexture2: on its coordinates - $basetexturetransform2)
+					msg->SetInt( "$pom_texturerelief2", 1 );
+				}
+				// (the G-buffer pass marches the blend only with a second bump map: the first one's,
+				// as the stock shaders light the second texture of a blend without one)
+				else if ( !msg->GetString( "$bumpmap2", "" )[0] )
+					msg->SetString( "$bumpmap2", msg->GetString( "$bumpmap", "" ) );
+				msg->SetInt( "$pom_texturerelief", ( layer1.pszNormal || layer2.pszNormal ) ? 1 : 0 );
 			}
 		}
 	}

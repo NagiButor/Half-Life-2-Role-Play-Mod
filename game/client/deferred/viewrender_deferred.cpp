@@ -4230,7 +4230,11 @@ void CDeferredViewRender::DrawViewModels( const CViewSetup &view, bool drawViewm
 		if ( !bGBuffer )
 			DeferredTAA_MarkCameraAttached( true );
 
+		// (the weapon's own effects - ViewModelDrawn - belong to the composite, see c_baseviewmodel.cpp)
+		extern bool g_bViewModelGBufferPass;
+		g_bViewModelGBufferPass = bGBuffer;
 		DrawRenderablesInList( opaqueViewModelList );
+		g_bViewModelGBufferPass = false;
 		if (!bGBuffer)
 		{
 			DrawRenderablesInList( translucentViewModelList, STUDIO_TRANSPARENCY );
@@ -4380,18 +4384,13 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 
 	PixelVisibility_EndScene();
 
-	// Draw fade over entire screen if needed
-	byte color[4];
-	bool blend;
-	vieweffects->GetFadeParams( &color[0], &color[1], &color[2], &color[3], &blend );
-
 	// Draw an overlay to make it even harder to see inside smoke particle systems.
 	DrawSmokeFogOverlay();
 
-	// Overlay screen fade on entire screen
-	IMaterial* pMaterial = blend ? m_ModulateSingleColor : m_TranslucentSingleColor;
-	render->ViewDrawFade( color, pMaterial );
-	PerformScreenOverlay( worldView.x, worldView.y, worldView.width, worldView.height );
+	// HL2RPM: the screen fade and the screen overlay go on top of the finished frame, after the
+	// post-processing below (as the stock tone mapping of LDR, which changed nothing, left them):
+	// put under the eye adaptation, bloom and TAA, the gravity gun's 12 % white flash at night was
+	// a grey veil over half the screen, and fades and overlays trailed with the TAA history.
 
 	// Prevent sound stutter if going slow
 	engine->Sound_ExtraUpdate();
@@ -4433,6 +4432,16 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	// HL2RPM: eye adaptation, bloom, grading, lens effects (the HUD comes after)
 	if ( !building_cubemaps.GetBool() )
 		DeferredPostFX_Draw( worldView );
+
+	// Overlay screen fade on entire screen (see above: on the finished frame)
+	{
+		byte color[4];
+		bool blend;
+		vieweffects->GetFadeParams( &color[0], &color[1], &color[2], &color[3], &blend );
+		IMaterial* pMaterial = blend ? m_ModulateSingleColor : m_TranslucentSingleColor;
+		render->ViewDrawFade( color, pMaterial );
+		PerformScreenOverlay( worldView.x, worldView.y, worldView.width, worldView.height );
+	}
 
 	// And here are the screen-space effects
 

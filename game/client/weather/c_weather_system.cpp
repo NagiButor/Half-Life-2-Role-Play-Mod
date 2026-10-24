@@ -382,6 +382,27 @@ void C_WeatherSystem::ModifyGlobalLight( lightData_Global_t &data, const Vector 
 		ambL += Vector( 0.25f, 0.35f, 0.60f ) * ( Luminance( vecBaseAmbHigh ) * flNightAmb * 0.6f );
 	}
 
+	// --- The dusk never darker than a moonlit night (the moon some 50 degrees up): after sunset the
+	// sky light fades before the moon is high - at 18:36 the street of map_v11 was three times darker
+	// than at midnight. Filled up with the soft blue light of the twilight sky, before the weather
+	// dims it all; only while the sun goes down (gone at -12 degrees, the timecycle's night: a fill
+	// all night would brighten the rooms - the GI's least sky light indoors - whenever the moon is low).
+	const float flDuskFill = SmoothStep01( ( m_flSunAltitude + 12.0f ) / 3.0f );
+	if ( flDuskFill > 0.0f )
+	{
+		const float flFloor = cl_weather_moonlight.GetFloat() * flBaseLum * 0.75f * flDuskFill;
+		const float flLightUp = Max( data.vecLight.z, 0.0f );
+		const float flGround = Luminance( ambH ) * 0.6f + Luminance( ambL ) * 0.4f + Luminance( diff ) * flLightUp;
+		if ( flGround < flFloor )
+		{
+			// (ambient high + 0.6 of it low make 0.84 of it on the ground; the color has luminance 1)
+			const float flAdd = ( flFloor - flGround ) / 0.84f;
+			const Vector vecNightSky( 0.80f, 1.02f, 1.45f );
+			ambH += vecNightSky * flAdd;
+			ambL += vecNightSky * ( flAdd * 0.6f );
+		}
+	}
+
 	// --- Weather: clouds block the direct light and turn the sky into one big soft light.
 	const float flSun = Clamp( p.flSunIntensity, 0.0f, 2.0f );
 	diff *= flSun;

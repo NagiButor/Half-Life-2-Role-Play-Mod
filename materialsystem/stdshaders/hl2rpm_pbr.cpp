@@ -38,10 +38,11 @@ struct pbrKeyword_t
 #define PBR_METAL_RUSTY		{ 0.70f, 0.30f, 1.0f }
 #define PBR_GLASS			{ 0.12f, 0.00f, 1.3f }
 #define PBR_TILE			{ 0.35f, 0.00f, 1.3f }
-#define PBR_WOOD			{ 0.62f, 0.00f, 1.0f }
+#define PBR_WOOD			{ 0.66f, 0.00f, 0.9f }
 #define PBR_WOOD_FINISHED	{ 0.42f, 0.00f, 1.1f }
-#define PBR_MASONRY			{ 0.80f, 0.00f, 1.0f }
-#define PBR_ASPHALT			{ 0.72f, 0.00f, 1.0f }
+// (masonry: matte - with 0.8 and the full reflectance of 4 % brick and plaster looked like glazed clay)
+#define PBR_MASONRY			{ 0.88f, 0.00f, 0.75f }
+#define PBR_ASPHALT			{ 0.80f, 0.00f, 0.9f }
 #define PBR_GROUND			{ 0.90f, 0.00f, 0.45f }
 #define PBR_MUD				{ 0.62f, 0.00f, 1.1f }
 #define PBR_PLASTIC			{ 0.48f, 0.00f, 1.0f }
@@ -71,7 +72,7 @@ static const pbrKeyword_t s_SurfaceProps[] =
 	{ "chainlink",			PBR_METAL_BARE },
 	{ "chain",				PBR_METAL_BARE },
 	{ "crowbar",			PBR_METAL_BARE },
-	{ "weapon",				{ 0.42f, 0.60f, 1.0f } },
+	{ "weapon",				{ 0.45f, 0.35f, 1.0f } },
 	{ "popcan",				{ 0.35f, 0.80f, 1.0f } },
 	{ "metal",				PBR_METAL_PAINTED },
 	{ "canister",			PBR_METAL_PAINTED },
@@ -115,7 +116,8 @@ static const pbrKeyword_t s_SurfaceProps[] =
 // the folder and the name of the material (without "maps/<map>/" of the cubemap patches)
 static const pbrKeyword_t s_Names[] =
 {
-	{ "models/weapons",		{ 0.42f, 0.60f, 1.0f } },
+	// (blued steel and polymer: with 0.6 the view models in a shade were black - half their diffuse light gone)
+	{ "models/weapons",		{ 0.45f, 0.30f, 1.0f } },
 	// (leaves: thin cards with rough normals - a sharp reflection would sparkle)
 	{ "foliage",			PBR_LEAVES },
 	{ "detail/",			PBR_LEAVES },
@@ -185,6 +187,70 @@ static const pbrKeyword_t s_Names[] =
 	{ "antlion",			{ 0.45f, 0.0f, 1.0f } },
 };
 
+// HL2RPM: the characters - one surface of PBR_FLESH (0.58) for the face and the clothes and a
+// metal of "combine" for the soldiers made every person look like a plastic figure. Their
+// materials are a face (skin), hair and a sheet of clothes; by the name, in their own folders.
+#define PBR_SKIN			{ 0.55f, 0.00f, 0.70f }
+#define PBR_HAIR			{ 0.62f, 0.00f, 0.80f }
+#define PBR_CLOTHES			{ 0.90f, 0.00f, 0.50f }
+static const char *const s_pszCharacterFolders[] =
+{
+	"models/humans/", "models/alyx", "models/police/", "models/combine_soldier", "models/combine_super_soldier",
+	"models/kleiner", "models/eli", "models/mossman", "models/breen", "models/magnusson", "models/monk", "models/gman",
+	"models/odessa", "models/barney", "models/vortigaunt", "models/zombie", "models/headcrab", "models/stalker",
+	"models/charple", "models/lostcoast/fisherman", "models/player", "models/characters/", "models/hunter",
+	"models/antlion", "models/dog", "models/advisor", "models/synth", "models/soldier_stripped",
+};
+static const pbrKeyword_t s_Characters[] =
+{
+	// (lenses: Kleiner's glasses)
+	{ "glass",			PBR_GLASS },
+	{ "eyeball",		{ 0.10f, 0.0f, 1.0f } },
+	{ "teeth",			{ 0.35f, 0.0f, 1.0f } },
+	{ "mouth",			{ 0.40f, 0.0f, 1.0f } },
+	{ "tongue",			{ 0.40f, 0.0f, 1.0f } },
+	// (wet, slimy - before "head")
+	{ "headcrab",		{ 0.45f, 0.0f, 0.9f } },
+	{ "blackcrab",		{ 0.40f, 0.0f, 0.9f } },
+	{ "allinonebacup",	{ 0.45f, 0.0f, 0.9f } },
+	{ "faceandhair",	PBR_SKIN },
+	{ "hair",			PBR_HAIR },
+	{ "face",			PBR_SKIN },
+	{ "head",			PBR_SKIN },
+	{ "skin",			PBR_SKIN },
+	{ "eli_tex",		PBR_SKIN },
+	{ "labcoat",		PBR_CLOTHES },
+	// (the armor of the soldiers is painted, mostly not metal at all; the metrocops' masks and belts)
+	{ "combine_elite",	{ 0.50f, 0.10f, 1.0f } },
+	{ "combinesoldier",	{ 0.62f, 0.08f, 0.9f } },
+	{ "metrocop",		{ 0.68f, 0.05f, 0.8f } },
+	{ "manhack",		PBR_METAL_PAINTED },
+	{ "briefcase",		{ 0.45f, 0.0f, 1.0f } },
+	{ "clipboard",		PBR_PAPER },
+	{ "zombie",			{ 0.70f, 0.0f, 0.7f } },
+	{ "stalker",		{ 0.60f, 0.0f, 0.7f } },
+	{ "charple",		{ 0.85f, 0.0f, 0.5f } },
+	{ "vortigaunt",		{ 0.62f, 0.0f, 0.7f } },
+	{ "vort",			{ 0.62f, 0.0f, 0.7f } },
+	{ "antlion",		{ 0.45f, 0.0f, 1.0f } },
+	{ "hunter",			{ 0.50f, 0.05f, 0.9f } },
+	{ "dog",			{ 0.50f, 0.35f, 1.0f } },
+	// the rest - the "sheets" of the clothes (shirts, coats, overalls)
+	{ "",				PBR_CLOTHES },
+};
+
+static bool IsCharacterMaterial( const char *pszName )
+{
+	if ( !pszName )
+		return false;
+	for ( const char *pszFolder : s_pszCharacterFolders )
+	{
+		if ( !V_strnicmp( pszName, pszFolder, V_strlen( pszFolder ) ) )
+			return true;
+	}
+	return false;
+}
+
 static bool FindKeyword( const pbrKeyword_t *pTable, int nCount, const char *pszText, pbrSurface_t &out )
 {
 	if ( !pszText || !pszText[0] )
@@ -228,6 +294,20 @@ static bool BoolParm( IMaterialVar **params, int i )
 static pbrSurface_t Classify( const char *pszSurfaceProp, const char *pszName, bool bModel )
 {
 	pbrSurface_t s = { bModel ? 0.60f : 0.78f, 0.0f, 1.0f };
+	// the hands of the view models: gloves and sleeves, whatever the folder (models/weapons) says
+	if ( pszName && ( V_stristr( pszName, "v_hand" ) || V_stristr( pszName, "glove" ) || V_stristr( pszName, "sleeve" ) ) )
+	{
+		const pbrSurface_t glove = { 0.72f, 0.0f, 0.6f };
+		return glove;
+	}
+	// a character: by the name of the material file alone (its folder - "headcrab_classic",
+	// "combine_soldier" - says whose it is, not what)
+	if ( IsCharacterMaterial( pszName ) )
+	{
+		const char *pszFile = V_strrchr( pszName, '/' );
+		FindKeyword( s_Characters, ARRAYSIZE( s_Characters ), pszFile ? pszFile + 1 : pszName, s );
+		return s;
+	}
 	if ( pszSurfaceProp && !V_strnicmp( pszSurfaceProp, "default", 7 ) )
 		pszSurfaceProp = NULL;
 	if ( !FindKeyword( s_SurfaceProps, ARRAYSIZE( s_SurfaceProps ), pszSurfaceProp, s ) )
@@ -341,6 +421,20 @@ float PBR_GetReliefOcclusion()
 	return r_deferred_pom_occlusion.GetFloat();
 }
 
+void PBR_GetTextureTransformRows( IMaterialVar **params, int iVar, float *pOut8 )
+{
+	static const float s_flIdentity[8] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
+	V_memcpy( pOut8, s_flIdentity, sizeof( s_flIdentity ) );
+	if ( iVar < 0 || !params[ iVar ]->IsDefined() || params[ iVar ]->GetType() != MATERIAL_VAR_TYPE_MATRIX )
+		return;
+	const VMatrix &mat = params[ iVar ]->GetMatrixValue();
+	for ( int i = 0; i < 4; i++ )
+	{
+		pOut8[i] = mat[0][i];
+		pOut8[4 + i] = mat[1][i];
+	}
+}
+
 //-----------------------------------------------------------------------------
 // Trees in the wind
 //-----------------------------------------------------------------------------
@@ -440,6 +534,10 @@ void InitParmsPBR( const pbrParms_t &info, IMaterialVar **params, const char *ps
 {
 	const char *pszSurfaceProp = StringParm( params, info.iSurfaceProp );
 	pbrSurface_t s = Classify( pszSurfaceProp, pszMaterialName, info.bModel );
+	const bool bCharacter = IsCharacterMaterial( pszMaterialName );
+	// (matte by nature - masonry, ground, cloth, paper: what its author said about reflections below
+	// is about a few masked parts or a wet look, not about the whole surface)
+	const bool bMatte = s.flRoughness >= 0.75f;
 
 	// what the author said about its reflections: a cubemap and how strong (masked or not)
 	const bool bBump = info.iBumpmap >= 0 && params[ info.iBumpmap ]->IsDefined();
@@ -447,14 +545,18 @@ void InitParmsPBR( const pbrParms_t &info, IMaterialVar **params, const char *ps
 	const bool bNormalAlphaMask = BoolParm( params, info.iNormalAlphaEnvmapMask )
 		|| ( params[ FLAGS ]->GetIntValue() & MATERIAL_VAR_NORMALMAPALPHAENVMAPMASK ) != 0;
 	bool bGlossMask = bBump && bNormalAlphaMask;
-	if ( info.iEnvmap >= 0 && params[ info.iEnvmap ]->IsDefined() )
+	if ( info.iEnvmap >= 0 && params[ info.iEnvmap ]->IsDefined() && !bCharacter )
 	{
 		float flTint[3] = { 1.0f, 1.0f, 1.0f };
 		if ( info.iEnvmapTint >= 0 && params[ info.iEnvmapTint ]->IsDefined() )
 			params[ info.iEnvmapTint ]->GetVecValue( flTint, 3 );
 		const float flStrength = clamp( ( flTint[0] * 0.3f + flTint[1] * 0.59f + flTint[2] * 0.11f ) * 1.5f, 0.0f, 1.0f );
-		s.flRoughness = MIN( s.flRoughness, 0.65f - 0.45f * flStrength );
-		s.flSpecular = MAX( s.flSpecular, 1.0f + 1.5f * flStrength );
+		// (the stock brick, concrete and plaster with a cubemap - a masked sheen, the wet look of a
+		// rainy map - got a gloss of 0.45 all over and shone like glazed clay; their $envmap pass
+		// still shows the masked parts)
+		const float flGloss = bMatte ? 0.15f : 1.0f;
+		s.flRoughness = MIN( s.flRoughness, Lerp( flGloss, s.flRoughness, 0.65f - 0.45f * flStrength ) );
+		s.flSpecular = MAX( s.flSpecular, Lerp( flGloss, s.flSpecular, 1.0f + 1.5f * flStrength ) );
 	}
 
 	// $phong of the models: the exponent is a roughness, the boost a specular level, the mask
@@ -464,10 +566,11 @@ void InitParmsPBR( const pbrParms_t &info, IMaterialVar **params, const char *ps
 		float flExp = ( info.iPhongExponent >= 0 && params[ info.iPhongExponent ]->IsDefined() ) ? params[ info.iPhongExponent ]->GetFloatValue() : 0.0f;
 		if ( flExp <= 0.0f )
 			flExp = 20.0f;
-		// (Blinn-Phong n -> GGX: alpha^2 = 2 / ( n + 2 ), roughness = sqrt( alpha ))
-		s.flRoughness = MIN( s.flRoughness, clamp( powf( 2.0f / ( flExp + 2.0f ), 0.25f ), 0.25f, 0.8f ) );
+		// (Blinn-Phong n -> GGX: alpha^2 = 2 / ( n + 2 ), roughness = sqrt( alpha )); skin and the
+		// clothes of characters never below 0.45 - their phong was a sheen tuned by a Fresnel warp
+		s.flRoughness = MIN( s.flRoughness, clamp( powf( 2.0f / ( flExp + 2.0f ), 0.25f ), bCharacter ? 0.45f : 0.25f, 0.8f ) );
 		const float flBoost = ( info.iPhongBoost >= 0 && params[ info.iPhongBoost ]->IsDefined() ) ? params[ info.iPhongBoost ]->GetFloatValue() : 1.0f;
-		s.flSpecular = MAX( s.flSpecular, clamp( 0.8f + 0.2f * flBoost, 0.8f, 3.0f ) );
+		s.flSpecular = MAX( s.flSpecular, clamp( 0.8f + 0.2f * flBoost, 0.8f, bCharacter ? 1.0f : 3.0f ) );
 		if ( bBump && !BoolParm( params, info.iBaseAlphaPhongMask ) )
 			bGlossMask = true;
 	}
