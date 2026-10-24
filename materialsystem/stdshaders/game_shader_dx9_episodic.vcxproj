@@ -290,6 +290,9 @@
     <ClCompile Include="hl2rpm_taa.cpp" />
     <ClCompile Include="hl2rpm_depthalpha.cpp" />
     <ClCompile Include="weather_motes.cpp" />
+    <ClCompile Include="deferred_decal.cpp" />
+    <ClCompile Include="deferred_glass.cpp" />
+    <ClCompile Include="hl2rpm_mirror.cpp" />
     <ClCompile Include="weather_post.cpp" />
     <ClCompile Include="weather_rain.cpp" />
     <ClCompile Include="volumpass_sun.cpp" />

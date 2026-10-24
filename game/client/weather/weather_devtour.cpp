@@ -29,6 +29,8 @@ static ConVar cl_weather_tour_exec( "cl_weather_tour_exec", "", 0, "Dev: with cl
 static ConVar cl_weather_tour_run( "cl_weather_tour_run", "1", 0, "Dev: with cl_weather_tour_map, run the photo tour (0 = only load the map and exec cl_weather_tour_exec)" );
 static ConVar cl_weather_tour_disconnect( "cl_weather_tour_disconnect", "1", 0, "Dev: disconnect before quitting at the end of the tour" );
 static ConVar cl_weather_tour_flash_lead( "cl_weather_tour_flash_lead", "0.05", 0, "Dev: seconds between a tour step's lightning and its screenshot" );
+static ConVar cl_weather_tour_glint_target( "cl_weather_tour_glint_target", "0 0 0", 0, "Dev: the point of the floor a \"glint\" step looks at (the sun mirrored there)" );
+static ConVar cl_weather_tour_glint_dist( "cl_weather_tour_glint_dist", "160", 0, "Dev: how far from cl_weather_tour_glint_target a \"glint\" step puts the eye" );
 static ConVar cl_weather_tour_script( "cl_weather_tour_script", "", 0, "Dev: run the steps of this file (cfg/<name>) instead of the built-in tour. "
 	"One step per line: <flags>|<console commands>, flags: shot, sun, spin (comma separated, may be empty). "
 	"A step that contains setang keeps its own angles." );
@@ -39,6 +41,7 @@ enum TourView_e
 	TOURVIEW_SUN,			// look toward the sun (sun in the upper left of the frame)
 	TOURVIEW_SPIN,			// keep turning the camera (checks the cloud reprojection)
 	TOURVIEW_MOON,			// the moon in the middle of the frame
+	TOURVIEW_GLINT,			// the sun's reflection off a floor at cl_weather_tour_glint_target in the middle of the frame
 };
 
 struct TourStep_t
@@ -108,7 +111,7 @@ static void LoadTourSteps()
 				TourStep_t step;
 				step.bScreenshot = V_stristr( szLine, "shot" ) != NULL;
 				step.iView = V_stristr( szLine, "spin" ) ? TOURVIEW_SPIN : ( V_stristr( szLine, "sun" ) ? TOURVIEW_SUN :
-					( V_stristr( szLine, "moon" ) ? TOURVIEW_MOON : TOURVIEW_DEFAULT ) );
+					( V_stristr( szLine, "moon" ) ? TOURVIEW_MOON : ( V_stristr( szLine, "glint" ) ? TOURVIEW_GLINT : TOURVIEW_DEFAULT ) ) );
 				// "flash" / "flash1" / "flash2": lightning (close / mid / far) just before the shot
 				const char *pszFlash = V_stristr( szLine, "flash" );
 				step.iFlash = pszFlash ? ( ( pszFlash[5] >= '0' && pszFlash[5] <= '2' ) ? pszFlash[5] - '0' : 0 ) : -1;
@@ -309,6 +312,22 @@ public:
 			engine->ClientCmd_Unrestricted( VarArgs( "setang %.1f %.1f 0", flPitch, flYaw ) );
 			if ( cl_weather_tour_debug.GetBool() )
 				Msg( "[tour] aim: setang %.1f %.1f 0 (sun %.2f %.2f %.2f)\n", flPitch, flYaw, sun.x, sun.y, sun.z );
+		}
+		else if ( s_TourSteps[m_iStep].iView == TOURVIEW_GLINT )
+		{
+			// look down at the sun's height toward it: a level floor mirrors the sun in the middle of the
+			// frame - put the eye so that the middle is the target point (setpos takes the feet: 64 below)
+			const Vector &sun = GetWeatherSystem()->GetSunDir();
+			const float flYaw = RAD2DEG( atan2f( sun.y, sun.x ) );
+			const float flAlt = Max( RAD2DEG( asinf( clamp( sun.z, -1.0f, 1.0f ) ) ), 3.0f );
+			Vector vecView;
+			AngleVectors( QAngle( flAlt, flYaw, 0 ), &vecView );
+			Vector vecTarget( 0, 0, 0 );
+			sscanf( cl_weather_tour_glint_target.GetString(), "%f %f %f", &vecTarget.x, &vecTarget.y, &vecTarget.z );
+			const Vector vecEye = vecTarget - vecView * cl_weather_tour_glint_dist.GetFloat();
+			engine->ClientCmd_Unrestricted( VarArgs( "setpos %.1f %.1f %.1f; setang %.1f %.1f 0", vecEye.x, vecEye.y, vecEye.z - 64.0f, flAlt, flYaw ) );
+			if ( cl_weather_tour_debug.GetBool() )
+				Msg( "[tour] glint: eye %.0f %.0f %.0f, setang %.1f %.1f 0 (sun %.2f %.2f %.2f)\n", vecEye.x, vecEye.y, vecEye.z, flAlt, flYaw, sun.x, sun.y, sun.z );
 		}
 	}
 

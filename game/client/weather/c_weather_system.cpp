@@ -44,6 +44,7 @@ static ConVar cl_weather_night_ambient( "cl_weather_night_ambient", "0.06", FCVA
 // (walking moves you 'parallax' times further under them) and drift faster.
 static ConVar r_weather_cloud_parallax( "r_weather_cloud_parallax", "10", FCVAR_ARCHIVE, "How much faster the clouds pass over a walking player than real clouds would (cloud space scale)", true, 1.0f, true, 60.0f );
 static ConVar r_weather_cloud_wind_scale( "r_weather_cloud_wind_scale", "2.5", FCVAR_ARCHIVE, "Cloud drift speed multiplier", true, 0.0f, true, 10.0f );
+static ConVar r_weather_altocumulus( "r_weather_altocumulus", "1", 0, "Scale of the altocumulus layer (the small cloudlets high above the cumulus)", true, 0.0f, true, 2.0f );
 static ConVar r_weather_cloud_debug( "r_weather_cloud_debug", "0", FCVAR_CHEAT, "Cloud lighting debug: 1 = sun light only, 2 = sky light only, 3 = opacity" );
 
 #define WEATHER_SOUND_RAIN_OUT	"hl2rpm/weather/rain_loop.wav"
@@ -874,7 +875,8 @@ void C_WeatherSystem::FillRenderData( weatherData_t &data, const CViewSetup &vie
 	data.vecCloudParams1.Init( p.flCloudBase, p.flCloudThickness, p.flCirrus, m_flCloudTime );
 	// altocumulus sit well above the cumulus tops
 	// z: meters of cloud space per world unit (1 unit = 1 inch, times the parallax scale)
-	data.vecCloudParams3.Init( p.flAltocumulus, Max( 4800.0f, p.flCloudBase + p.flCloudThickness + 1200.0f ),
+	data.vecCloudParams3.Init( p.flAltocumulus * r_weather_altocumulus.GetFloat(),
+		Max( 4800.0f, p.flCloudBase + p.flCloudThickness + 1200.0f ),
 		0.0254f * r_weather_cloud_parallax.GetFloat(), (float)r_weather_cloud_debug.GetInt() );
 
 	const Vector2D vecSlant = GetRainSlant();

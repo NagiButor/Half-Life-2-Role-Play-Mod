@@ -907,6 +907,198 @@ bool DeferredPOM_GetFlatRelief( const char **ppszHeight, const char **ppszNormal
 	return true;
 }
 
+//-----------------------------------------------------------------------------
+// HL2RPM: the relief of a decal (DEFERRED_DECAL): a normal map (rgb, tangent space - +x along u, +y
+// along v, as the decal shader's cotangent frame has it) with the height in alpha (1 = the surface).
+// A DecalModulate texture is twice the color the surface is multiplied by: how dark it is, is how
+// much of the surface it covers - a hole is deepest where it is darkest, blood thickest.
+//-----------------------------------------------------------------------------
+static ConVar r_deferred_decal_relief_size( "r_deferred_decal_relief_size", "256", 0,
+	"Decals: largest size of the relief made of a decal's texture (made as materials load)", true, 32.0f, true, 1024.0f );
+
+bool DeferredPOM_GetDecalRelief( const char *pszBaseTexture, int iKind, const char **ppszNormalHeight )
+{
+	*ppszNormalHeight = NULL;
+	if ( !pszBaseTexture || !pszBaseTexture[0] || iKind <= DECAL_RELIEF_NONE )
+		return false;
+
+	char szName[ MAX_PATH ];
+	MakeKey( pszBaseTexture, szName, sizeof( szName ) );
+	char szKey[ MAX_PATH ];
+	V_snprintf( szKey, sizeof( szKey ), "decal%d/%s", iKind, szName );
+
+	int idx = s_PomEntries.Find( szKey );
+	if ( idx == s_PomEntries.InvalidIndex() )
+	{
+		PomEntry_t *pEntry = new PomEntry_t;
+		pEntry->szTexture[0] = 0;
+		V_snprintf( pEntry->szNormal, sizeof( pEntry->szNormal ), "_decaln/%s", szKey );
+		pEntry->pRegen = NULL;
+		pEntry->pNormalRegen = new CPomNormalRegen;
+		pEntry->bOk = false;
+
+		RPM_CRUMB( "decal relief of %s", szName );
+		CUtlVector< unsigned char > rgba;
+		int w = 0, h = 0;
+		if ( LoadTextureRGBA( szName, r_deferred_decal_relief_size.GetInt(), rgba, w, h ) )
+		{
+			// how much of the surface each texel covers, softened a little (the edge of a hole is a
+			// slope, not a step; a film of blood rounds off)
+			CUtlVector< float > cover, soft;
+			cover.SetCount( w * h );
+			soft.SetCount( w * h );
+			for ( int i = 0; i < w * h; i++ )
+			{
+				const unsigned char *p = rgba.Base() + i * 4;
+				const float flDark = clamp( ( 0.5f - Min( Min( p[0], p[1] ), p[2] ) / 255.0f ) * 2.2f, 0.0f, 1.0f );
+				cover[i] = p[3] > 0 ? flDark : 0.0f;
+			}
+			const int r = Max( 1, w / 96 );
+			for ( int pass = 0; pass < 2; pass++ )
+			{
+				for ( int y = 0; y < h; y++ )
+				{
+					for ( int x = 0; x < w; x++ )
+					{
+						float sum = 0.0f;
+						int n = 0;
+						for ( int k = -r; k <= r; k++ )
+						{
+							const int xx = pass == 0 ? clamp( x + k, 0, w - 1 ) : x;
+							const int yy = pass == 0 ? y : clamp( y + k, 0, h - 1 );
+							sum += ( pass == 0 ? cover : soft )[ yy * w + xx ];
+							n++;
+						}
+						( pass == 0 ? soft : cover )[ y * w + x ] = sum / n;
+					}
+				}
+			}
+
+			// the height: a hole sinks where it covers (its darkest middle the deepest), blood stands
+			// up as a film (only its normals are used - no parallax)
+			CUtlVector< float > height;
+			height.SetCount( w * h );
+			for ( int i = 0; i < w * h; i++ )
+			{
+				const float c = cover[i];
+				height[i] = ( iKind == DECAL_RELIEF_HOLE ) ? 1.0f - powf( c, 0.8f ) : c * c * ( 3.0f - 2.0f * c );
+			}
+
+			// the normal of that height: the slope over one texel is that many texels of rise -
+			// strong for a hole (a crater of a few texels), gentle for a film
+			const float flSlope = ( iKind == DECAL_RELIEF_HOLE ? 0.09f : 0.035f ) * w;
+			pEntry->pNormalRegen->m_nWidth = w;
+			pEntry->pNormalRegen->m_nHeight = h;
+			pEntry->pNormalRegen->m_Bits.SetCount( w * h * 4 );
+			for ( int y = 0; y < h; y++ )
+			{
+				for ( int x = 0; x < w; x++ )
+				{
+					const float dx = ( height[ y * w + Min( x + 1, w - 1 ) ] - height[ y * w + Max( x - 1, 0 ) ] ) * 0.5f;
+					const float dy = ( height[ Min( y + 1, h - 1 ) * w + x ] - height[ Max( y - 1, 0 ) * w + x ] ) * 0.5f;
+					Vector n( -dx * flSlope, -dy * flSlope, 1.0f );
+					VectorNormalize( n );
+					unsigned char *p = pEntry->pNormalRegen->m_Bits.Base() + ( y * w + x ) * 4;
+					p[0] = (unsigned char)clamp( n.x * 127.5f + 127.5f, 0.0f, 255.0f );
+					p[1] = (unsigned char)clamp( n.y * 127.5f + 127.5f, 0.0f, 255.0f );
+					p[2] = (unsigned char)clamp( n.z * 127.5f + 127.5f, 0.0f, 255.0f );
+					p[3] = (unsigned char)clamp( height[ y * w + x ] * 255.0f + 0.5f, 0.0f, 255.0f );
+				}
+			}
+
+			ITexture *pNormal = CreatePomTexture( pEntry->szNormal, w, h, IMAGE_FORMAT_RGBA8888, true, pEntry->pNormalRegen );
+			if ( pNormal )
+			{
+				pEntry->texNormal.Init( pNormal );
+				pNormal->DecrementReferenceCount();
+				pEntry->bOk = true;
+			}
+		}
+		if ( r_deferred_pom_info.GetBool() )
+			Msg( "[pom] decal %s: %s (%dx%d)\n", szName, pEntry->bOk ? ( iKind == DECAL_RELIEF_HOLE ? "a hole" : "a film" ) : "unreadable", w, h );
+		idx = s_PomEntries.Insert( szKey, pEntry );
+	}
+
+	PomEntry_t *pEntry = s_PomEntries[ idx ];
+	if ( !pEntry->bOk )
+		return false;
+	*ppszNormalHeight = pEntry->szNormal;
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// HL2RPM: glass in a texture - the windows of a facade texture: a gloss map ($phong_map of
+// DEFERRED_BRUSH: 0 rough .. 1 a mirror) of its envmap mask - the base alpha (inverted with
+// $basealphaenvmapmask: the stock shaders mirror where it is low) or the red of an $envmapmask
+// texture. Smooth glass where the material mirrored, its own gloss elsewhere.
+//-----------------------------------------------------------------------------
+bool DeferredPOM_GetGlassGloss( const char *pszTexture, bool bAlpha, bool bInvert, float flGloss, float flGlass, const char **ppszGloss )
+{
+	*ppszGloss = NULL;
+	if ( !pszTexture || !pszTexture[0] )
+		return false;
+
+	char szName[ MAX_PATH ];
+	MakeKey( pszTexture, szName, sizeof( szName ) );
+	char szKey[ MAX_PATH ];
+	V_snprintf( szKey, sizeof( szKey ), "glass%d%d_%d_%d/%s", bAlpha ? 1 : 0, bInvert ? 1 : 0, (int)( flGloss * 100.0f ), (int)( flGlass * 100.0f ), szName );
+
+	int idx = s_PomEntries.Find( szKey );
+	if ( idx == s_PomEntries.InvalidIndex() )
+	{
+		PomEntry_t *pEntry = new PomEntry_t;
+		pEntry->szTexture[0] = 0;
+		V_snprintf( pEntry->szNormal, sizeof( pEntry->szNormal ), "_glassgloss/%s", szKey );
+		pEntry->pRegen = NULL;
+		pEntry->pNormalRegen = new CPomNormalRegen;
+		pEntry->bOk = false;
+
+		RPM_CRUMB( "glass gloss of %s", szName );
+		CUtlVector< unsigned char > rgba;
+		int w = 0, h = 0;
+		int nGlass = 0;
+		if ( LoadTextureRGBA( szName, 256, rgba, w, h ) )
+		{
+			pEntry->pNormalRegen->m_nWidth = w;
+			pEntry->pNormalRegen->m_nHeight = h;
+			pEntry->pNormalRegen->m_Bits.SetCount( w * h * 4 );
+			for ( int i = 0; i < w * h; i++ )
+			{
+				float m = rgba[ i * 4 + ( bAlpha ? 3 : 0 ) ] / 255.0f;
+				if ( bInvert )
+					m = 1.0f - m;
+				// (the masks are soft or half-way: the panes of a window are glass, its frame is not)
+				m = clamp( ( m - 0.25f ) * 2.0f, 0.0f, 1.0f );
+				m = m * m * ( 3.0f - 2.0f * m );
+				nGlass += ( m > 0.5f ) ? 1 : 0;
+				const unsigned char g = (unsigned char)clamp( Lerp( m, flGloss, flGlass ) * 255.0f + 0.5f, 0.0f, 255.0f );
+				unsigned char *p = pEntry->pNormalRegen->m_Bits.Base() + i * 4;
+				p[0] = p[1] = p[2] = p[3] = g;
+			}
+			// (no glass at all in the mask: nothing to make)
+			if ( nGlass > 0 )
+			{
+				ITexture *pGloss = CreatePomTexture( pEntry->szNormal, w, h, IMAGE_FORMAT_RGBA8888, true, pEntry->pNormalRegen );
+				if ( pGloss )
+				{
+					pEntry->texNormal.Init( pGloss );
+					pGloss->DecrementReferenceCount();
+					pEntry->bOk = true;
+				}
+			}
+		}
+		if ( r_deferred_pom_info.GetBool() )
+			Msg( "[pom] glass of %s: %s (%dx%d, %.0f%% glass)\n", szName, pEntry->bOk ? "made" : "none", w, h, w * h > 0 ? 100.0f * nGlass / ( w * h ) : 0.0f );
+		idx = s_PomEntries.Insert( szKey, pEntry );
+	}
+
+	PomEntry_t *pEntry = s_PomEntries[ idx ];
+	if ( !pEntry->bOk )
+		return false;
+	*ppszGloss = pEntry->szNormal;
+	return true;
+}
+
 void DeferredPOM_Shutdown()
 {
 	for ( int i = s_PomEntries.First(); i != s_PomEntries.InvalidIndex(); i = s_PomEntries.Next( i ) )

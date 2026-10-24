@@ -45,6 +45,10 @@ ConVar mat_hl2rpm_map_cubemaps( "mat_hl2rpm_map_cubemaps", "1", FCVAR_HIDDEN, "S
 static ConVar r_deferred_envmap_fallback_sky( "r_deferred_envmap_fallback_sky", "1.0", 0,
 	"$envmap without a cubemap: the most it mirrors, in units of the light of the open sky", true, 0.0f, true, 8.0f );
 
+// HL2RPM: glass in the textures of facades (deferred_brush $pbr_glassmask, weather_post.cpp mirrors for it)
+ConVar r_deferred_glass_facades( "r_deferred_glass_facades", "1", 0,
+	"Glass in the textures (the windows of facades, panes painted into a texture): smooth, mirroring the sky and the scene around by the angle of the view" );
+
 // HL2RPM: the detail textures of the stock materials ($detail - the grain of concrete, plaster, brick
 // and metal up close; the deferred composite had none)
 static ConVar r_deferred_detail( "r_deferred_detail", "1", FCVAR_ARCHIVE, "Detail textures of the materials ($detail): the fine grain up close" );
@@ -582,9 +586,11 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 		// HL2RPM (PBR): per draw - r_deferred_pbr switches it without the materials being loaded anew
 		{
 			const bool bPBROn = bPBR && r_deferred_pbr.GetBool();
+			// (glass in the texture: its windows are its darkest texels - they keep their glint)
+			const bool bGlassMask = PARM_VALID( info.iGlassMask ) && PARM_SET( info.iGlassMask );
 			const float flPBR[4] = { bPBROn ? clamp( PARM_FLOAT( info.iMetalness ), 0.0f, 1.0f ) : 0.0f,
 				bPBROn ? 0.04f * clamp( PARM_FLOAT( info.iSpecular ), 0.0f, 4.0f ) : 0.0f,
-				r_deferred_pbr_cavity.GetFloat(), bPBROn ? 1.0f + clamp( r_deferred_pbr_debug.GetInt(), 0, 2 ) : 0.0f };
+				bGlassMask ? 0.0f : r_deferred_pbr_cavity.GetFloat(), bPBROn ? 1.0f + clamp( r_deferred_pbr_debug.GetInt(), 0, 2 ) : 0.0f };
 			// (the cubemap of $envmap: a model's is never bound; a brush's may be the engine's
 			// default one - the patch of a map without built cubemaps, or a missing texture)
 			bool bEnvFallback = false;
@@ -725,7 +731,10 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 			// (not the light at the pixel that stands in for a missing cubemap: it is the light of now)
 			const weatherData_t &w = GetDeferredExt()->GetWeatherData();
 			const bool bLightEnv = r_deferred_envmap_fallback.GetFloat() > 0.0f && ( bModel || !mat_hl2rpm_map_cubemaps.GetBool() );
-			const float flEnvScale = ( w.bEnabled && !bLightEnv ) ? w.vecSkyZenith.w : 1.0f;
+			float flEnvScale = ( w.bEnabled && !bLightEnv ) ? w.vecSkyZenith.w : 1.0f;
+			// (glass in the texture: the weather pass mirrors the sky and the scene around for it)
+			if ( PARM_VALID( info.iGlassMask ) && PARM_SET( info.iGlassMask ) && r_deferred_glass_facades.GetBool() )
+				flEnvScale = 0.0f;
 			const float *pTint = params[ info.iEnvmapTint ]->GetVecValue();
 			float flTint[4] = { pTint[0] * flEnvScale, pTint[1] * flEnvScale, pTint[2] * flEnvScale, 0.0f };
 			pShaderAPI->SetPixelShaderConstant( 5, flTint, 1, true );

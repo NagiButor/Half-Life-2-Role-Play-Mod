@@ -735,6 +735,15 @@ public:
 	int				ScriptGetRagdollObjectCount();
 #endif
 
+	// HL2RPM: the local player's own body after death - the view rides its eyes (C_BasePlayer::
+	// CalcDeathBodyView), and its head is left out of the views from there
+	virtual void BuildTransformations( CStudioHdr *pStudioHdr, Vector *pos, Quaternion q[], const matrix3x4_t& cameraTransform, int boneMask, CBoneBitList &boneComputed );
+	bool m_bDeathCamBody;
+	// (the eyes as the bones last had them, before the head is left out: the attachment would be
+	// computed from the zeroed head bone)
+	bool m_bDeathCamEyesValid;
+	matrix3x4_t m_matDeathCamEyes;
+
 	bool m_bFadeOut;
 	bool m_bImportant;
 #ifdef MAPBASE

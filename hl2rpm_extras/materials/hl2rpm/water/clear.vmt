@@ -1,0 +1,47 @@
+"Water"
+{
+	// HL2RPM: clear water: the bottom is seen deep down, blue-green with depth (the red fades first)
+	"%compilewater" 1
+	"%tooltexture" "dev/water_normal"
+	"$abovewater" 1
+	"$forceexpensive" 1
+	"$envmap" "env_cubemap"
+	"$refracttexture" "_rt_WaterRefraction"
+	"$refractamount" ".2"
+	"$reflecttexture" "_rt_WaterReflection"
+	"$reflectentities" 1
+	"$reflectamount" "1"
+	"$scale" "[1 1]"
+	"$bumpmap" "dev/water_dudv"
+	"$normalmap" "dev/water_normal"
+	"$surfaceprop" "water"
+	"$bottommaterial" "nature/water_canals_waterbeneath_clear"
+	"$bumpframe" "0"
+	"$fogenable" 1
+	"$fogcolor" "{28 58 66}"
+	"$fogstart" "0"
+	"$fogend" "900"
+	// the kind of water (stdshaders/water.cpp): how much faster than the average each color fades
+	// on the way through it (rgb), its density (w); its own color's glow
+	"$water_absorb" "[2.6 1.15 0.7 1.0]"
+	"$water_glow" "0"
+
+	"Proxies"
+	{
+		"AnimatedTexture"
+		{
+			"animatedtexturevar" "$normalmap"
+			"animatedtextureframenumvar" "$bumpframe"
+			"animatedtextureframerate" 30.00
+		}
+		"TextureScroll"
+		{
+			"texturescrollvar" "$bumptransform"
+			"texturescrollrate" .05
+			"texturescrollangle" 45.00
+		}
+		"WaterLOD"
+		{
+		}
+	}
+}

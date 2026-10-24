@@ -73,6 +73,7 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 		SHADER_PARAM( HDTEXTURE, SHADER_PARAM_TYPE_TEXTURE, "", "a higher resolution $basetexture (sampled with the same coordinates)" )
 		SHADER_PARAM( HDTEXTURE2, SHADER_PARAM_TYPE_TEXTURE, "", "a higher resolution $basetexture2" )
 		SHADER_PARAM( PBR_TRANSMISSION, SHADER_PARAM_TYPE_FLOAT, "0", "0 .. 1: how much light shines through (grass, cloth)" )
+		SHADER_PARAM( PBR_GLASSMASK, SHADER_PARAM_TYPE_BOOL, "0", "glass in the texture where its envmap mask is (set by the client: its gloss map, the weather pass mirrors for it)" )
 
 		// HL2RPM: the detail texture of the stock material (composite: blend mode 0, "mod2x")
 		SHADER_PARAM( DETAIL, SHADER_PARAM_TYPE_TEXTURE, "", "detail texture" )
@@ -168,6 +169,7 @@ BEGIN_VS_SHADER( DEFERRED_BRUSH, "" )
 		p.iPomTextureRelief2 = POM_TEXTURERELIEF2;
 		p.iBaseTransform2 = BASETEXTURETRANSFORM2;
 		p.iTransmission = PBR_TRANSMISSION;
+		p.iGlassMask = PBR_GLASSMASK;
 
 		p.iBlendmodulate = BLENDMODULATETEXTURE;
 	p.iBlendmodulate2 = BLENDMODULATETEXTURE2;

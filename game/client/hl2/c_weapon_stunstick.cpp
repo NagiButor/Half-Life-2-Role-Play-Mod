@@ -184,6 +184,11 @@ int C_WeaponStunStick::DrawModel(int flags)
 	// Only render these on the transparent pass
 	if (flags & STUDIO_TRANSPARENCY)
 	{
+		// HL2RPM: in first person the view model draws them (ViewModelDrawn) - with Mapbase's
+		// first-person legs the world model in the hand is drawn too, and its effects were a second
+		// glowing head at every swing
+		if (IsCarriedByLocalPlayer() && !::input->CAM_IsThirdPerson())
+			return 1;
 		DrawEffects();
 		return 1;
 	}
@@ -293,6 +298,20 @@ bool C_WeaponStunStick::InSwing(void)
 	// FIXME: This is needed until the actual animation works
 	if (IsCarriedByLocalPlayer() == false || ::input->CAM_IsThirdPerson())
 		return true;
+
+	// HL2RPM: the swing as the view model plays it (as the HL2MP stunstick does): the server's
+	// m_bInSwing is true for one tick only, and the glow and the light of most swings were never
+	// seen - "it lights only at some hits"
+	C_BasePlayer* pOwner = ToBasePlayer(GetOwner());
+	C_BaseViewModel* pViewModel = pOwner ? pOwner->GetViewModel() : NULL;
+	if (pViewModel && pViewModel->GetModelPtr())
+	{
+		const int iActivity = pViewModel->GetSequenceActivity(pViewModel->GetSequence());
+		if ((iActivity == ACT_VM_HITCENTER || iActivity == ACT_VM_MISSCENTER || iActivity == ACT_VM_HITCENTER2
+			|| iActivity == ACT_VM_MISSCENTER2 || iActivity == ACT_VM_SWINGHIT || iActivity == ACT_VM_SWINGMISS)
+			&& pViewModel->GetCycle() < 0.7f)
+			return true;
+	}
 
 	// If we are in the middle of an attack, we are swinging.
 	if (m_bInSwing)

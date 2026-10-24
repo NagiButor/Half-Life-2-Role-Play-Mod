@@ -90,4 +90,11 @@ float PBR_GetReliefOcclusion();
 // constants - $basetexturetransform2 of a blend; the identity for -1 or a parameter not set
 void PBR_GetTextureTransformRows( IMaterialVar **params, int iVar, float *pOut8 );
 
+//-----------------------------------------------------------------------------
+// The sky as it is seen, for what mirrors it (hl2rpm_sky_fxc.h): xyz the light the sky is lit by;
+// x the exposure of the procedural sky, y cloud coverage, z how much the clouds hide. False = no
+// global light (no sky-view LUT is built).
+//-----------------------------------------------------------------------------
+bool HL2RPM_GetSkySeenConstants( float *pLightDir4, float *pParams4 );
+
 #endif // HL2RPM_PBR_H

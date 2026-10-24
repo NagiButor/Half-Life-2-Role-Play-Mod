@@ -27,6 +27,13 @@ WATERS = [
     "nature/water_canals_cheap001",     # 7 $forcecheap: cubemap + fog color only
     "nature/water_canals03",            # 8 dark brown, 330
     "nature/water_tunnels01",           # 9 EP2 tunnels: nearly black green
+    # the kinds of water of the mod (materials/hl2rpm/water, water.cpp $water_absorb / $water_glow)
+    "hl2rpm/water/clear",               # 10 clear: blue-green with depth
+    "hl2rpm/water/murky",               # 11 silt, brown-green, the bottom gone within a meter
+    "hl2rpm/water/swamp",               # 12 dark green-brown
+    "hl2rpm/water/sea",                 # 13 deep teal
+    "hl2rpm/water/radioactive",         # 14 glowing green
+    "nature/toxicslime002a",            # 15 the stock toxic slime (a lightmapped surface: glows too)
 ]
 
 out = sys.argv[1]

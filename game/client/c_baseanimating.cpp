@@ -380,6 +380,8 @@ C_ClientRagdoll::C_ClientRagdoll( bool bRestoring )
 	m_bFadeOut = false;
 	m_bFadingOut = false;
 	m_bImportant = false;
+	m_bDeathCamBody = false;
+	m_bDeathCamEyesValid = false;
 #ifdef MAPBASE
 	m_flForcedRetireTime = 0.0f;
 #endif
@@ -690,6 +692,39 @@ float C_ClientRagdoll::LastBoneChangedTime()
 //-----------------------------------------------------------------------------
 // Purpose: clear out any face/eye values stored in the material system
 //-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+// HL2RPM: the local player's body after death, seen from its own eyes: the head is left out of the
+// views drawn from there (as Mapbase leaves it out of the living first-person body), the shadows
+// and reflections keep it
+//-----------------------------------------------------------------------------
+void C_ClientRagdoll::BuildTransformations( CStudioHdr *pStudioHdr, Vector *pos, Quaternion q[], const matrix3x4_t& cameraTransform, int boneMask, CBoneBitList &boneComputed )
+{
+	BaseClass::BuildTransformations( pStudioHdr, pos, q, cameraTransform, boneMask, boneComputed );
+
+	if ( !m_bDeathCamBody )
+		return;
+
+	// the eyes, from their bone as it is now
+	const int iEyes = LookupAttachment( "eyes" );
+	if ( iEyes > 0 )
+	{
+		const mstudioattachment_t &attachment = pStudioHdr->pAttachment( iEyes - 1 );
+		const int iBone = pStudioHdr->GetAttachmentBone( iEyes - 1 );
+		if ( iBone >= 0 && ( pStudioHdr->boneFlags( iBone ) & boneMask ) )
+		{
+			ConcatTransforms( GetBone( iBone ), attachment.local, m_matDeathCamEyes );
+			m_bDeathCamEyesValid = true;
+		}
+	}
+
+	C_BasePlayer *pLocal = C_BasePlayer::GetLocalPlayer();
+	if ( !pLocal || pLocal->IsAlive() || !pLocal->InPerspectiveView() )
+		return;
+	const int iHead = LookupBone( "ValveBiped.Bip01_Head1" );
+	if ( iHead >= 0 && ( pStudioHdr->boneFlags( iHead ) & boneMask ) )
+		MatrixScaleByZero( GetBoneForWrite( iHead ) );
+}
+
 void C_ClientRagdoll::SetupWeights( const matrix3x4_t *pBoneToWorld, int nFlexWeightCount, float *pFlexWeights, float *pFlexDelayedWeights )
 {
 	BaseClass::SetupWeights( pBoneToWorld, nFlexWeightCount, pFlexWeights, pFlexDelayedWeights );

@@ -1,0 +1,95 @@
+//========= HL2RPM ============================================================//
+//
+// DEFERRED_DECAL (deferred_decal.cpp): the decals of DecalModulate - blood, bullet
+// holes - on the world and on models. As the stock decal shader: compressed model
+// vertices, skinning, morphing (flexed faces keep their wounds); out goes what the
+// G-buffer pass and the composite need: the world position, the normal and the
+// G-buffer depth.
+//
+//=============================================================================//
+
+// STATIC:		"VERTEXCOLOR"			"0..1"
+
+// DYNAMIC:		"COMPRESSED_VERTS"		"0..1"
+// DYNAMIC:		"SKINNING"				"0..1"
+// DYNAMIC:		"MORPHING"				"0..1"
+
+#include "common_vs_fxc.h"
+// (not common_deferred_fxc.h: its SKIP lines are for shaders with a MODEL combo - without one they
+// left out every skinned and compressed combo, and a decal on a model would be an invalid combo)
+
+// the G-buffer depth, as gbuffer_vs30 writes it (WriteDepth of common_deferred_fxc.h)
+float DecalDepth( float3 worldpos, float3 eyepos, float3 eyeforward, float scale )
+{
+	return dot( eyeforward, worldpos - eyepos ) * scale;
+}
+
+static const bool g_bSkinning		= SKINNING ? true : false;
+
+const float3 g_vecOrigin					: register( SHADER_SPECIFIC_CONST_0 );
+const float3 g_vecForward					: register( SHADER_SPECIFIC_CONST_1 );
+const float g_flDepthScale					: register( SHADER_SPECIFIC_CONST_2 );
+
+const float3 cMorphTargetTextureDim			: register( SHADER_SPECIFIC_CONST_10 );
+const float4 cMorphSubrect					: register( SHADER_SPECIFIC_CONST_11 );
+sampler2D morphSampler						: register( s0 );
+
+struct VS_INPUT
+{
+	float4 vPos					: POSITION;
+	float4 vBoneWeights			: BLENDWEIGHT;
+	float4 vBoneIndices			: BLENDINDICES;
+	float4 vNormal				: NORMAL;
+	float4 vColor				: COLOR0;
+	float4 vTexCoord0			: TEXCOORD0;
+	float4 vTexCoord2			: TEXCOORD2;
+
+	float3 vPosFlex				: POSITION1;
+	float3 vNormalFlex			: NORMAL1;
+	float vVertexID				: POSITION2;
+};
+
+struct VS_OUTPUT
+{
+	float4 vProjPos				: POSITION;
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vWorldPos			: TEXCOORD1;
+	float4 vWorldNormal_Depth	: TEXCOORD2;
+	float4 vColor				: TEXCOORD3;
+};
+
+VS_OUTPUT main( const VS_INPUT In )
+{
+	VS_OUTPUT Out;
+
+	float4 vPosition = In.vPos;
+	float3 vNormal;
+	DecompressVertex_Normal( In.vNormal, vNormal );
+
+#if !MORPHING
+	ApplyMorph( In.vPosFlex, In.vNormalFlex, vPosition.xyz, vNormal );
+#else
+	ApplyMorph( morphSampler, cMorphTargetTextureDim, cMorphSubrect, In.vVertexID, In.vTexCoord2, vPosition.xyz, vNormal );
+#endif
+
+	float3 worldPos, worldNormal;
+	SkinPositionAndNormal( g_bSkinning, vPosition, vNormal, In.vBoneWeights, In.vBoneIndices, worldPos, worldNormal );
+	worldNormal = normalize( worldNormal );
+
+#if MORPHING
+	// (as the stock decal shader: off the flexed surface a little - depth precision)
+	worldPos += worldNormal * 0.05f * In.vTexCoord2.z;
+#endif
+
+	Out.vProjPos = mul( float4( worldPos, 1 ), cViewProj );
+	Out.vTexCoord = In.vTexCoord0.xy;
+	Out.vWorldPos = worldPos;
+	Out.vWorldNormal_Depth = float4( worldNormal, DecalDepth( worldPos, g_vecOrigin, g_vecForward, g_flDepthScale ) );
+#if VERTEXCOLOR
+	Out.vColor = In.vColor;
+#else
+	Out.vColor = 1.0f;
+#endif
+
+	return Out;
+}

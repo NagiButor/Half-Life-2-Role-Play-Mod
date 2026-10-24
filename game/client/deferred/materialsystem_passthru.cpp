@@ -69,6 +69,11 @@ CON_COMMAND( r_deferred_list_materials, "Dev: list loaded materials containing <
 				pTransmission ? pTransmission->GetFloatValue() : 0.0f, pLitface ? pLitface->GetIntValue() : 0,
 				( pRelief && pRelief->IsDefined() ) ? pRelief->GetStringValue() : "-" );
 		}
+		// (glass in the texture: its gloss map)
+		IMaterialVar *pGlassMask = pMat->FindVar( "$pbr_glassmask", &bFound, false );
+		IMaterialVar *pPhongMap = pMat->FindVar( "$phong_map", &bFound, false );
+		if ( pGlassMask && pGlassMask->GetIntValue() )
+			Msg( "[matlist]     glass in the texture, gloss map %s\n", ( pPhongMap && pPhongMap->IsDefined() && pPhongMap->IsTexture() ) ? pPhongMap->GetTextureValue()->GetName() : "-" );
 		nShown++;
 	}
 	Msg( "[matlist] %d of %d materials\n", nShown, nTotal );
@@ -137,6 +142,41 @@ static bool IsHairMaterial( const char *pszName )
 			return true;
 	}
 	return false;
+}
+
+//-----------------------------------------------------------------------------
+// HL2RPM: blended panes of glass - windows, doors, the glass of vehicles and lamps
+// (LightmappedGeneric / VertexLitGeneric with $translucent, glass by their name or their
+// $surfaceprop). As translucents they fell back to the forward shaders: lit by the lightmap
+// of one time of day, mirroring the engine's default cubemap on maps without built ones -
+// half opaque grey, greenish, as bright at night as by day. DEFERRED_GLASS draws them as
+// glass (stdshaders/deferred_glass.cpp).
+//-----------------------------------------------------------------------------
+static bool IsGlassMaterial( IMaterial *pMat, const char *pszShader )
+{
+	static ConVarRef r_deferred_glass( "r_deferred_glass" );
+	if ( !r_deferred_glass.IsValid() || !r_deferred_glass.GetBool() )
+		return false;
+	if ( !V_stristr( pszShader, "LightmappedGeneric" ) && !V_stristr( pszShader, "VertexLitGeneric" ) )
+		return false;
+	if ( !pMat->GetMaterialVarFlag( MATERIAL_VAR_TRANSLUCENT ) || pMat->GetMaterialVarFlag( MATERIAL_VAR_ADDITIVE )
+		|| pMat->GetMaterialVarFlag( MATERIAL_VAR_DECAL ) || pMat->GetMaterialVarFlag( MATERIAL_VAR_SELFILLUM )
+		|| pMat->GetMaterialVarFlag( MATERIAL_VAR_ALPHATEST ) )
+		return false;
+
+	const char *pszName = pMat->GetName();
+	static const char *const s_pszNot[] = { "effects/", "sprites/", "particle", "decals/", "overlays/", "glow", "beam", "water" };
+	for ( const char *pszKey : s_pszNot )
+	{
+		if ( V_stristr( pszName, pszKey ) )
+			return false;
+	}
+	if ( V_stristr( pszName, "glass" ) || V_stristr( pszName, "window" ) )
+		return true;
+
+	bool bFound = false;
+	IMaterialVar *pSurfaceProp = pMat->FindVar( "$surfaceprop", &bFound, false );
+	return bFound && pSurfaceProp && V_stristr( pSurfaceProp->GetStringValue(), "glass" ) != NULL;
 }
 
 //-----------------------------------------------------------------------------
@@ -405,6 +445,67 @@ static void DetectMapCubemaps()
 		Msg( "[deferred] map %s has no built cubemaps: $envmap materials mirror the light around them instead\n", szMap );
 }
 
+//-----------------------------------------------------------------------------
+// HL2RPM: what a decal of DecalModulate is (DEFERRED_DECAL), by its name: blood - a wet film,
+// glossy, mirroring its surroundings; a bullet hole - a rough crater with a parallax of its depth
+// (in metal a brighter, smoother rim); anything else rough and flat. A value the material names
+// itself is kept.
+//-----------------------------------------------------------------------------
+static void ApplyDecalPBR( KeyValues *pMsg, const char *pszMatname )
+{
+	const char *pszBase = pMsg->GetString( "$basetexture", "" );
+	const char *pszName = pszMatname ? pszMatname : "";
+	auto Has = [&]( const char *psz ) { return V_stristr( pszName, psz ) != NULL || V_stristr( pszBase, psz ) != NULL; };
+
+	int iKind = DECAL_RELIEF_NONE;
+	float flGloss = 0.3f, flF0 = 0.03f, flWet = 0.0f, flRelief = 0.0f, flBump = 1.0f;
+	if ( Has( "blood" ) || Has( "flesh" ) || Has( "gore" ) )
+	{
+		iKind = DECAL_RELIEF_FILM;
+		// (fresh blood is a film of liquid: a mirror - the reflections pass, hl2rpm_mirror.cpp, gives it
+		// the surroundings below a roughness of 0.12)
+		flGloss = 0.9f;
+		flF0 = 0.03f;
+		flWet = 1.0f;
+	}
+	else if ( Has( "shot" ) || Has( "bullet" ) || Has( "impact" ) || Has( "hole" ) )
+	{
+		iKind = DECAL_RELIEF_HOLE;
+		const bool bMetal = Has( "metal" );
+		flGloss = bMetal ? 0.55f : 0.12f;
+		flF0 = bMetal ? 0.25f : 0.035f;
+		flRelief = bMetal ? 0.05f : 0.1f;
+		flBump = 1.6f;
+	}
+
+	const char *pszRelief = NULL;
+	if ( iKind != DECAL_RELIEF_NONE && !pMsg->FindKey( "$decalnormal" ) && DeferredPOM_GetDecalRelief( pszBase, iKind, &pszRelief ) )
+		pMsg->SetString( "$decalnormal", pszRelief );
+
+	// the higher resolution version of its texture (materials/hd, hd_textures.py): sampled in its place,
+	// the size of the decal stays its stock texture's
+	static ConVarRef s_mat_picmip( "mat_picmip" );
+	if ( pszBase[0] && !pMsg->FindKey( "$hdtexture" ) && r_deferred_hd_textures.GetBool() && ( !s_mat_picmip.IsValid() || s_mat_picmip.GetInt() <= 0 ) )
+	{
+		char szHD[ MAX_PATH ], szFile[ MAX_PATH ];
+		V_snprintf( szHD, sizeof( szHD ), "hd/%s", pszBase );
+		V_FixSlashes( szHD, '/' );
+		V_snprintf( szFile, sizeof( szFile ), "materials/%s.vtf", szHD );
+		if ( filesystem->FileExists( szFile, "GAME" ) )
+			pMsg->SetString( "$hdtexture", szHD );
+	}
+	if ( !pMsg->FindKey( "$decal_gloss" ) )
+		pMsg->SetFloat( "$decal_gloss", flGloss );
+	if ( !pMsg->FindKey( "$decal_f0" ) )
+		pMsg->SetFloat( "$decal_f0", flF0 );
+	if ( !pMsg->FindKey( "$decal_wet" ) )
+		pMsg->SetFloat( "$decal_wet", flWet );
+	if ( !pMsg->FindKey( "$decal_relief" ) )
+		pMsg->SetFloat( "$decal_relief", flRelief );
+	if ( !pMsg->FindKey( "$decal_bumpscale" ) )
+		pMsg->SetFloat( "$decal_bumpscale", flBump );
+}
+
 static void ShaderReplaceReplMat( const char *szNewShadername, IMaterial *pMat, bool bVegetation = false, bool bHair = false )
 {
 	const char *pszOldShadername = pMat->GetShaderName();
@@ -608,6 +709,63 @@ static void ShaderReplaceReplMat( const char *szNewShadername, IMaterial *pMat, 
 		}
 	}
 
+	// HL2RPM: glass in the texture - the windows painted into a facade texture (building_template and
+	// its kin mirror a cubemap through their envmap mask), a pane that is a texture of its own (opaque,
+	// $surfaceprop glass). Without cubemaps they mirrored the flat light at the pixel: windows as dull
+	// as the wall around them. Their glass gets the gloss of glass (a gloss map of the mask, or the
+	// material's own gloss times it) and mirrors the sky and the scene around by the angle of the view
+	// - the weather pass does that for the smooth pixels (weather_post_ps30); the composite leaves
+	// its envmap out for them ($pbr_glassmask).
+	if ( bDeferredBrush && !bDecal && !bAlphaBlending && !bAlphaTesting && msg->FindKey( "$envmap" ) && pszMatname )
+	{
+		static ConVarRef r_deferred_glass_facades( "r_deferred_glass_facades" );
+		bool bFound = false;
+		IMaterialVar *pSurfaceProp = pMat->FindVar( "$surfaceprop", &bFound, false );
+		const bool bGlassProp = bFound && pSurfaceProp && V_stristr( pSurfaceProp->GetStringValue(), "glass" ) != NULL;
+		const bool bFacade = V_stristr( pszMatname, "building_template" ) || V_stristr( pszMatname, "courtyard_template" )
+			|| V_stristr( pszMatname, "storefront_template" ) || V_stristr( pszMatname, "trainstation_window" );
+		if ( r_deferred_glass_facades.IsValid() && r_deferred_glass_facades.GetBool() && ( bGlassProp || bFacade ) )
+		{
+			bool bGlass = false;
+			const char *pszMask = msg->GetString( "$envmapmask", "" );
+			const char *pszBase = msg->GetString( "$basetexture", "" );
+			const char *pszGloss = NULL;
+			if ( pszMask[0] )
+				bGlass = DeferredPOM_GetGlassGloss( pszMask, false, false, 0.12f, 0.95f, &pszGloss );
+			else if ( msg->GetInt( "$basealphaenvmapmask", 0 ) && pszBase[0] )
+				bGlass = DeferredPOM_GetGlassGloss( pszBase, true, true, 0.12f, 0.95f, &pszGloss );
+			else if ( msg->GetInt( "$normalmapalphaenvmapmask", 0 ) && msg->GetString( "$bumpmap", "" )[0] )
+			{
+				// (the alpha of the bump map scales the gloss already: $pbr_glossmask)
+				msg->SetFloat( "$pbr_roughness", 0.05f );
+				msg->SetInt( "$pbr_glossmask", 1 );
+				bGlass = true;
+			}
+			else if ( bGlassProp )
+			{
+				msg->SetFloat( "$pbr_roughness", 0.05f );
+				bGlass = true;
+			}
+			if ( bGlass )
+			{
+				if ( pszGloss )
+					msg->SetString( "$phong_map", pszGloss );
+				if ( !msg->FindKey( "$pbr_specular" ) )
+					msg->SetFloat( "$pbr_specular", 1.0f );
+				msg->SetInt( "$pbr_glassmask", 1 );
+			}
+		}
+	}
+
+	// HL2RPM: toxic slime (nature/toxicslime002a & co - not a water: a lightmapped surface of a slime
+	// volume) glows, as the radioactive waters do (water.cpp $water_glow): its own light, at night too
+	if ( bDeferredBrush && !bDecal && pszMatname && ( V_stristr( pszMatname, "toxicslime" ) || V_stristr( pszMatname, "nature/slime" )
+		|| V_stristr( pszMatname, "radioactive" ) ) && !msg->FindKey( "$selfillum" ) )
+	{
+		msg->SetInt( "$selfillum", 1 );
+		msg->SetString( "$selfillumtint", "[0.8 2.2 0.6]" );
+	}
+
 	// HL2RPM: the relief of a brush material - a height map made of its bump map, or (none) of its
 	// texture with a bump map of that too (deferred_pom.cpp; scripts/hl2rpm_relief.txt names the
 	// exceptions; a material that names a $pom_heightmap itself keeps its own). A blend of two
@@ -705,6 +863,15 @@ static void ShaderReplaceReplMat( const char *szNewShadername, IMaterial *pMat, 
 			msg->SetFloat( "$pbr_transmission", 0.3f );
 	}
 
+	// HL2RPM: blood and bullet holes as surfaces of their own
+	if ( !V_stricmp( szNewShadername, "DEFERRED_DECAL" ) )
+		ApplyDecalPBR( msg, pszMatname );
+
+	// HL2RPM: the glass of a model (DEFERRED_GLASS falls back to its stock shader without the
+	// deferred renderer, and draws with the model's vertex format)
+	if ( !V_stricmp( szNewShadername, "DEFERRED_GLASS" ) && pszOldShadername && V_stristr( pszOldShadername, "VertexLit" ) )
+		msg->SetInt( "$glass_model", 1 );
+
 	pMat->SetShaderAndParams( msg );
 	pMat->RefreshPreservingMaterialVars();
 }
@@ -741,6 +908,7 @@ IMaterial* CDeferredMaterialSystem::CreateMaterial( const char* pMaterialName, K
 }
 
 static ConVar r_deferred_material_replace( "r_deferred_material_replace", "1", 0, "Dev: replace stock shaders by the deferred ones (0 = off, for crash hunting)" );
+static ConVar r_deferred_decal_replace( "r_deferred_decal_replace", "1", 0, "Blood and bullet holes (DecalModulate) get the deferred decal shader: their own normal, gloss and reflection (takes effect as materials load)" );
 // (read at map load, when the materials are replaced)
 ConVar r_deferred_detail_sprites( "r_deferred_detail_sprites", "1", 0, "Detail sprites (grass) lit by the deferred lights: sun shadows, lamps (takes effect on map load)" );
 
@@ -785,6 +953,26 @@ static bool ReplaceMaterialShader( IMaterial *pMat )
 	if ( !V_strnicmp( pMat->GetName(), "detail/", 7 ) && V_stristr( pShaderName, "UnlitGeneric" ) && r_deferred_detail_sprites.GetBool() )
 	{
 		ShaderReplaceReplMat( "DEFERRED_BRUSH", pMat, true );
+		matCount++;
+		return true;
+	}
+
+	// HL2RPM: blood and bullet holes (DecalModulate) as surfaces of their own - DEFERRED_DECAL: their
+	// normal and gloss in the G-buffer, their reflection in the composite. Not the decals of glass:
+	// the pane is drawn after the deferred passes - the G-buffer under it is the wall behind.
+	if ( V_stristr( pShaderName, "DecalModulate" ) )
+	{
+		if ( !r_deferred_decal_replace.GetBool() || V_stristr( pMat->GetName(), "glass" ) )
+			return false;
+		ShaderReplaceReplMat( "DEFERRED_DECAL", pMat );
+		matCount++;
+		return true;
+	}
+
+	// HL2RPM: blended panes of glass as glass (see IsGlassMaterial)
+	if ( IsGlassMaterial( pMat, pShaderName ) )
+	{
+		ShaderReplaceReplMat( "DEFERRED_GLASS", pMat );
 		matCount++;
 		return true;
 	}

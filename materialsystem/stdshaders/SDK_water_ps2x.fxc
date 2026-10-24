@@ -49,6 +49,7 @@ const float3 g_EyePos				: register( c9 );
 const float4 g_FoamColor			: register( c10 );	// HL2RPM (water.cpp)
 const float4 g_BodyLight			: register( c11 );	// HL2RPM (water.cpp, water_ps2x_helper.h)
 const float4 g_BodyAmbient			: register( c12 );
+const float4 g_WaterKind			: register( c13 );	// HL2RPM (water.cpp): xyz how much faster than the average each color fades, w its own color's glow
 
 #define g_WaterFogStart			g_WaterFogParams.x
 #define g_WaterFogEndMinusStart	g_WaterFogParams.y
@@ -103,6 +104,7 @@ float4 main( PS_INPUT i ) : COLOR
 	params.vFoamColor = g_FoamColor;
 	params.vBodyLight = g_BodyLight;
 	params.vBodyAmbient = g_BodyAmbient;
+	params.vWaterKind = g_WaterKind;
 	params.vEyePos = g_EyePos;
 	params.vWorldPos = i.vWorldPos_projPosW.xyz;
 

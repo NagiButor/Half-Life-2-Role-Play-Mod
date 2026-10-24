@@ -40,6 +40,9 @@ BEGIN_VS_SHADER( WEATHER_POST, "" )
 			pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
 			pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
 			pShaderShadow->EnableTexture( SHADER_SAMPLER4, true );	// HL2RPM: the lit opaque scene (reflections)
+			// (the frame copy holds gamma colors: read linear, as this pass writes - read as they were, the
+			// mirrored scene came out brighter than the scene itself)
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER4, true );
 
 			// result = src.rgb + dest * src.a
 			EnableAlphaBlending( SHADER_BLEND_ONE, SHADER_BLEND_SRC_ALPHA );

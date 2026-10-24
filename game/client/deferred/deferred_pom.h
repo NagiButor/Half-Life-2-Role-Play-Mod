@@ -33,6 +33,21 @@ bool DeferredPOM_GetTextureRelief( const char *pszBaseTexture, int iRule, const 
 // next to one that has ($pom_heightmap / $bumpmap of that layer).
 bool DeferredPOM_GetFlatRelief( const char **ppszHeight, const char **ppszNormal );
 
+// The relief of a decal (DEFERRED_DECAL), made of its DecalModulate texture: a normal map (rgb)
+// with the height in alpha - a hole sinks where it is dark, blood stands up as a film.
+enum
+{
+	DECAL_RELIEF_NONE = 0,
+	DECAL_RELIEF_HOLE,
+	DECAL_RELIEF_FILM,
+};
+bool DeferredPOM_GetDecalRelief( const char *pszBaseTexture, int iKind, const char **ppszNormalHeight );
+
+// Glass in a texture (the windows of a facade texture): a gloss map ($phong_map) of its envmap mask -
+// the alpha of the texture (inverted: $basealphaenvmapmask) or its red ($envmapmask) - flGlass where
+// it mirrors, flGloss elsewhere. False = no glass in the mask, or unreadable.
+bool DeferredPOM_GetGlassGloss( const char *pszTexture, bool bAlpha, bool bInvert, float flGloss, float flGlass, const char **ppszGloss );
+
 // (the textures and their regenerators; before the material system goes)
 void DeferredPOM_Shutdown();
 

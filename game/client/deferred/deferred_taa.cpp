@@ -46,8 +46,17 @@ static ConVar r_deferred_taa_history_min( "r_deferred_taa_history_min", "0.75", 
 	"TAA: weight of the history where it had to be pulled toward this frame (something moved)", true, 0.0f, true, 0.98f );
 static ConVar r_deferred_taa_clip( "r_deferred_taa_clip", "1.25", 0,
 	"TAA: how far the history may differ from the pixel's neighbourhood (standard deviations): less = less ghosting, more = smoother", true, 0.25f, true, 4.0f );
-static ConVar r_deferred_taa_motion( "r_deferred_taa_motion", "24", 0,
-	"TAA: motion (pixels per frame) at which the history weight is lowered by a fifth (resampling softens it)", true, 1.0f, true, 1000.0f );
+// HL2RPM: a moving camera resamples the history every frame and each resampling softens it a little:
+// walking sideways (~3 pixels a frame on map_v11) the textures went soft (sharpness -10 .. 15 %) and
+// sharp again when standing - the full lowering of the history came at 24 pixels a frame and was a
+// fifth. Now all of it from 2 pixels, to 0.6 of the weight: moving as sharp as standing (measured on
+// map_v11, strafing). Giving the frame's own fine detail back (motion_detail) over-sharpens - off.
+static ConVar r_deferred_taa_motion( "r_deferred_taa_motion", "2", 0,
+	"TAA: motion (pixels per frame) from which the history weight is lowered fully (r_deferred_taa_motion_history)", true, 0.5f, true, 1000.0f );
+static ConVar r_deferred_taa_motion_history( "r_deferred_taa_motion_history", "0.6", 0,
+	"TAA: the history weight in motion, in parts of its weight still (resampling softens it)", true, 0.0f, true, 1.0f );
+static ConVar r_deferred_taa_motion_detail( "r_deferred_taa_motion_detail", "0", 0,
+	"TAA: how much of this frame's fine detail (its difference from the 3x3 mean) is given back in motion", true, 0.0f, true, 1.0f );
 static ConVar r_deferred_taa_jitter( "r_deferred_taa_jitter", "1", 0,
 	"TAA: sub-pixel jitter of the projection (0 = none: only temporal smoothing, for comparison)", true, 0.0f, true, 2.0f );
 static ConVar r_deferred_taa_mipbias( "r_deferred_taa_mipbias", "-0.5", 0,
@@ -388,6 +397,8 @@ void DeferredTAA_Draw( const CViewSetup &view )
 	static int s_iDitherFrame = 0;
 	s_iDitherFrame = ( s_iDitherFrame + 1 ) & 1023;
 	data.vecParams3.x = (float)s_iDitherFrame;
+	data.vecParams3.y = r_deferred_taa_motion_history.GetFloat();
+	data.vecParams3.z = r_deferred_taa_motion_detail.GetFloat();
 	QUEUE_FIRE( CommitTAAData, data );
 
 	CMatRenderContextPtr pRenderContext( materials );

@@ -64,6 +64,11 @@ struct defParms_composite
 	int iBaseTransform2;
 	int iTreeSway;
 	int iTransmission;
+	// HL2RPM: glass in the texture ($pbr_glassmask, set by the client: the windows of a facade, a pane
+	// painted into a texture) - smooth where its envmap mask is (the G-buffer's gloss map); what it
+	// mirrors comes from the weather pass (the sky by the direction, the scene around), not from the
+	// envmap here, and its dark texels (the windows) keep their glint
+	int iGlassMask;
 	// HL2RPM: the detail texture ($detail, $detailscale, $detailblendfactor, $detailblendmode)
 	int iDetail;
 	int iDetailScale;

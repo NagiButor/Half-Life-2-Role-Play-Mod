@@ -1,0 +1,246 @@
+//========= HL2RPM ============================================================//
+//
+// DEFERRED_GLASS (deferred_glass.cpp): panes of glass - windows, doors, the glass of
+// vehicles and lamps - as glass. What lies behind is seen through it; it mirrors its
+// surroundings by the angle of the view - a few % from the front, most of it at a
+// glancing angle (the env BRDF of its roughness): outdoors the sky above the horizon
+// and the ground below, under a roof a dim room; the sun glints on it, in the shadow
+// of the cascades; and the dirt and smudges of its texture are lit like a surface of
+// their own - by the sun (through the pane from either side) and the sky.
+//
+// The stock panes were half opaque grey: the texture's alpha (~0.5) was all that made
+// a pane visible. Here only a part of it is dirt on the glass (g_vecGlass.w); what is
+// opaque in the texture (the frames painted into it) stays opaque.
+//
+// Premultiplied alpha (blend ONE, ONE_MINUS_SRC_ALPHA): the color is what the pane adds,
+// the alpha how much of what is behind it hides - its dirt and its reflection.
+//
+//=============================================================================//
+
+// STATIC:		"VERTEXALPHA"			"0..1"
+
+// DYNAMIC:		"PIXELFOGTYPE"			"0..1"
+
+#include "common_ps_fxc.h"
+#include "common_deferred_fxc.h"
+#include "hl2rpm_sky_fxc.h"
+
+sampler sBase						: register( s0 );	// the dirt, the tint and the frames of the pane (alpha: how much it covers)
+sampler sShadowDepth				: register( s1 );	// the sun's cascades (hardware compare)
+sampler sRainDepth					: register( s2 );	// the top-down rain map (hardware compare): a roof above?
+sampler sDepth						: register( s3 );	// the G-buffer depth of the main view
+sampler sScene						: register( s4 );	// the opaque scene (the engine copies it at the start of the translucent pass)
+sampler sSkyView					: register( s5 );	// the sky-view LUT of the procedural sky
+
+const float3 g_vecEye				: register( c0 );
+const float3 g_vecLightDir			: register( c1 );	// direction to the sun (the moon at night)
+
+// the first three cascades of the sun, laid out as CommitShadowProjectionConstants_Ortho_Composite
+// does (deferred_glass.cpp sets only these: c29 is the engine's fog color)
+const float4x3 g_matOrtho[3]		: register( c2 );
+const float4 g_vecUVTransform[3]	: register( c26 );
+
+const float4 g_vecLightColor		: register( c58 );	// rgb the sun's light, w 1 = look up its shadow (0: the 3D skybox - unshadowed)
+const float4 g_vecSkyZenith			: register( c59 );	// rgb the light of the sky straight above, w how open the place is without a rain map
+const float4 g_vecSkyHorizon		: register( c60 );	// rgb the light of the sky at the horizon
+const float4 g_vecGround			: register( c61 );	// rgb the ground mirrored below the horizon
+const float4 g_vecGlass				: register( c62 );	// x roughness, y reflectance from the front (F0), z scale of the reflection, w how much of the texture's opacity is dirt
+const float4 g_vecFogParams			: register( c63 );
+const float4 g_matRainMap[3]		: register( c64 );	// rows of world -> rain map texture (c64 - c66)
+const float4 g_vecRain				: register( c67 );	// x "covered" margin (rain map depth units), y 1 = rain map valid, z what a pane under a roof mirrors (of the sky), w debug
+const float4 g_vecGlass2			: register( c68 );	// x scale of the sun's glint, y the opacity from which the texture is a frame (not glass), z the sky's light for the dirt (scale)
+const float4 g_matToScreen[4]		: register( c69 );	// world -> screen texture coordinates of the main view (c69 - c72)
+const float4 g_vecForward			: register( c73 );	// xyz the main view's forward (its G-buffer depth is along it), w 1 = trace reflections in the scene
+const float4 g_vecSSR				: register( c74 );	// x steps, y strength, z how thick a surface is taken to be (units), w first step
+const float4 g_vecSkyLightDir		: register( c75 );	// xyz the sun or the moon the sky is lit by
+const float4 g_vecSkySeen			: register( c76 );	// x exposure of the sky, y cloud coverage, z how much the clouds hide, w 1 = the sky-view LUT is valid
+
+struct PS_INPUT
+{
+	float2 vTexCoord				: TEXCOORD0;
+	float3 vWorldPos				: TEXCOORD1;
+	float4 vWorldNormal_Depth		: TEXCOORD2;
+	float4 vColor					: TEXCOORD3;
+};
+
+// the sun at a point: the first cascade that holds it
+float SunShadow( float3 p )
+{
+	[unroll]
+	for ( int c = 0; c < 3; c++ )
+	{
+		const float3 uvz = mul( float4( p, 1 ), g_matOrtho[c] );
+		if ( all( uvz.xy > 0.003f ) && all( uvz.xy < 0.997f ) )
+		{
+			const float2 uv = uvz.xy * g_vecUVTransform[c].zw + g_vecUVTransform[c].xy;
+			return tex2Dlod( sShadowDepth, float4( uv, uvz.z - 0.0005f, 0 ) ).x;
+		}
+	}
+	return 1.0f;
+}
+
+// something above the point in the top-down rain map (1 = under a roof)
+float Covered( float3 p )
+{
+	const float4 wp = float4( p, 1.0f );
+	const float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
+	if ( any( uvz.xy < 0.0f ) || any( uvz.xy > 1.0f ) )
+		return 0.0f;
+	return 1.0f - tex2Dlod( sRainDepth, float4( uvz.xy, uvz.z - g_vecRain.x, 0 ) ).x;
+}
+
+// the env BRDF of a roughness (Karis' fit, as EnvFresnel of common_deferred_fxc.h): what a surface
+// mirrors of its surroundings is F0 * x + y
+float2 EnvBRDF( float3 N, float3 V, float roughness )
+{
+	const float4 r = roughness * float4( -1.0f, -0.0275f, -0.572f, 0.022f ) + float4( 1.0f, 0.0425f, 1.04f, -0.04f );
+	const float a004 = min( r.x * r.x, exp2( -9.28f * saturate( dot( N, V ) ) ) ) * r.x + r.y;
+	return float2( -1.04f, 1.04f ) * a004 + r.zw;
+}
+
+// the sky by the direction mirrored: from its horizon to its zenith above, the ground below
+// (the horizon softer the rougher the pane)
+float3 SkyMirrored( float3 R, float flRoughness )
+{
+	// (the sky as it is seen - its light, the ambient, is many times dimmer than the sky on the screen)
+	const float3 vecSky = ( g_vecSkySeen.w > 0.5f ) ? HL2RPM_SkySeen( sSkyView, R, g_vecSkyLightDir.xyz, g_vecSkySeen )
+		: lerp( g_vecSkyHorizon.rgb, g_vecSkyZenith.rgb, sqrt( saturate( R.z ) ) );
+	const float flSoft = 0.04f + flRoughness * 0.5f;
+	return lerp( g_vecGround.rgb, vecSky, smoothstep( -flSoft, flSoft, R.z ) );
+}
+
+float2 ToScreen( float3 p, out float w )
+{
+	const float4 q = float4( p, 1.0f );
+	w = dot( g_matToScreen[3], q );
+	return float2( dot( g_matToScreen[0], q ), dot( g_matToScreen[1], q ) ) / max( w, 1e-3f );
+}
+
+// what the pane mirrors of the scene around: a march along the mirrored ray (steps growing with
+// the distance) against the main view's depth; the first point behind a visible surface - by less
+// than its thickness, or the ray only passed behind a thing in front of it - refined by bisection,
+// the scene's color there. conf fades toward the screen's edges and with the length of the ray.
+float3 TraceScene( float3 P, float3 R, out float conf )
+{
+	conf = 0.0f;
+	float tPrev = 0.0f;
+	float t = g_vecSSR.w;
+	const int nSteps = (int)g_vecSSR.x;
+	[loop]
+	for ( int i = 0; i < 20; i++ )
+	{
+		if ( i >= nSteps )
+			break;
+		const float3 q = P + R * t;
+		float w;
+		const float2 uv = ToScreen( q, w );
+		if ( w < 1.0f || any( uv < 0.0f ) || any( uv > 1.0f ) )
+			break;
+		const float d = tex2Dlod( sDepth, float4( uv, 0, 0 ) ).x;
+		const float behind = dot( g_vecForward.xyz, q - g_vecEye ) - d;
+		if ( d > 0.1f && behind > 0.0f && behind < g_vecSSR.z + ( t - tPrev ) * 1.2f )
+		{
+			float a = tPrev, b = t;
+			float2 uvHit = uv;
+			[unroll]
+			for ( int k = 0; k < 4; k++ )
+			{
+				const float m = ( a + b ) * 0.5f;
+				const float3 qm = P + R * m;
+				float wm;
+				const float2 uvm = ToScreen( qm, wm );
+				const float dm = tex2Dlod( sDepth, float4( uvm, 0, 0 ) ).x;
+				if ( dot( g_vecForward.xyz, qm - g_vecEye ) - dm > 0.0f )
+				{
+					b = m;
+					uvHit = uvm;
+				}
+				else
+					a = m;
+			}
+			const float2 edge = min( uvHit, 1.0f - uvHit );
+			conf = saturate( min( edge.x, edge.y ) * 10.0f ) * saturate( 1.0f - i / max( (float)nSteps, 1.0f ) * 0.7f );
+			return tex2Dlod( sScene, float4( uvHit, 0, 0 ) ).rgb;
+		}
+		tPrev = t;
+		t = t * 1.35f + 6.0f;
+	}
+	return 0.0f;
+}
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	const float4 tex = tex2D( sBase, In.vTexCoord );
+	float flAlpha = tex.a;
+#if VERTEXALPHA
+	flAlpha *= In.vColor.a;
+#endif
+	// the dirt on the glass: a part of the stock opacity; the frames painted into the texture
+	// (opaque) stay what they are
+	const float flFrame = smoothstep( g_vecGlass2.y - 0.15f, g_vecGlass2.y, flAlpha );
+	const float flDirt = saturate( lerp( flAlpha * g_vecGlass.w, flAlpha, flFrame ) );
+
+	const float3 V = normalize( g_vecEye - In.vWorldPos );
+	float3 N = normalize( In.vWorldNormal_Depth.xyz );
+	// (a pane is seen from both sides)
+	N = ( dot( N, V ) < 0.0f ) ? -N : N;
+	const float3 R = reflect( -V, N );
+	const float flRoughness = g_vecGlass.x;
+
+	// outdoors: nothing above the point in front of the pane - on the side of the eye. A window
+	// seen from the street mirrors the sky, the same window seen from inside the room mirrors the room.
+	float flOpen = g_vecSkyZenith.w;
+	[branch]
+	if ( g_vecRain.y > 0.5f )
+		flOpen = 1.0f - Covered( In.vWorldPos + N * 24.0f );
+
+	// what it mirrors
+	const float3 vecRoom = ( g_vecSkyZenith.rgb + g_vecSkyHorizon.rgb ) * ( 0.5f * g_vecRain.z );
+	float3 vecEnv = lerp( vecRoom, SkyMirrored( R, flRoughness ), flOpen );
+	const float2 vecEnvBRDF = EnvBRDF( N, V, flRoughness );
+	const float flFresnel = saturate( g_vecGlass.y * vecEnvBRDF.x + vecEnvBRDF.y );
+
+	// ...and what of the scene the main view sees: the houses across the street, the room behind the eye
+	[branch]
+	if ( g_vecForward.w > 0.5f && flFresnel * g_vecGlass.z > 0.02f )
+	{
+		float flConf;
+		const float3 vecScene = TraceScene( In.vWorldPos + N * 1.0f, R, flConf );
+		vecEnv = lerp( vecEnv, vecScene, flConf * g_vecSSR.y );
+	}
+
+	// the sun: its glint (GGX, the growth toward glancing angles included) in the shadow of the cascades
+	const float flSunN = dot( N, g_vecLightDir );
+	float flSun = 1.0f;
+	[branch]
+	if ( g_vecLightColor.w > 0.5f )
+		flSun = SunShadow( In.vWorldPos + g_vecLightDir * 2.0f );
+	const float flGlint = SpecularGGX( N, V, g_vecLightDir, max( flRoughness, 0.03f ) ) * saturate( flSunN ) * flSun
+		* g_vecGlass.y * g_vecGlass2.x;
+	const float3 vecReflect = vecEnv * ( flFresnel * g_vecGlass.z ) + g_vecLightColor.rgb * flGlint;
+
+	// the dirt: lit by the sun (through the pane, from either side) and the light around
+	const float3 vecAround = lerp( vecRoom, ( g_vecSkyZenith.rgb + g_vecSkyHorizon.rgb + g_vecGround.rgb ) * ( 0.333f * g_vecGlass2.z ), flOpen );
+	const float3 vecDirt = tex.rgb * ( g_vecLightColor.rgb * ( abs( flSunN ) * flSun ) + vecAround );
+
+	float4 result;
+	result.rgb = vecDirt * flDirt + vecReflect * ( 1.0f - flDirt );
+	result.a = saturate( flDirt + flFresnel * g_vecGlass.z * ( 1.0f - flDirt ) );
+
+	// r_deferred_glass_debug: 1 outdoors (green) / under a roof (red), 2 the sun on it, 3 the reflectance
+	if ( g_vecRain.w > 0.5f )
+	{
+		const float3 vecDebug = ( g_vecRain.w < 1.5f ) ? float3( 1.0f - flOpen, flOpen, 0.0f )
+			: ( ( g_vecRain.w < 2.5f ) ? flSun.xxx : flFresnel.xxx );
+		return float4( vecDebug, 1.0f );
+	}
+
+#if PIXELFOGTYPE == 0
+	// (squared like the composite's fog; premultiplied: the fog takes the share the pane covers)
+	float flFog = saturate( CalcPixelFogFactor( PIXELFOGTYPE, g_vecFogParams, g_vecEye, In.vWorldPos, 0 ) );
+	flFog *= flFog;
+	result.rgb = lerp( result.rgb, g_LinearFogColor * result.a, flFog );
+#endif
+
+	return result;
+}

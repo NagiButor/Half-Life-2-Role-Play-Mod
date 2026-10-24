@@ -1674,6 +1674,11 @@ void CBasePlayer::CalcPlayerView( Vector& eyeOrigin, QAngle& eyeAngles, float& f
 	m_flObserverChaseDistance = 0.0;
 #endif
 
+#if defined( CLIENT_DLL )
+	// HL2RPM: dead - the eyes of our own body (its ragdoll)
+	CalcDeathBodyView( eyeOrigin, eyeAngles );
+#endif
+
 	// calc current FOV
 	fov = GetFOV();
 }

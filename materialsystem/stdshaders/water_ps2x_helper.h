@@ -29,6 +29,7 @@ struct DrawWater_params_t
 	float4 vFoamColor;			// HL2RPM: rgb foam in the current light (linear), a its strength (0 = none)
 	float4 vBodyLight;			// HL2RPM: x 1 / the light of the open sky and sun of the moment, y the most the water's own color is lit by (x that light), z density of the water's fog (1 = the material's), w 1 = by the path of the view ray, 0 = by the depth alone
 	float4 vBodyAmbient;		// HL2RPM: rgb the least light of the water's own color where the sky is in sight (x the same: the sky light and what the water passes on from where the sun reaches it), w uv scale of the sky visibility target
+	float4 vWaterKind;			// HL2RPM: xyz how much faster than the average each color fades on the way through the water, w how much its own color glows (radioactive)
 };
 
 // HL2RPM: with the deferred renderer the alpha of the refraction view is the depth under the
@@ -259,7 +260,11 @@ void DrawWater( in DrawWater_params_t i,
 	const float flFogBlend = ( i.fRefractDepthEncoded > 0.5f )
 		? 1.0f - ( 1.0f - waterFogDepthValue ) * ( 1.0f - saturate( waterFogDepthValue - 0.05f ) )
 		: saturate( waterFogDepthValue - 0.05f );
-	vRefractColor.rgb = lerp( vRefractColor.rgb, i.waterFogColor.rgb * LINEAR_LIGHT_SCALE * vBodyLight, flFogBlend );
+	// HL2RPM: each color fades at its own rate (the kind of water, water.cpp): clear water loses the
+	// red first and turns blue-green with depth, silt water loses the blue and browns; a radioactive
+	// water's own color glows in the dark as well
+	const float3 vFogBlend = 1.0f - pow( saturate( 1.0f - flFogBlend ).xxx, i.vWaterKind.xyz );
+	vRefractColor.rgb = lerp( vRefractColor.rgb, i.waterFogColor.rgb * LINEAR_LIGHT_SCALE * max( vBodyLight, i.vWaterKind.www ), vFogBlend );
 #else
 	float waterFogFactor = saturate( ( i.vProjPos.z - i.fWaterFogStart ) / i.fWaterFogEndMinusStart );
 	vRefractColor = lerp( vRefractColor, i.waterFogColor * LINEAR_LIGHT_SCALE, waterFogFactor );

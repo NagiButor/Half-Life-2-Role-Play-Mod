@@ -55,6 +55,65 @@ static ConVar r_deferred_water_debugview( "r_deferred_water_debugview", "0", FCV
 static ConVar r_deferred_water_scatter( "r_deferred_water_scatter", "0.25", FCVAR_ARCHIVE,
 	"Water: how much of the open daylight its own color keeps in a shadow under the open sky (the light a murky water passes on inside itself)", true, 0.0f, true, 1.0f );
 
+// HL2RPM: what kind of water a material is (water_ps2x_helper.h): the colors fade at their own rates
+// on the way through it - clear water loses the red first and turns blue-green with depth, silt water
+// loses the blue and browns - how dense it is, and whether its own color glows (radioactive). A
+// material may say it itself ($water_absorb, $water_glow); the stock ones are told by their name,
+// then by their fog distance.
+static ConVar r_deferred_water_types( "r_deferred_water_types", "1", 0, "Water: kinds of water (clear, murky, the sea, radioactive) - the colors fade at their own rates, density, glow" );
+
+static void ClassifyWater( const char *pszName, float flFogEnd, float *pAbsorb, float &flGlow )
+{
+	struct WaterKind_t { const char *pszKey; float r, g, b, flDensity, flGlow; };
+	static const WaterKind_t s_Kinds[] =
+	{
+		// radioactive, toxic: the green passes, its color glows
+		{ "radioactive",	3.0f, 0.45f, 2.6f, 2.2f, 1.6f },
+		{ "toxic",			3.0f, 0.45f, 2.6f, 2.2f, 1.6f },
+		{ "slime",			3.0f, 0.45f, 2.6f, 2.2f, 1.6f },
+		{ "acid",			3.0f, 0.45f, 2.6f, 2.2f, 1.6f },
+		// silt, sewage, swamps: the blue goes first, dense
+		{ "murky",			0.85f, 1.0f, 1.35f, 1.6f, 0.0f },
+		{ "dirty",			0.85f, 1.0f, 1.35f, 1.6f, 0.0f },
+		{ "sewer",			0.85f, 1.0f, 1.35f, 1.5f, 0.0f },
+		{ "swamp",			0.8f, 1.0f, 1.45f, 1.9f, 0.0f },
+		{ "mud",			0.8f, 1.0f, 1.45f, 1.9f, 0.0f },
+		{ "sludge",			0.8f, 1.0f, 1.45f, 2.2f, 0.0f },
+		{ "tunnel",			0.9f, 1.0f, 1.25f, 1.5f, 0.0f },
+		{ "canals03",		0.9f, 1.0f, 1.25f, 1.3f, 0.0f },
+		// clear water, the sea: the red goes first - blue-green with depth
+		{ "clear",			2.6f, 1.15f, 0.7f, 1.0f, 0.0f },
+		{ "pool",			2.6f, 1.15f, 0.7f, 1.0f, 0.0f },
+		{ "coast",			2.4f, 1.1f, 0.8f, 1.0f, 0.0f },
+		{ "sea",			2.4f, 1.1f, 0.8f, 1.0f, 0.0f },
+		{ "ocean",			2.4f, 1.1f, 0.8f, 1.0f, 0.0f },
+		{ "lake",			2.0f, 1.05f, 0.85f, 1.0f, 0.0f },
+		{ "river",			1.8f, 1.0f, 0.9f, 1.15f, 0.0f },
+	};
+	for ( const WaterKind_t &k : s_Kinds )
+	{
+		if ( pszName && V_stristr( pszName, k.pszKey ) )
+		{
+			pAbsorb[0] = k.r; pAbsorb[1] = k.g; pAbsorb[2] = k.b; pAbsorb[3] = k.flDensity;
+			flGlow = k.flGlow;
+			return;
+		}
+	}
+	flGlow = 0.0f;
+	if ( flFogEnd >= 500.0f )
+	{
+		pAbsorb[0] = 2.4f; pAbsorb[1] = 1.1f; pAbsorb[2] = 0.75f; pAbsorb[3] = 1.0f;
+	}
+	else if ( flFogEnd <= 200.0f )
+	{
+		pAbsorb[0] = 0.85f; pAbsorb[1] = 1.0f; pAbsorb[2] = 1.35f; pAbsorb[3] = 1.4f;
+	}
+	else
+	{
+		pAbsorb[0] = 1.5f; pAbsorb[1] = 1.0f; pAbsorb[2] = 0.85f; pAbsorb[3] = 1.0f;
+	}
+}
+
 DEFINE_FALLBACK_SHADER( SDK_Water, SDK_Water_DX9_HDR )
 
 BEGIN_VS_SHADER( SDK_Water_DX90, 
@@ -90,6 +149,9 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 		SHADER_PARAM( SCROLL1, SHADER_PARAM_TYPE_COLOR, "", "" )
 		SHADER_PARAM( SCROLL2, SHADER_PARAM_TYPE_COLOR, "", "" )
 		SHADER_PARAM( BLURREFRACT, SHADER_PARAM_TYPE_BOOL, "0", "Cause the refraction to be blurry on ps2b hardware" )
+		// HL2RPM: the kind of water (r_deferred_water_types)
+		SHADER_PARAM( WATER_ABSORB, SHADER_PARAM_TYPE_VEC4, "[0 0 0 0]", "how much faster than the average each color fades in the water (rgb), w its density (x the material's fog); not set = by the material's name" )
+		SHADER_PARAM( WATER_GLOW, SHADER_PARAM_TYPE_FLOAT, "-1", "how much the water's own color glows (radioactive: 1 .. 2); -1 = by the material's name" )
 	END_SHADER_PARAMS
 
 	SHADER_INIT_PARAMS()
@@ -133,6 +195,17 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 		if( !params[REFLECTBLENDFACTOR]->IsDefined() )
 		{
 			params[REFLECTBLENDFACTOR]->SetFloatValue( 1.0f );
+		}
+
+		// HL2RPM: the kind of water - what the material says, or by its name and fog
+		{
+			float flAbsorb[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+			float flGlow = 0.0f;
+			ClassifyWater( pMaterialName, params[FOGEND]->IsDefined() ? params[FOGEND]->GetFloatValue() : 300.0f, flAbsorb, flGlow );
+			if ( !params[WATER_ABSORB]->IsDefined() )
+				params[WATER_ABSORB]->SetVecValue( flAbsorb, 4 );
+			if ( !params[WATER_GLOW]->IsDefined() || params[WATER_GLOW]->GetFloatValue() < 0.0f )
+				params[WATER_GLOW]->SetFloatValue( flGlow );
 		}
 
 		// By default, we're force expensive on dx9.  NO WE DON'T!!!!
@@ -451,7 +524,8 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 				c10[0] = vecFoam.x;
 				c10[1] = vecFoam.y;
 				c10[2] = vecFoam.z;
-				c10[3] = 0.7f;
+				// (off: the user found the shore foam out of place in the setting - 2026-10-24)
+				c10[3] = 0.0f;
 			}
 			pShaderAPI->SetPixelShaderConstant( 10, c10, 1 );
 
@@ -469,6 +543,12 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 			if ( GetDeferredExt()->IsDeferredLightingEnabled() )
 			{
 				c11[2] = r_deferred_water_density.GetFloat();
+				if ( r_deferred_water_types.GetBool() )
+				{
+					float flAbsorb[4];
+					params[WATER_ABSORB]->GetVecValue( flAbsorb, 4 );
+					c11[2] *= ( flAbsorb[3] > 0.0f ) ? flAbsorb[3] : 1.0f;
+				}
 				c11[3] = r_deferred_water_viewangle.GetBool() ? 1.0f : 0.0f;
 				if ( r_deferred_water_debugview.GetInt() > 0 )
 					c11[3] = 1.0f + r_deferred_water_debugview.GetInt();
@@ -515,6 +595,23 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 				pShaderAPI->BindStandardTexture( SHADER_SAMPLER7, TEXTURE_WHITE );
 			pShaderAPI->SetPixelShaderConstant( 11, c11, 1 );
 			pShaderAPI->SetPixelShaderConstant( 12, c12, 1 );
+
+			// HL2RPM: the kind of water (water_ps2x_helper.h): xyz how much faster than the average each
+			// color fades on the way through it; w how much its own color glows
+			float c13[4] = { 1.0f, 1.0f, 1.0f, 0.0f };
+			if ( GetDeferredExt()->IsDeferredLightingEnabled() && r_deferred_water_types.GetBool() )
+			{
+				float flAbsorb[4];
+				params[WATER_ABSORB]->GetVecValue( flAbsorb, 4 );
+				if ( flAbsorb[0] > 0.0f && flAbsorb[1] > 0.0f && flAbsorb[2] > 0.0f )
+				{
+					c13[0] = flAbsorb[0];
+					c13[1] = flAbsorb[1];
+					c13[2] = flAbsorb[2];
+				}
+				c13[3] = MAX( params[WATER_GLOW]->GetFloatValue(), 0.0f );
+			}
+			pShaderAPI->SetPixelShaderConstant( 13, c13, 1 );
 
 			pShaderAPI->SetPixelShaderFogParams( 8 );
 

@@ -57,3 +57,7 @@ hl2rpm_taa_ps30.fxc
 hl2rpm_depthalpha_ps30.fxc
 weather_motes_vs30.fxc
 weather_motes_ps30.fxc
+deferred_decal_vs30.fxc
+deferred_decal_ps30.fxc
+deferred_glass_ps30.fxc
+hl2rpm_mirror_ps30.fxc

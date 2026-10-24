@@ -106,6 +106,12 @@ CBaseEntity* FindEntity( edict_t *pEdict, char *classname)
 void ClientGamePrecache( void )
 {
 	CBaseEntity::PrecacheModel("models/player.mdl");
+#ifdef MAPBASE
+	// HL2RPM: the player model the mod (or the default, a citizen) gives the player
+	extern char g_szDefaultPlayerModel[MAX_PATH];
+	if ( g_szDefaultPlayerModel[0] )
+		CBaseEntity::PrecacheModel( g_szDefaultPlayerModel );
+#endif
 	CBaseEntity::PrecacheModel( "models/gibs/agibs.mdl" );
 	CBaseEntity::PrecacheModel ("models/weapons/v_hands.mdl");
 

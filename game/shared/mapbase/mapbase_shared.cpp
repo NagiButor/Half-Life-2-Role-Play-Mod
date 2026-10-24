@@ -250,7 +250,10 @@ public:
 			}
 
 #ifdef GAME_DLL
-			Q_strncpy( g_szDefaultPlayerModel, gameinfo->GetString( "player_default_model", "models/player.mdl" ), sizeof( g_szDefaultPlayerModel ) );
+			// HL2RPM: a citizen when the mod names none (models/player.mdl is the grey placeholder of HL2 - with
+			// player_default_legs it was the body seen looking down and in mirrors; Mapbase's male_shared.mdl
+			// brings the citizens the player animations)
+			Q_strncpy( g_szDefaultPlayerModel, gameinfo->GetString( "player_default_model", "models/humans/group01/male_07.mdl" ), sizeof( g_szDefaultPlayerModel ) );
 			g_bDefaultPlayerLegs = gameinfo->GetBool( "player_default_legs", false );
 			g_bDefaultPlayerDrawExternally = gameinfo->GetBool( "player_default_draw_externally", false );
 

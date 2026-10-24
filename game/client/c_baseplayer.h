@@ -508,6 +508,11 @@ protected:
 	virtual float		GetDeathCamInterpolationTime();
 
 	virtual void		CalcDeathCamView( Vector& eyeOrigin, QAngle& eyeAngles, float& fov );
+public:
+	// HL2RPM: after death the view is our own body's - the eyes of the player's ragdoll
+	void				CalcDeathBodyView( Vector& eyeOrigin, QAngle& eyeAngles );
+protected:
+	float				m_flDeathBodyViewStart;
 	virtual void		CalcRoamingView(Vector& eyeOrigin, QAngle& eyeAngles, float& fov);
 	virtual void		CalcFreezeCamView( Vector& eyeOrigin, QAngle& eyeAngles, float& fov );
 

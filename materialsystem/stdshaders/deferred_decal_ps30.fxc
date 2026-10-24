@@ -1,0 +1,180 @@
+//========= HL2RPM ============================================================//
+//
+// DEFERRED_DECAL (deferred_decal.cpp): blood and bullet holes (the DecalModulate
+// decals) as surfaces of their own. Three passes:
+//
+//   0  the G-buffer: where the decal covers, its own normal (the relief the client
+//      made of its texture - the crater of a hole, the film of blood) and its gloss
+//      (wet blood mirrors, a hole in plaster is rough). The light passes then light
+//      it as what it is: the sun glints on blood, a lamp shows a hole's rim.
+//   1  the color: as the stock decal, the surface times twice the texture (grey =
+//      nothing), through the parallax of its relief (a hole looks deep).
+//   2  the reflection, added: the light buffer's specular (at the decal's gloss)
+//      times its reflectance, and the surroundings mirrored by the wet ones.
+//
+// The coverage of a DecalModulate texture is how dark it is: grey 0.5 changes
+// nothing, its darkest channel says how much.
+//
+//=============================================================================//
+
+// STATIC:		"PASS"					"0..2"
+// STATIC:		"BUMPMAP"				"0..1"
+// STATIC:		"VERTEXALPHA"			"0..1"
+
+// DYNAMIC:		"PIXELFOGTYPE"			"0..1"
+
+#include "common_ps_fxc.h"
+#include "common_deferred_fxc.h"
+
+sampler sBase						: register( s0 );
+sampler sNormal						: register( s1 );	// rgb normal (tangent space), a height (1 = the surface)
+sampler sLightAccum					: register( s2 );
+
+const float4 g_vecDecal				: register( c0 );	// x gloss 0 .. 62, y reflectance (F0), z how much it mirrors its surroundings, w relief depth (texture units)
+const float2 g_vecFullScreenTexel	: register( c1 );
+const float4 g_vecFogParams			: register( c2 );
+const float3 g_vecOrigin			: register( c3 );
+const float4 g_vecEnvSky			: register( c4 );	// rgb the light of the open sky (what the wet ones mirror at most)
+const float4 g_vecDecal2			: register( c5 );	// x normal map strength, y coverage scale, z dither phase
+
+struct PS_INPUT
+{
+	float2 vTexCoord				: TEXCOORD0;
+	float3 vWorldPos				: TEXCOORD1;
+	float4 vWorldNormal_Depth		: TEXCOORD2;
+	float4 vColor					: TEXCOORD3;
+	float2 vScreenPos				: VPOS;
+};
+
+struct PS_OUTPUT
+{
+	float4 vColor_0					: COLOR0;
+#if PASS == 0
+	float4 vColor_1					: COLOR1;
+#endif
+};
+
+float VertexAlpha( const PS_INPUT In )
+{
+#if VERTEXALPHA
+	return In.vColor.a;
+#else
+	return 1.0f;
+#endif
+}
+
+// how much of the surface the decal covers
+float Coverage( float4 tex, float flVertexAlpha )
+{
+	const float flDark = saturate( ( 0.5f - min( min( tex.r, tex.g ), tex.b ) ) * 2.2f );
+	return flDark * step( 0.004f, tex.a ) * flVertexAlpha * g_vecDecal2.y;
+}
+
+// the tangent frame from the screen derivatives of the position and the texture coordinate
+// (Schuler's cotangent frame): neither world nor model decals bring tangents of their own
+float3x3 CotangentFrame( float3 N, float3 p, float2 uv )
+{
+	const float3 dp1 = ddx( p );
+	const float3 dp2 = ddy( p );
+	const float2 duv1 = ddx( uv );
+	const float2 duv2 = ddy( uv );
+	const float3 dp2perp = cross( dp2, N );
+	const float3 dp1perp = cross( N, dp1 );
+	const float3 T = dp2perp * duv1.x + dp1perp * duv2.x;
+	const float3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+	const float flInvMax = rsqrt( max( dot( T, T ), dot( B, B ) ) + 1e-20f );
+	return float3x3( T * flInvMax, B * flInvMax, N );
+}
+
+// the relief: a few steps along the view into the height (1 = the surface, 0 = the deepest)
+float2 DecalParallax( float2 uv, float3 vecViewTS )
+{
+	const float3 v = normalize( vecViewTS );
+	const float2 vecShift = -v.xy / max( v.z, 0.3f ) * g_vecDecal.w;
+	float flRay = 1.0f;
+	float flHeight = tex2Dlod( sNormal, float4( uv, 0, 0 ) ).a;
+	float flPrevRay = 1.0f;
+	float flPrevHeight = flHeight;
+	[unroll]
+	for ( int i = 0; i < 8; i++ )
+	{
+		if ( flHeight < flRay )
+		{
+			flPrevRay = flRay;
+			flPrevHeight = flHeight;
+			flRay -= 0.125f;
+			flHeight = tex2Dlod( sNormal, float4( uv + vecShift * ( 1.0f - flRay ), 0, 0 ) ).a;
+		}
+	}
+	const float flAbove = flPrevRay - flPrevHeight;
+	const float flBelow = flHeight - flRay;
+	const float flCross = flRay + ( flPrevRay - flRay ) * saturate( flBelow / max( flAbove + flBelow, 1e-5f ) );
+	return uv + vecShift * saturate( 1.0f - flCross );
+}
+
+float FogAmount( const PS_INPUT In )
+{
+#if PIXELFOGTYPE == 0
+	const float flFog = saturate( CalcPixelFogFactor( PIXELFOGTYPE, g_vecFogParams, g_vecOrigin, In.vWorldPos, 0 ) );
+	return flFog * flFog;
+#else
+	return 0.0f;
+#endif
+}
+
+PS_OUTPUT main( const PS_INPUT In )
+{
+	PS_OUTPUT Out;
+
+	const float3 N = normalize( In.vWorldNormal_Depth.xyz );
+	float2 uv = In.vTexCoord;
+
+#if BUMPMAP
+	const float3x3 TBN = CotangentFrame( N, In.vWorldPos, In.vTexCoord );
+#if PASS != 0
+	if ( g_vecDecal.w > 0.0f )
+		uv = DecalParallax( uv, mul( TBN, g_vecOrigin - In.vWorldPos ) );
+#endif
+#endif
+
+	const float4 tex = tex2D( sBase, uv );
+	clip( tex.a - 0.004f );
+	const float flCover = Coverage( tex, VertexAlpha( In ) );
+
+	float3 worldNormal = N;
+#if BUMPMAP
+	{
+		const float3 n = tex2D( sNormal, uv ).xyz * 2.0f - 1.0f;
+		worldNormal = normalize( mul( float3( n.xy * g_vecDecal2.x, n.z ), TBN ) );
+	}
+#endif
+
+#if PASS == 0
+	// the decal's own surface where it covers - dithered toward its edge (TAA blends the dither)
+	const float flDither = frac( 52.9829189f * frac( dot( In.vScreenPos + g_vecDecal2.z, float2( 0.06711056f, 0.00583715f ) ) ) );
+	clip( flCover - lerp( 0.12f, 0.75f, flDither ) );
+	Out.vColor_0 = float4( worldNormal * 0.5f + 0.5f, PackLightingControls( floor( g_vecDecal.x + 0.5f ), 0, 0 ) );
+	Out.vColor_1 = float4( In.vWorldNormal_Depth.w, 0, 0, 1 );
+
+#elif PASS == 1
+	// the color: the stock decal's "the surface times twice the texture", toward grey with the fog
+	float3 color = lerp( float3( 0.5f, 0.5f, 0.5f ), tex.rgb, VertexAlpha( In ) );
+	color = lerp( color, float3( 0.5f, 0.5f, 0.5f ), FogAmount( In ) );
+	Out.vColor_0 = float4( color, 1.0f );
+
+#else
+	// the reflection: the light buffer's specular (lit at this decal's gloss) times its reflectance,
+	// and the surroundings mirrored - the light of the open sky, no brighter than the light here
+	const float2 screenPos = ( In.vScreenPos + 0.5f ) * g_vecFullScreenTexel;
+	const float4 light = ReadLighting( tex2D( sLightAccum, screenPos ) );
+	const float flLum = dot( light.rgb, float3( 0.2126f, 0.7152f, 0.0722f ) );
+	const float3 V = normalize( g_vecOrigin - In.vWorldPos );
+	const float flRoughness = 1.0f - g_vecDecal.x / 62.0f;
+	float3 spec = light.rgb * ( light.a / max( flLum, 1e-3f ) ) * g_vecDecal.y;
+	spec += min( light.rgb, g_vecEnvSky.rgb ) * EnvFresnel( worldNormal, V, flRoughness ) * ( g_vecDecal.y * g_vecDecal.z );
+	spec *= flCover * ( 1.0f - FogAmount( In ) );
+	Out.vColor_0 = float4( spec, 1.0f );
+#endif
+
+	return Out;
+}

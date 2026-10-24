@@ -878,7 +878,7 @@ for i, mat in enumerate(TARGETS):
 # breakable glass panes, a fence, a water trough
 for i in range(3):
     ty = y0 + 400 + i * 400
-    m.add_brush_entity("func_breakable", [m.make_box((x0 + 1000, ty, 0), (x0 + 1002, ty + 160, 160), "GLASS/GLASSWINDOW001A")],
+    m.add_brush_entity("func_breakable", [m.make_box((x0 + 1000, ty, 0), (x0 + 1002, ty + 160, 160), "GLASS/GLASSWINDOW007A")],
                        material="0", health="1", propdata="0", spawnflags="0", explosion="0", gibdir="0 0 0",
                        targetname="range_glass_%d" % i)
 # (a shallow trough: water brush over the floor - its bottom is the floor top)

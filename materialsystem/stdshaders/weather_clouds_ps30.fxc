@@ -42,8 +42,12 @@ static const float EARTH_R = 6371000.0;
 static const float UNITS_TO_M = 0.0254;
 static const float MAX_DIST = 60000.0;
 // all periods divide the 160 km wrap of the wind offset (no pops when it wraps)
-static const float SHAPE_PERIOD = 8000.0;		// m
-static const float DETAIL_PERIOD = 1600.0;		// m
+// HL2RPM: the shape noise of 8 km made clouds of 100 - 300 m: a fair sky was strewn with flat white
+// confetti, thin enough to be lit through. Cumulus are 0.5 - 2 km: the shape 20 km, the detail 2 km
+// (the coverage cut is calibrated on the noise's distribution, which the scale doesn't change;
+// lightingpass_global_ps30 CloudShadow has the same period)
+static const float SHAPE_PERIOD = 20000.0;		// m
+static const float DETAIL_PERIOD = 2000.0;		// m
 static const float WEATHER_PERIOD = 40000.0;	// m
 
 // 3D noise from the 8x8 slice atlas: 62x62 slices with a 1 texel wrap border
@@ -131,8 +135,9 @@ float CloudDensity( float3 pos, float h01, bool bDetail )
 
 	float threshold = CoverageThreshold( coverage, type );
 	float base = shape * HeightProfile( h01, type );
-	// narrow transition band: crisp cumulus edges instead of a soft veil
-	base = saturate( ( base - threshold ) / max( ( 1.0 - threshold ) * 0.6, 0.05 ) );
+	// the transition band: firm cumulus edges, softened (smoothstep) - the narrow linear band cut the
+	// clouds out like paper (the same band in lightingpass_global_ps30 CloudShadow)
+	base = smoothstep( 0.0, 1.0, saturate( ( base - threshold ) / max( ( 1.0 - threshold ) * 0.6, 0.05 ) ) );
 	base *= 0.35 + 0.65 * coverage;
 
 	if ( bDetail && base > 0.0 )
@@ -145,8 +150,9 @@ float CloudDensity( float3 pos, float h01, bool bDetail )
 		detail = detail * 0.7 + ( detailNoise2.g * 0.6 + detailNoise2.b * 0.4 ) * 0.3;
 		// wispy at the bottom, billowy at the top
 		detail = lerp( detail, 1.0 - detail, saturate( h01 * 4.0 ) );
-		// the thin outskirts of a cloud erode most: crisp cores, ragged edges
-		float erosion = lerp( 0.30, 0.55, saturate( 1.0 - base * 1.6 ) );
+		// the thin outskirts of a cloud erode most: crisp cores, ragged edges (0.3 - 0.55 broke every
+		// cloud into flakes of ~100 m - each lit through, flat and white)
+		float erosion = lerp( 0.2, 0.42, saturate( 1.0 - base * 1.6 ) );
 		base = saturate( Remap( base, detail * erosion, 1.0, 0.0, 1.0 ) );
 	}
 
@@ -288,7 +294,9 @@ float4 main( const PS_INPUT In ) : COLOR
 		float dAbove = CloudDensity( float3( worldPos.xy, baseH + hAbove * g_vecCloud1.y ), hAbove, false );
 		float skyVis = exp( -dAbove * densityScale * g_vecCloud1.y * ( 1.0 - h01 ) * 0.00035 );
 
-		float3 ambient = lerp( g_vecSkyHorizon.rgb * 0.9, g_vecSkyZenith.rgb, saturate( h01 * 1.3 ) ) * ( 0.22 + 0.78 * h01 ) * ( 1.0 - darkness * 0.45 );
+		// (the base sees the dark ground and little of the sky: a fair cumulus is grey underneath - with
+		// 0.22 of the sky there the bases were as white as the sunlit tops after the sky's exposure)
+		float3 ambient = lerp( g_vecSkyHorizon.rgb * 0.9, g_vecSkyZenith.rgb, saturate( h01 * 1.3 ) ) * ( 0.1 + 0.9 * h01 * h01 ) * ( 1.0 - darkness * 0.45 );
 		ambient *= 0.15 + 0.85 * skyVis;
 		float3 S = sun * lightColor + ambient * ambScale + flashColor * flashAim * ( 1.0 - 0.6 * h01 );
 
@@ -313,20 +321,23 @@ float4 main( const PS_INPUT In ) : COLOR
 			float2 p = rd.xy * tAc + camXY.xy * 1.3;
 			float wmAc = tex2Dlod( sWeather, float4( p / WEATHER_PERIOD + 0.37, 0, 0 ) ).r;
 			float amount = saturate( acAmount * 1.2 + ( wmAc - 0.5 ) * 1.1 );
-			float4 n1 = Noise3D( float3( p / 4000.0, 0.31 + g_vecCloud1.w * 0.0003 ) );
-			float4 n2 = Noise3D( float3( p / 1300.0, 0.73 + g_vecCloud1.w * 0.0008 ) );
+			// (cells of 8 and 2.5 km: at 4 and 1.3 km the layer was a field of white dots)
+			float4 n1 = Noise3D( float3( p / 8000.0, 0.31 + g_vecCloud1.w * 0.0003 ) );
+			float4 n2 = Noise3D( float3( p / 2500.0, 0.73 + g_vecCloud1.w * 0.0008 ) );
 			float cells = n1.g * 0.55 + n2.g * 0.45;
 			// billow rows (altocumulus undulatus) instead of a field of round dots: a wavy
 			// ripple across the cells (650 m; the direction keeps it periodic over the wrap)
 			float rows = 0.5 + 0.5 * sin( dot( p, float2( 0.8, 0.6 ) ) * ( 6.2831853 / 650.0 ) + n1.b * 7.0 );
 			cells *= 0.82 + 0.3 * rows;
 			float patches = saturate( ( n1.r - 0.45 ) * 3.0 );
-			float dens = saturate( ( cells - ( 1.0 - amount * 0.55 ) ) / 0.2 ) * patches;
+			float dens = smoothstep( 0.0, 1.0, saturate( ( cells - ( 1.0 - amount * 0.55 ) ) / 0.3 ) ) * patches;
 			float acFade = exp( -tAc / 45000.0 ) * saturate( rd.z * 12.0 );
-			float acAlpha = dens * amount * 0.7 * acFade;
+			// (thin: a veil of cloudlets the sky shows through, not white dots)
+			float acAlpha = dens * amount * 0.5 * acFade;
 
 			float acPhase = HG( cosTheta, 0.6 ) * 4.0 * PI;
-			float3 acSun = lightColor * ( 0.3 + 0.35 * acPhase ) * ( 1.2 - 0.6 * dens );
+			// (the thick middle of a cloudlet is greyer than its thin rim)
+			float3 acSun = lightColor * ( 0.3 + 0.35 * acPhase ) * ( 1.25 - 0.75 * dens );
 			float3 acAmb = g_vecSkyZenith.rgb * ambScale * ( 1.0 - darkness * 0.45 );
 			scatter += T * ( acSun + acAmb ) * acAlpha;
 			T *= 1.0 - acAlpha;

@@ -1,0 +1,47 @@
+"Water"
+{
+	// HL2RPM: radioactive water: thick, glowing green - its own light, at night too
+	"%compilewater" 1
+	"%tooltexture" "dev/water_normal"
+	"$abovewater" 1
+	"$forceexpensive" 1
+	"$envmap" "env_cubemap"
+	"$refracttexture" "_rt_WaterRefraction"
+	"$refractamount" ".6"
+	"$reflecttexture" "_rt_WaterReflection"
+	"$reflectentities" 1
+	"$reflectamount" ".6"
+	"$scale" "[1 1]"
+	"$bumpmap" "dev/water_dudv"
+	"$normalmap" "dev/water_normal"
+	"$surfaceprop" "slime"
+	"$bottommaterial" "nature/toxicslime002a_dx70_beneath"
+	"$bumpframe" "0"
+	"$fogenable" 1
+	"$fogcolor" "{70 220 50}"
+	"$fogstart" "0"
+	"$fogend" "40"
+	// the kind of water (stdshaders/water.cpp): how much faster than the average each color fades
+	// on the way through it (rgb), its density (w); its own color's glow
+	"$water_absorb" "[3.0 0.45 2.6 1.0]"
+	"$water_glow" "1.6"
+
+	"Proxies"
+	{
+		"AnimatedTexture"
+		{
+			"animatedtexturevar" "$normalmap"
+			"animatedtextureframenumvar" "$bumpframe"
+			"animatedtextureframerate" 12.00
+		}
+		"TextureScroll"
+		{
+			"texturescrollvar" "$bumptransform"
+			"texturescrollrate" .015
+			"texturescrollangle" 45.00
+		}
+		"WaterLOD"
+		{
+		}
+	}
+}

@@ -18,6 +18,14 @@ For each base texture ($basetexture, $basetexture2 of a blend) that is 512 or sm
      large) - the client gives the deferred material $hdtexture, $basetexture keeps the mapping.
 
 Bump maps, models, translucent and alpha tested textures are left alone. --dry lists what it would do.
+
+    python hd_textures.py --textures <list.txt> [--inplace] [--min 64]
+
+A list of textures themselves (not materials) - the faces of the characters, the sheets of the
+weapons, the decals. --inplace writes over their paths in the mod's materials (models: their texture
+coordinates are normalized, a 2x texture only sharpens them - a texture the mod has of its own is
+left alone); without it into materials/hd (decals: the size of a decal is its texture's - the client
+gives DEFERRED_DECAL $hdtexture).
 """
 import os
 import re
@@ -241,7 +249,16 @@ def vtf_flags(path):
 BATCH = 8            # textures per run of the upscaler: what is done is written (a stopped run resumes)
 
 
-def upscale(textures, force=False, dry=False, out_root=None):
+INPLACE_LIST = os.path.join(MOD, "materials", "hd_inplace.txt")
+
+
+def inplace_written():
+    if not os.path.exists(INPLACE_LIST):
+        return set()
+    return set( l.strip() for l in open(INPLACE_LIST, encoding="utf-8") if l.strip() )
+
+
+def upscale(textures, force=False, dry=False, out_root=None, inplace=False, min_size=64):
     out_root = out_root or os.path.join(MOD, "materials", "hd")
     jobs = []
     for tex in textures:
@@ -249,12 +266,17 @@ def upscale(textures, force=False, dry=False, out_root=None):
         if not p:
             continue
         out = os.path.join(out_root, tex.replace("/", os.sep) + ".vtf")
-        if os.path.exists(out) and not force:
+        if inplace:
+            # (a texture the mod has of its own is not the stock one: left alone - with --force only
+            # what this script wrote there before, listed in materials/hd_inplace.txt)
+            if os.path.exists(out) and not ( force and tex in inplace_written() ):
+                continue
+        elif os.path.exists(out) and not force:
             continue
         with open(p, "rb") as f:
             hdr = f.read(64)
         w, h = struct.unpack_from("<HH", hdr, 16)
-        if max(w, h) > 512 or min(w, h) < 64:
+        if max(w, h) > 512 or min(w, h) < min_size:
             continue
         jobs.append((tex, p, out))
         print("  %-48s %dx%d" % (tex, w, h))
@@ -301,6 +323,10 @@ def upscale_batch(jobs):
         alpha = np.array(Image.fromarray(a[..., 3]).resize((w * 2, h * 2), Image.LANCZOS)) if has_alpha else np.full((h * 2, w * 2), 255, np.uint8)
         write_vtf(out, np.concatenate([rgb, alpha[..., None]], -1), flags, has_alpha)
         print("wrote", out)
+        if out.lower().startswith(os.path.join(MOD, "materials").lower() + os.sep) and not out.lower().startswith(os.path.join(MOD, "materials", "hd").lower() + os.sep):
+            if tex not in inplace_written():
+                with open(INPLACE_LIST, "a", encoding="utf-8") as f:
+                    f.write(tex + "\n")
     shutil.rmtree(work, ignore_errors=True)
 
 
@@ -328,6 +354,20 @@ def main(argv):
     out_root = None
     if "--out" in argv:
         out_root = argv[argv.index("--out") + 1]
+    if "--textures" in argv:
+        lst = argv[argv.index("--textures") + 1]
+        textures = []
+        for line in open(lst, encoding="utf-8"):
+            line = line.split("//")[0].strip().lower().replace("\\", "/")
+            if line and line not in textures:
+                textures.append(line)
+        inplace = "--inplace" in argv
+        min_size = int(argv[argv.index("--min") + 1]) if "--min" in argv else 64
+        if inplace:
+            out_root = os.path.join(MOD, "materials")
+        print("%d textures%s" % (len(textures), " (in place)" if inplace else ""))
+        upscale(textures, force=force, dry=dry, out_root=out_root, inplace=inplace, min_size=min_size)
+        return
     items = [a for a in argv[1:] if not a.startswith("--") and a != out_root]
     materials = []
     for it in items:

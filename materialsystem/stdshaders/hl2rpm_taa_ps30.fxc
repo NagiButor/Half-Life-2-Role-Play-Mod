@@ -34,7 +34,7 @@ const float4 g_vecCurW		: register( c6 );
 const float4 g_vecCamDelta	: register( c7 );	// xyz last camera position - this one, w 1 = no reprojection (weapon, body)
 const float4 g_vecTAA		: register( c8 );	// x history weight (history like the frame), y (unlike it), z clip box size, w reset
 const float4 g_vecTAA2		: register( c9 );	// x debug mode (0 = the real pass), y motion (pixels) at which less history is kept, zw view size / texture size
-const float4 g_vecTAA3		: register( c10 );	// x frame number
+const float4 g_vecTAA3		: register( c10 );	// x frame number, y history weight in motion (part of it still), z frame detail given back in motion
 
 struct PS_INPUT
 {
@@ -162,12 +162,17 @@ float4 main( const PS_INPUT In ) : COLOR
 	const float flMatch = ( 1.0 - flDiff ) * ( 1.0 - flDiff );
 	float flHistory = lerp( g_vecTAA.y, g_vecTAA.x, flMatch );
 
-	// fast motion: a little less history (every resampling softens it)
+	// motion: every resampling softens the history a little - less of it the faster it moves (all of
+	// the lowering from g_vecTAA2.y pixels a frame), and this frame's own finest detail (its
+	// difference from the 3x3 mean, luma only) given back for the part the history weight took away
 	const float flSpeed = length( velocity * g_vecTexel.zw );
-	flHistory *= lerp( 1.0, 0.8, saturate( flSpeed / max( g_vecTAA2.y, 1.0 ) ) );
+	const float flMotion = saturate( flSpeed / max( g_vecTAA2.y, 0.5 ) );
+	flHistory *= lerp( 1.0, g_vecTAA3.y, flMotion );
 	flHistory = ( bOutside || g_vecTAA.w > 0.5 ) ? 0.0 : flHistory;
 
-	float3 result = YCoCgToRGB( lerp( cur, histClipped, flHistory ) );
+	float3 resultYCoCg = lerp( cur, histClipped, flHistory );
+	resultYCoCg.x += ( cur.x - mean.x ) * flHistory * flMotion * g_vecTAA3.z;
+	float3 result = YCoCgToRGB( resultYCoCg );
 
 	// debug pass (drawn over the frame after the history was saved), in red over the grey
 	// frame: 1 motion (16 pixels per frame = full; no history = full), 2 how far the

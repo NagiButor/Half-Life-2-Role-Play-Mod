@@ -482,6 +482,7 @@ C_BasePlayer::C_BasePlayer() : m_iv_vecViewOffset( "C_BasePlayer::m_iv_vecViewOf
 #endif
 
 	m_pFlashlight = NULL;
+	m_flDeathBodyViewStart = -1.0f;
 
 	m_pCurrentVguiScreen = NULL;
 	m_pCurrentCommand = NULL;
@@ -2201,6 +2202,74 @@ void C_BasePlayer::CalcInEyeCamView(Vector& eyeOrigin, QAngle& eyeAngles, float&
 	}
 
 	engine->SetViewAngles( eyeAngles );
+}
+
+//-----------------------------------------------------------------------------
+// HL2RPM: dead - the view of our own body. The stock view stayed a few units above the floor where
+// we fell, rolled, while the body tumbled away as a ragdoll; here it moves into the eyes of that
+// ragdoll and rides them (its head is left out of the view, C_ClientRagdoll::BuildTransformations).
+//-----------------------------------------------------------------------------
+static ConVar cl_deathcam_body( "cl_deathcam_body", "1", FCVAR_ARCHIVE, "After death the view is our own body's: the eyes of the player's ragdoll (0 = the stock view near the floor)" );
+static ConVar cl_deathcam_body_blend( "cl_deathcam_body_blend", "0.4", 0, "Death camera: seconds to move from the view at the moment of death into the eyes of the body" );
+static ConVar cl_deathcam_body_debug( "cl_deathcam_body_debug", "0", 0, "Death camera: print the body it rides, twice a second" );
+
+void C_BasePlayer::CalcDeathBodyView( Vector& eyeOrigin, QAngle& eyeAngles )
+{
+	if ( IsAlive() || !IsLocalPlayer() || !cl_deathcam_body.GetBool() )
+	{
+		m_flDeathBodyViewStart = -1.0f;
+		return;
+	}
+	C_ClientRagdoll *pBody = dynamic_cast< C_ClientRagdoll * >( m_pClientsideRagdoll );
+	const int iEyes = pBody ? pBody->LookupAttachment( "eyes" ) : -1;
+	if ( cl_deathcam_body_debug.GetBool() )
+	{
+		static float s_flNextPrint = 0.0f;
+		if ( gpGlobals->realtime >= s_flNextPrint )
+		{
+			s_flNextPrint = gpGlobals->realtime + 0.5f;
+			Msg( "[deathcam] ragdoll %s (clientside %p, server %p), eyes attachment %d\n", pBody ? pBody->GetModelName() : "none",
+				m_pClientsideRagdoll, m_pServerRagdoll, iEyes );
+		}
+	}
+	if ( !pBody || iEyes <= 0 )
+		return;
+	// (the eyes as the ragdoll's bones were last set up - before its head was left out of the view:
+	// its attachment comes from that zeroed bone; the first frame from the attachment)
+	pBody->m_bDeathCamBody = true;
+	Vector vecEyes;
+	QAngle angEyes;
+	if ( pBody->m_bDeathCamEyesValid )
+		MatrixAngles( pBody->m_matDeathCamEyes, angEyes, vecEyes );
+	else if ( !pBody->GetAttachment( iEyes, vecEyes, angEyes ) )
+		return;
+	if ( m_flDeathBodyViewStart < 0.0f )
+		m_flDeathBodyViewStart = gpGlobals->curtime;
+
+	// (not into the floor or the wall the head lies against: a short hull trace out of the chest)
+	trace_t tr;
+	UTIL_TraceHull( pBody->WorldSpaceCenter(), vecEyes, Vector( -3, -3, -3 ), Vector( 3, 3, 3 ), MASK_SOLID, pBody, COLLISION_GROUP_NONE, &tr );
+	vecEyes = tr.endpos;
+
+	// from the view at the moment of death into the eyes
+	float t = clamp( ( gpGlobals->curtime - m_flDeathBodyViewStart ) / Max( cl_deathcam_body_blend.GetFloat(), 0.01f ), 0.0f, 1.0f );
+	t = t * t * ( 3.0f - 2.0f * t );
+	Quaternion qFrom, qTo, q;
+	AngleQuaternion( eyeAngles, qFrom );
+	AngleQuaternion( angEyes, qTo );
+	QuaternionSlerp( qFrom, qTo, t, q );
+	QuaternionAngles( q, eyeAngles );
+	eyeOrigin = Lerp( t, eyeOrigin, vecEyes );
+	if ( cl_deathcam_body_debug.GetBool() )
+	{
+		static float s_flNextPrint2 = 0.0f;
+		if ( gpGlobals->realtime >= s_flNextPrint2 )
+		{
+			s_flNextPrint2 = gpGlobals->realtime + 0.25f;
+			Msg( "[deathcam] eyes %.0f %.0f %.0f (%.0f %.0f %.0f), view %.0f %.0f %.0f (%.0f %.0f %.0f), blend %.2f\n",
+				XYZ( vecEyes ), angEyes.x, angEyes.y, angEyes.z, XYZ( eyeOrigin ), eyeAngles.x, eyeAngles.y, eyeAngles.z, t );
+		}
+	}
 }
 
 float C_BasePlayer::GetDeathCamInterpolationTime()

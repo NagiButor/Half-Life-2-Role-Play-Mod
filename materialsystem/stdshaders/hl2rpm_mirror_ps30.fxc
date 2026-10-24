@@ -1,0 +1,169 @@
+//========= HL2RPM ============================================================//
+//
+// HL2RPM_MIRROR (hl2rpm_mirror.cpp): mirror-smooth surfaces of the lit opaque scene -
+// the glass in the windows of a facade texture, a pane that is a texture of its own,
+// wet blood - get what is around them, by the angle of the view (a few % from the
+// front, most of it at a glancing angle; the env BRDF of their roughness): the scene
+// the screen holds where the mirrored ray finds it, else the sky by the direction
+// (outdoors: nothing above the point in the top-down rain map) or a dim room. The
+// composite gives them the light at the pixel only - without cubemaps the windows of
+// the facades were as dull as the walls around them.
+//
+// Drawn before the weather pass (which fogs it with the rest).
+// Blend: ONE, SRC_ALPHA  ->  result = src.rgb + scene * src.a
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+#include "common_deferred_fxc.h"
+#include "hl2rpm_sky_fxc.h"
+
+sampler sNormals				: register( s0 );
+sampler sDepth					: register( s1 );
+sampler sRainMap				: register( s2 );	// hardware depth compare
+sampler sScene					: register( s3 );	// the lit opaque scene (copied before this pass)
+sampler sSkyView				: register( s4 );	// the sky-view LUT of the procedural sky
+
+const float3 g_vecViewOrigin	: register( c0 );
+const float4 g_vecSkyZenith		: register( c1 );	// rgb the light of the sky straight above
+const float4 g_vecSkyHorizon	: register( c2 );	// rgb ... at the horizon
+const float4 g_vecGround		: register( c3 );	// rgb the ground mirrored below the horizon
+const float4 g_matRainMap[3]	: register( c4 );	// rows of world -> rain map texture (c4 - c6)
+const float4 g_vecRainMap		: register( c7 );	// x depth bias, y map size, z texel size, w valid
+const float4 g_matWorldToScreen[4]	: register( c8 );	// world -> screen texture coords of this view (c8 - c11)
+const float4 g_vecSSR			: register( c12 );	// x steps (0 = no scene to trace), w thickness scale
+const float4 g_vecMirror		: register( c13 );	// x strength, y the roughness below which it mirrors fully, z 1 / the fade above it, w what a surface under a roof mirrors (of the sky)
+const float4 g_vecMirror2		: register( c14 );	// x the reflectance from the front (F0) of glass - the smoothest pixels: the windows, y debug
+const float4 g_vecSkyLightDir	: register( c15 );	// xyz the sun or the moon the sky is lit by
+const float4 g_vecSkySeen		: register( c16 );	// x exposure of the sky, y cloud coverage, z how much the clouds hide, w 1 = the sky-view LUT is valid
+
+// the env BRDF of a roughness (Karis' fit, as EnvFresnel of common_deferred_fxc.h): what a surface
+// mirrors of its surroundings is F0 * x + y
+float2 EnvBRDF( float3 N, float3 V, float roughness )
+{
+	const float4 r = roughness * float4( -1.0, -0.0275, -0.572, 0.022 ) + float4( 1.0, 0.0425, 1.04, -0.04 );
+	const float a004 = min( r.x * r.x, exp2( -9.28 * saturate( dot( N, V ) ) ) ) * r.x + r.y;
+	return float2( -1.04, 1.04 ) * a004 + r.zw;
+}
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+	float3 vecWorldRay			: TEXCOORD1;
+};
+
+// the scene along the mirrored ray: steps growing with the distance, each compared with the depth
+// buffer along the view ray through it (linear in screen space); the first one behind the visible
+// surface - by less than the last step: the ray went through it, not behind a thing in front of it -
+// refined by bisection. conf fades toward the screen's edges and with the length of the ray.
+float3 TraceScene( float3 P, float3 R, float3 rayP, float2 uvP, float3 dRdu, float3 dRdv, out float conf )
+{
+	conf = 0.0;
+	float tPrev = 0.0;
+	float t = 3.0;
+	const int steps = (int)g_vecSSR.x;
+	[loop]
+	for ( int i = 0; i < 20; i++ )
+	{
+		if ( i >= steps )
+			break;
+		const float4 q = float4( P + R * t, 1.0 );
+		const float w = dot( g_matWorldToScreen[3], q );
+		if ( w < 1.0 )
+			break;
+		const float2 uv = float2( dot( g_matWorldToScreen[0], q ), dot( g_matWorldToScreen[1], q ) ) / w;
+		if ( any( uv < 0.0 ) || any( uv > 1.0 ) )
+			break;
+		const float d = tex2Dlod( sDepth, float4( uv, 0, 0 ) ).x;
+		if ( d > 0.1 )
+		{
+			const float3 rayQ = rayP + dRdu * ( uv.x - uvP.x ) + dRdv * ( uv.y - uvP.y );
+			const float behind = length( q.xyz - g_vecViewOrigin ) - d * length( rayQ );
+			if ( behind > 0.0 && behind < ( 6.0 + ( t - tPrev ) * 1.5 ) * g_vecSSR.w )
+			{
+				float a = tPrev, b = t;
+				float2 uvHit = uv;
+				[unroll]
+				for ( int k = 0; k < 4; k++ )
+				{
+					const float m = ( a + b ) * 0.5;
+					const float4 qm = float4( P + R * m, 1.0 );
+					const float wm = dot( g_matWorldToScreen[3], qm );
+					const float2 uvm = float2( dot( g_matWorldToScreen[0], qm ), dot( g_matWorldToScreen[1], qm ) ) / max( wm, 1.0 );
+					const float dm = tex2Dlod( sDepth, float4( uvm, 0, 0 ) ).x;
+					const float3 rayM = rayP + dRdu * ( uvm.x - uvP.x ) + dRdv * ( uvm.y - uvP.y );
+					if ( length( qm.xyz - g_vecViewOrigin ) - dm * length( rayM ) > 0.0 )
+					{
+						b = m;
+						uvHit = uvm;
+					}
+					else
+						a = m;
+				}
+				const float2 edge = min( uvHit, 1.0 - uvHit );
+				conf = saturate( min( edge.x, edge.y ) * 12.0 ) * saturate( 1.0 - i / max( (float)steps, 1.0 ) * 0.8 );
+				return tex2Dlod( sScene, float4( uvHit, 0, 0 ) ).rgb;
+			}
+		}
+		tPrev = t;
+		t = t * 1.4 + 4.0;
+	}
+	return 0.0;
+}
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	// (the screen space steps of the view ray, ahead of any branch)
+	const float3 dRdu = ddx( In.vecWorldRay ) / ddx( In.vTexCoord.x );
+	const float3 dRdv = ddy( In.vecWorldRay ) / ddy( In.vTexCoord.y );
+
+	const float4 vecNormalCtrl = tex2D( sNormals, In.vTexCoord );
+	const float flRough = UnpackRoughness( vecNormalCtrl.a );
+	const float flMirror = saturate( ( g_vecMirror.y - flRough ) * g_vecMirror.z + 1.0 );
+	const float depth = tex2D( sDepth, In.vTexCoord ).x;
+	// (the sky, the 3D skybox (lighting controls 1.0) and what is not smooth: nothing to do)
+	if ( flMirror < 0.001 || depth < 0.1 || vecNormalCtrl.a > ( 254.5 / 255.0 ) )
+		return float4( 0, 0, 0, 1 );
+
+	const float3 worldPos = g_vecViewOrigin + In.vecWorldRay * depth;
+	const float3 rd = normalize( worldPos - g_vecViewOrigin );
+	const float3 N = normalize( vecNormalCtrl.xyz * 2.0 - 1.0 );
+	const float3 R = reflect( rd, N );
+	// (the smoothest the G-buffer holds - roughness 0.08 - is the glass of the windows: a pane of a
+	// house is two or more panes of glass, four surfaces and more - ~15 % from the front where one
+	// surface mirrors 4 %; the rest of what is smooth (wet blood) mirrors as one surface)
+	const float flGlass = saturate( ( 0.11 - flRough ) * 33.0 );
+	const float2 AB = EnvBRDF( N, -rd, flRough );
+	const float F = saturate( lerp( 0.04, g_vecMirror2.x, flGlass ) * AB.x + AB.y ) * flMirror * g_vecMirror.x;
+
+	// outdoors: nothing above the point in front of the surface
+	float open = 1.0;
+	if ( g_vecRainMap.w > 0.5 )
+	{
+		const float4 wp = float4( worldPos + N * 24.0, 1.0 );
+		const float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
+		if ( all( uvz.xy > 0.0 ) && all( uvz.xy < 1.0 ) )
+			open = tex2Dlod( sRainMap, float4( uvz.xy, uvz.z - g_vecRainMap.x, 0 ) ).x;
+	}
+	// the sky as it is seen (not its light: that is many times dimmer than the sky on the screen)
+	const float3 sky = ( g_vecSkySeen.w > 0.5 ) ? HL2RPM_SkySeen( sSkyView, R, g_vecSkyLightDir.xyz, g_vecSkySeen )
+		: lerp( g_vecSkyHorizon.rgb, g_vecSkyZenith.rgb, sqrt( saturate( R.z ) ) );
+	const float soft = 0.04 + flRough * 0.5;
+	float3 env = lerp( ( g_vecSkyZenith.rgb + g_vecSkyHorizon.rgb ) * ( 0.5 * g_vecMirror.w ),
+		lerp( g_vecGround.rgb, sky, smoothstep( -soft, soft, R.z ) ), open );
+
+	[branch]
+	if ( g_vecSSR.x > 0.5 && F > 0.01 )
+	{
+		float conf = 0.0;
+		const float3 scene = TraceScene( worldPos + N * 1.5, R, In.vecWorldRay, In.vTexCoord, dRdu, dRdv, conf );
+		env = lerp( env, scene, conf );
+		// r_deferred_reflections_debug: r how much it mirrors (x 4), g the scene found, b glass
+		if ( g_vecMirror2.y > 0.5 )
+			return float4( F * 4.0, conf, flGlass, 0.0 );
+	}
+	if ( g_vecMirror2.y > 0.5 )
+		return float4( F * 4.0, 0.0, flGlass, 0.0 );
+
+	return float4( env * F, 1.0 - F );
+}

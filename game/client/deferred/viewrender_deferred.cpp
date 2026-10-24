@@ -3056,8 +3056,12 @@ void CDeferredViewRender::ViewDrawComposite( const CViewSetup &view, bool &bDrew
 	unsigned int visFlags;
 	SetupVis( view, visFlags, NULL );
 
-	if ( !bDrew3dSkybox &&
-		( nSkyboxVisible == SKYBOX_NOT_VISIBLE ) && ( visFlags & IVRenderView::VIEW_SETUP_VIS_EX_RETURN_FLAGS_USES_RADIAL_VIS ) )
+	// HL2RPM: no sky at all - the engine says none is in sight from here (CSkyboxViewDeferred::
+	// ComputeSkyboxVisibility: the eye in a solid - a camera pushed into a wall, noclip - or a leaf the
+	// map's vis gave no sky): neither the 3D skybox nor the sky is drawn, and where the sky still shows
+	// the frame kept what the deferred passes left in it - acid green, yellow and pink blotches. The
+	// stock clear for radial vis, for this too: the fog color.
+	if ( !bDrew3dSkybox && ( nSkyboxVisible == SKYBOX_NOT_VISIBLE ) )
 	{
 		// This covers the case where we don't see a 3dskybox, yet radial vis is clipping
 		// the far plane.  Need to clear to fog color in this case.

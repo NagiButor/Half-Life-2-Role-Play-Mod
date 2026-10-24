@@ -555,8 +555,13 @@ void InitParmsPBR( const pbrParms_t &info, IMaterialVar **params, const char *ps
 		// rainy map - got a gloss of 0.45 all over and shone like glazed clay; their $envmap pass
 		// still shows the masked parts)
 		const float flGloss = bMatte ? 0.15f : 1.0f;
-		s.flRoughness = MIN( s.flRoughness, Lerp( flGloss, s.flRoughness, 0.65f - 0.45f * flStrength ) );
-		s.flSpecular = MAX( s.flSpecular, Lerp( flGloss, s.flSpecular, 1.0f + 1.5f * flStrength ) );
+		// (a cubemap is mostly masked to a few parts - the glaze of a tile, the paint of a door - and
+		// without a gloss mask the whole surface gets the gloss: not below 0.38 then, 0.3 for a metal;
+		// a stock "full" envmap made doors, cardboard boxes, fridges and the APC roughness 0.2 with
+		// 10 % reflectance - wet plastic. A non-metal mirrors 4-6 % from the front, not more.)
+		const float flFloor = bGlossMask ? 0.2f : ( s.flMetalness > 0.3f ? 0.3f : 0.38f );
+		s.flRoughness = MIN( s.flRoughness, Lerp( flGloss, s.flRoughness, MAX( 0.65f - 0.45f * flStrength, flFloor ) ) );
+		s.flSpecular = MAX( s.flSpecular, Lerp( flGloss, s.flSpecular, MIN( 1.0f + 1.5f * flStrength, 1.4f ) ) );
 	}
 
 	// $phong of the models: the exponent is a roughness, the boost a specular level, the mask
@@ -570,7 +575,7 @@ void InitParmsPBR( const pbrParms_t &info, IMaterialVar **params, const char *ps
 		// clothes of characters never below 0.45 - their phong was a sheen tuned by a Fresnel warp
 		s.flRoughness = MIN( s.flRoughness, clamp( powf( 2.0f / ( flExp + 2.0f ), 0.25f ), bCharacter ? 0.45f : 0.25f, 0.8f ) );
 		const float flBoost = ( info.iPhongBoost >= 0 && params[ info.iPhongBoost ]->IsDefined() ) ? params[ info.iPhongBoost ]->GetFloatValue() : 1.0f;
-		s.flSpecular = MAX( s.flSpecular, clamp( 0.8f + 0.2f * flBoost, 0.8f, bCharacter ? 1.0f : 3.0f ) );
+		s.flSpecular = MAX( s.flSpecular, clamp( 0.8f + 0.2f * flBoost, 0.8f, bCharacter ? 1.0f : 1.4f ) );
 		if ( bBump && !BoolParm( params, info.iBaseAlphaPhongMask ) )
 			bGlossMask = true;
 	}

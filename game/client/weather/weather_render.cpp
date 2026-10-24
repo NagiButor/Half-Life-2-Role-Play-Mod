@@ -156,6 +156,7 @@ int GetWeatherRainMapResolution()
 static IMaterial *g_pMatClouds = NULL;
 static IMaterial *g_pMatCloudResolve = NULL;
 static IMaterial *g_pMatPost = NULL;
+static IMaterial *g_pMatMirror = NULL;
 static IMaterial *g_pMatRain = NULL;
 static IMaterial *g_pMatMotes = NULL;
 static IMaterial *g_pMatSunShafts = NULL;
@@ -181,6 +182,7 @@ static void EnsureWeatherMaterials()
 	g_pMatClouds = CreateWeatherMaterial( "__hl2rpm_weather_clouds", "WEATHER_CLOUDS" );
 	g_pMatCloudResolve = CreateWeatherMaterial( "__hl2rpm_weather_cloudresolve", "WEATHER_CLOUDRESOLVE" );
 	g_pMatPost = CreateWeatherMaterial( "__hl2rpm_weather_post", "WEATHER_POST" );
+	g_pMatMirror = CreateWeatherMaterial( "__hl2rpm_mirror", "HL2RPM_MIRROR" );
 	g_pMatRain = CreateWeatherMaterial( "__hl2rpm_weather_rain", "WEATHER_RAIN" );
 	g_pMatMotes = CreateWeatherMaterial( "__hl2rpm_weather_motes", "WEATHER_MOTES" );
 	g_pMatSunShafts = CreateWeatherMaterial( "__hl2rpm_volume_sun", "VOLUME_SUN" );
@@ -583,7 +585,10 @@ void WeatherRender_PostOpaque( const CViewSetup &view )
 	const WeatherParams_t &p = pSys->GetParams();
 	const bool bWet = r_weather_wetness.GetBool() && pSys->GetWetness() > 0.005f;
 	const bool bFog = r_weather_fog.GetBool() && p.flFogDensity > 0.001f;
-	if ( !bWet && !bFog && r_weather_debug_view.GetInt() == 0 )
+	// (mirror-smooth surfaces - glass in the facades, wet blood - get what is around them here too)
+	static ConVarRef r_deferred_reflections( "r_deferred_reflections" );
+	const bool bMirror = r_deferred_reflections.IsValid() && r_deferred_reflections.GetBool();
+	if ( !bWet && !bFog && !bMirror && r_weather_debug_view.GetInt() == 0 )
 		return;
 
 	// HL2RPM: screen space reflections read the lit opaque scene - only the main view's own
@@ -591,7 +596,7 @@ void WeatherRender_PostOpaque( const CViewSetup &view )
 	CMatRenderContextPtr pRenderContext( materials );
 	int iSSRSteps = 0;
 	ITexture *pFB = NULL;
-	if ( bWet && r_weather_ssr.GetInt() > 0 && CurrentViewID() == VIEW_MAIN )
+	if ( ( bWet || bMirror ) && r_weather_ssr.GetInt() > 0 && CurrentViewID() == VIEW_MAIN )
 	{
 		pFB = materials->FindTexture( "_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET );
 		if ( pFB && !pFB->IsError() )
@@ -631,7 +636,12 @@ void WeatherRender_PostOpaque( const CViewSetup &view )
 		pRenderContext->SetFrameBufferCopyTexture( pFB, 0 );
 	}
 
-	DrawLightPassFullscreen( g_pMatPost, view.width, view.height );
+	// mirror-smooth surfaces first (hl2rpm_mirror.cpp: the glass of the facades, wet blood - from the
+	// same copy), then the weather, which fogs them with the rest
+	if ( bMirror && g_pMatMirror )
+		DrawLightPassFullscreen( g_pMatMirror, view.width, view.height );
+	if ( bWet || bFog || r_weather_debug_view.GetInt() != 0 )
+		DrawLightPassFullscreen( g_pMatPost, view.width, view.height );
 
 	if ( iSSRSteps > 0 )
 		pRenderContext->SetFrameBufferCopyTexture( pSavedCopy, 0 );
@@ -1222,8 +1232,11 @@ static void ScanForwardMaterials()
 
 		if ( V_stristr( pszShader, "Water" ) )
 		{
-			// the water's own color
-			AddForwardVar( pMat, "$fogcolor", &known );
+			// the water's own color (not of a glowing one - radioactive: its light is its own)
+			bool bGlowFound = false;
+			IMaterialVar *pGlow = pMat->FindVar( "$water_glow", &bGlowFound, false );
+			if ( !bGlowFound || !pGlow || pGlow->GetFloatValue() <= 0.0f )
+				AddForwardVar( pMat, "$fogcolor", &known );
 			// real-time reflections are lit right (REFLECTVIEW); the cubemap one isn't
 			bool bFound = false;
 			IMaterialVar *pReflect = pMat->FindVar( "$reflecttexture", &bFound, false );
@@ -1343,6 +1356,7 @@ public:
 		if ( g_pMatMotes ) { g_pMatMotes->DecrementReferenceCount(); g_pMatMotes = NULL; }
 		if ( g_pMatClouds ) { g_pMatClouds->DecrementReferenceCount(); g_pMatClouds = NULL; }
 		if ( g_pMatPost ) { g_pMatPost->DecrementReferenceCount(); g_pMatPost = NULL; }
+		if ( g_pMatMirror ) { g_pMatMirror->DecrementReferenceCount(); g_pMatMirror = NULL; }
 		if ( g_pMatRain ) { g_pMatRain->DecrementReferenceCount(); g_pMatRain = NULL; }
 		if ( g_pMatSunShafts ) { g_pMatSunShafts->DecrementReferenceCount(); g_pMatSunShafts = NULL; }
 		if ( g_pMatGodRays ) { g_pMatGodRays->DecrementReferenceCount(); g_pMatGodRays = NULL; }
