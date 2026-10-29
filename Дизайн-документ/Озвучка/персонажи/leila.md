@@ -31,7 +31,7 @@
 | 2 | Вчера грузили семь-один. Завтра будут грузить тех, кто задаёт вопросы. | Yesterday they loaded up seven-one. Tomorrow they'll load the ones who ask questions. |
 | 3 | Эрнесто сказал: дошло. Он редко так говорит. | Ernesto said it got through. He rarely says that. |
 
-## Реплики (16; записано RU 0, EN 0)
+## Реплики (17; записано RU 0, EN 0)
 
 | ID | Контекст (квест · NPC · узел) | RU | EN | Эмоция / ремарка |
 |---|---|---|---|---|
@@ -47,6 +47,7 @@
 | `D_NPC_LEILA_N20` | lm01_lambda_sign · npc_leila · узел 20 | Эрнесто сказал: дошло. Он редко так говорит. | Ernesto said: it got through. He rarely says that. |  |
 | `D_NPC_LEILA_N20_V1` | lm01_lambda_sign · npc_leila · узел 20 · вариант 1 [require_flag lm01_route=roofs] | Лукич слышал водосток над облавой. Говорит, вы скрипели красиво. | Lukich heard the drainpipe above the raid. He says you creaked beautifully. |  |
 | `D_NPC_LEILA_N20_V2` | lm01_lambda_sign · npc_leila · узел 20 · вариант 2 [require_flag lm01_route=simple] | ГО пропустила дурачка с макулатурой. Я двадцать лет учу этому взрослых. | Civil Protection let a simpleton with waste paper through. I've spent twenty years teaching adults to do that. |  |
+| `D_NPC_LEILA_N22` | lm01_lambda_sign · npc_leila · узел 22 | Половину пачки забрала облава. Половина — тоже дошла. Поздравляю: теперь вас можно повесить вместе с нами. Для чистой карты — вокзал, подсобка за камерой хранения. Спросите юнита, который любит пиво. Но сначала Фарид: ему нужны руки. | The raid took half the bundle. Half of it got through, too. Congratulations: now you can be hanged together with us. For a clean card — the station, the back room behind the luggage office. Ask for the unit who likes beer. But Farid first: he needs hands. |  |
 | `D_NPC_LEILA_N21` | lm01_lambda_sign · npc_leila · узел 21 | Поздравляю. Теперь вас можно повесить вместе с нами. У нас это называется доверием. Для чистой карты — вокзал, подсобка за камерой хранения. Спросите юнита, который любит пиво. Но сначала Фарид: ему нужны руки. | Congratulations. Now you can be hanged together with us. We call that trust. For a clean card — the station, the back room behind the luggage office. Ask for the unit who likes beer. But Farid first: he needs hands. |  |
 | `D_NPC_LEILA_N30` | lm01_lambda_sign · npc_leila · узел 30 | Эрнесто сказал: не дошло. Я не спрашиваю, где пачка. Я знаю, где она. Дверь — там. | Ernesto said: it didn't get through. I'm not asking where the bundle is. I know where it is. The door is over there. | не поднимая глаз |
 | `D_NPC_LEILA_N40` | lm01_lambda_sign · npc_leila · узел 40 | Фарид ждёт. А я — нет: у меня урок через десять минут, и ученики опаздывать не умеют. | Farid is waiting. I'm not: I have a lesson in ten minutes, and my students don't know how to be late. |  |

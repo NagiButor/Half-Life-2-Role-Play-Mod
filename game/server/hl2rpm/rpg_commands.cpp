@@ -4,7 +4,7 @@
 //   тест:       rpg_dump, rpg_set, rpg_xp, rpg_flag, rpg_unflag, rpg_rep, rpg_chargen, rpg_levelup,
 //               rpg_reload, rpg_effects, rpg_test, rpg_check
 //   интерфейс:  rpg_request_state, rpg_chargen_commit, rpg_skill_add, rpg_perk_pick, rpg_sleep,
-//               rpg_barter_buy, rpg_barter_sell
+//               rpg_barter_buy, rpg_barter_sell, rpg_travel
 //
 //=============================//
 
@@ -290,3 +290,71 @@ CON_COMMAND_F( rpg_barter_sell, "RPG UI: sell to the trader whose barter screen 
 {
 	BarterCommand( args, false );
 }
+
+// ---------------------------------------------------------------------------
+// Быстрое перемещение - трамвай (RPG_SPEC §11.2): rpg_travel <локация>. На карте с остановкой -
+// info_landmark lm_travel (переход changelevel2) и info_target travel_arrive (где игрок выходит)
+// ---------------------------------------------------------------------------
+static ConVar rpg_travel_hours( "rpg_travel_hours", "0.5", FCVAR_GAMEDLL, "RPG: game hours a tram ride takes" );
+static bool s_bTravelArrive = false;
+static float s_flTravelArriveUntil = 0.0f;
+
+CON_COMMAND_F( rpg_travel, "RPG UI: ride the tram to a discovered stop: rpg_travel <location id>", FCVAR_GAMEDLL | FCVAR_CLIENTCMD_CAN_EXECUTE )
+{
+	if ( args.ArgC() < 2 )
+		return;
+	CBasePlayer *pPlayer = CommandPlayer();
+	if ( !pPlayer )
+		return;
+	CRPGCharacter *pChar = RPG_GetCharacter( pPlayer );
+	const RPGLocationDef_t *pLoc = RPGData().FindLocation( args[1] );
+	const char *pszFail = NULL;
+	if ( !pLoc || !pLoc->travel || pLoc->map.IsEmpty() || !pChar->Data().HasLocation( pLoc->id.Get() ) )
+		pszFail = "#HL2RPM_UI_Fail_TravelUnknown";
+	else if ( !Q_stricmp( pLoc->map.Get(), STRING( gpGlobals->mapname ) ) )
+		pszFail = "#HL2RPM_UI_Fail_TravelHere";
+	else if ( pChar->Data().m_flSuspicion >= 50.0f || pChar->Data().m_bAlarm )
+		pszFail = "#HL2RPM_UI_Fail_TravelSuspicion";
+	else if ( !gEntList.FindEntityByName( NULL, "lm_travel" ) )
+		pszFail = "#HL2RPM_UI_Fail_TravelNoStop";
+	if ( pszFail )
+	{
+		pChar->Notify( RPG_NOTIFY_FAIL, pszFail, 0, args[1] );
+		return;
+	}
+	RPG_AdvanceClock( rpg_travel_hours.GetFloat() );
+	s_bTravelArrive = true;
+	s_flTravelArriveUntil = 0.0f;
+	engine->ChangeLevel( pLoc->map.Get(), "lm_travel" );
+}
+
+// после поездки игрок выходит у остановки (а не в том же смещении от landmark, что на прошлой карте)
+class CRPGTravelArrival : public CAutoGameSystemPerFrame
+{
+public:
+	CRPGTravelArrival() : CAutoGameSystemPerFrame( "CRPGTravelArrival" ) {}
+	virtual void LevelInitPostEntity()
+	{
+		if ( s_bTravelArrive )
+			s_flTravelArriveUntil = gpGlobals->curtime + 5.0f;
+	}
+	virtual void FrameUpdatePostEntityThink()
+	{
+		if ( !s_bTravelArrive || s_flTravelArriveUntil <= 0.0f )
+			return;
+		CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
+		CBaseEntity *pSpot = gEntList.FindEntityByName( NULL, "travel_arrive" );
+		if ( pPlayer && pPlayer->IsAlive() && pSpot )
+		{
+			const QAngle ang = pSpot->GetAbsAngles();
+			pPlayer->Teleport( &pSpot->GetAbsOrigin(), &ang, &vec3_origin );
+			pPlayer->SnapEyeAngles( ang );
+			s_bTravelArrive = false;
+			const Vector &at = pSpot->GetAbsOrigin();
+			Msg( "[rpg] tram: arrived at the stop of %s (%.0f %.0f %.0f)\n", STRING( gpGlobals->mapname ), at.x, at.y, at.z );
+		}
+		else if ( gpGlobals->curtime > s_flTravelArriveUntil )
+			s_bTravelArrive = false;
+	}
+};
+static CRPGTravelArrival g_RPGTravelArrival;

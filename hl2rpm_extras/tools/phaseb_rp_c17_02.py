@@ -10,7 +10,7 @@
   ambience   posts at the Prospekt gate (Line-6) and the Opora gate, the kiosk trader, the
              newspaper seller; the world clock; baked-light fakes removed
 """
-from slice_kit import (npc_citizen, npc_cp, sign, prop, logic_rpg, trigger_box, strip_baked_fakes,
+from slice_kit import (tram_stop, npc_citizen, npc_cp, sign, prop, logic_rpg, trigger_box, strip_baked_fakes,
                        timecycle, lower)
 
 
@@ -57,11 +57,13 @@ def annex(m, log):
 
 
 def posts(m, log):
-    # Valve's metropolice_plaza stands at z 1.00001 (decompile rounding): "stuck in wall" on every load
-    for e in m.entities("npc_metropolice"):
+    # one of Valve's two metropolice_plaza stands inside the geometry at (-2492 -1203): "stuck in wall"
+    # on every load (raising it does not help) - the other unit keeps the act-busy post
+    for e in list(m.entities("npc_metropolice")):
         if lower(e.get("targetname")) == "metropolice_plaza":
-            x, y, z = e.get("origin").split()
-            e.set("origin", "%s %s %g" % (x, y, float(z) + 8))
+            x, y, z = (float(v) for v in e.get("origin").split())
+            if abs(x + 2491.57) < 4 and abs(y + 1202.78) < 4:
+                m.delete(e)
     npc_cp(m, "npc_cp_line6", (-1072, -2008, 0), 180)
     npc_cp(m, "npc_cp_gate_opora", (-2216, -4936, 0), 135)
     # Ilona Sanders of the "Gratitude" kiosk (Part V/04 AD-03): dialog npc_ilona -> barter screen
@@ -92,4 +94,5 @@ def build_phase_b(m, log):
     annex(m, log)
     posts(m, log)
     timecycle(m, (-2304, -2048, 200), 9.0)
+    tram_stop(m, "rp_c17_02_plaza", (-2560, -1900, 0), 0, (-2560, -1990, 0), 90)
     strip_baked_fakes(m, log)

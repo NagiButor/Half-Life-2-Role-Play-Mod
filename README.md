@@ -1,3 +1,5 @@
+<p align="center"><img src="hl2rpm_extras/art/steam/store/main_capsule_616x353_en.png" alt="Half-Life 2: Role-Playing Mod"></p>
+
 # Half-Life 2: Role-Playing Mod (HL2RPM)
 
 **English** · [Русский](README.ru.md)
@@ -33,6 +35,12 @@ GO-01 *Volunteers* (join Civil Protection: tests and a loyalty check at "Opora")
 LM-01 *Sign of the Lambda* (a samizdat run through a raid to "Lock 3"), SM-01 *The Bathhouse* (a parcel for Kadar's black market).
 Start from **New Game → Prologue: Arrival** or `map rp_c17_01_trainstation`.
 
+<p align="center">
+  <img src="hl2rpm_extras/art/readme/plaza_night.jpg" width="49%"> <img src="hl2rpm_extras/art/readme/oldtown_street.jpg" width="49%">
+  <img src="hl2rpm_extras/art/readme/barter.jpg" width="49%"> <img src="hl2rpm_extras/art/readme/go01_dialog.jpg" width="49%">
+  <img src="hl2rpm_extras/art/readme/oldtown_bridge.jpg" width="49%"> <img src="hl2rpm_extras/art/readme/train.jpg" width="49%">
+</p>
+
 ## Features
 
 ### Role-playing systems
@@ -50,6 +58,7 @@ Start from **New Game → Prologue: Arrival** or `map rp_c17_01_trainstation`.
 - **Quests** — stages, objectives with markers on the compass, journal and notes.
 - **Inventory, loot, trade** — items with weight, searching bodies and containers; traders with their own
   till and stock (kept in the save), prices by Barter skill and faction standing, haggling in dialogs.
+- **Tram** — fast travel between the districts you have discovered (stops in the station, the plaza, "Opora", the Old Town).
 - **Sleep** — beds you own: choose the hours, suspicion resets, curfew is checked.
 - **Persistent world** — character, quests, flags, time and weather survive saves and map transitions.
 

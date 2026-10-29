@@ -176,6 +176,7 @@
 		"terminal" : "Terminal text"
 		"read" : "Read only"
 		"sleep" : "Bed (sleep)"
+		"travel" : "Tram stop (fast travel: route screen)"
 		"effects" : "Effects only"
 	]
 	note(string) : "Note id" : "" : "Note id (strings NOTE_<id>_TITLE / NOTE_<id>_TEXT) for note, terminal and read."

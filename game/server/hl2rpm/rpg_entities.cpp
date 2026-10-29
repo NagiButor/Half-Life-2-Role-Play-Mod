@@ -469,6 +469,9 @@ public:
 	CPropRPGUsable() : m_bOnce( false ), m_bUsed( false ), m_bUseDisabled( false ), m_bHome( false ), m_flSleepHours( 8.0f ) {}
 
 	virtual int ObjectCaps() { return BaseClass::ObjectCaps() | FCAP_IMPULSE_USE; }
+	// записка, кровать, остановка - не ломаются и не падают, даже если у модели есть propdata
+	// (иначе Mapbase на каждой загрузке пишет «should be used on a prop_physics»)
+	virtual bool OverridePropdata() { return true; }
 
 	virtual void Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )
 	{
@@ -496,6 +499,13 @@ public:
 			if ( !Q_stricmp( pszAction, "note" ) )
 				RPG_GetCharacter()->AddNote( pszNote );
 			RPG_OpenUI( pPlayer, pszAction, pszNote, this );
+		}
+		else if ( !Q_stricmp( pszAction, "travel" ) )
+		{
+			// остановка трамвая: экран маршрута -> rpg_travel <локация>
+			RPG_OpenUI( pPlayer, "travel", STRING( GetEntityName() ), this );
+			m_OnUsed.FireOutput( pPlayer, this );
+			return;
 		}
 		else if ( !Q_stricmp( pszAction, "sleep" ) )
 		{

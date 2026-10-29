@@ -91,6 +91,7 @@ struct RPGLocationDef_t
 {
 	CUtlString id, name, map;
 	int xp;
+	bool travel;		// остановка трамвая: быстрое перемещение сюда (rpg_travel)
 };
 
 struct RPGKillDef_t

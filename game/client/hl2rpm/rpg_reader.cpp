@@ -25,7 +25,8 @@
 using namespace vgui;
 using namespace RPGUI;
 
-enum { BTN_READER_CLOSE = 1, BTN_SLEEP_MINUS = 10, BTN_SLEEP_PLUS = 11, BTN_SLEEP_GO = 12, BTN_SLEEP_CANCEL = 13, BTN_SCROLL_UP = 20, BTN_SCROLL_DOWN = 21 };
+enum { BTN_READER_CLOSE = 1, BTN_SLEEP_MINUS = 10, BTN_SLEEP_PLUS = 11, BTN_SLEEP_GO = 12, BTN_SLEEP_CANCEL = 13, BTN_SCROLL_UP = 20, BTN_SCROLL_DOWN = 21,
+       BTN_TRAVEL_CANCEL = 30, BTN_TRAVEL_STOP = 100 };
 
 // ---------------------------------------------------------------------------
 class CRPGReader : public CRPGScreen
@@ -243,10 +244,95 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// Трамвай: маршрут по открытым остановкам (locations.txt "travel" 1) -> rpg_travel <локация>
+// ---------------------------------------------------------------------------
+class CRPGTravel : public CRPGScreen
+{
+	DECLARE_CLASS_SIMPLE( CRPGTravel, CRPGScreen );
+public:
+	CRPGTravel() : BaseClass( "RPGTravel" ) {}
+	void Show()
+	{
+		if ( !IsOpen() )
+			Open();
+		PlayUISound( "buttons/combine_button1.wav" );
+	}
+protected:
+	virtual void OnKey( KeyCode code )
+	{
+		if ( code == KEY_E )
+			Close();
+	}
+	virtual void OnButton( int id, bool bRight )
+	{
+		if ( id == BTN_TRAVEL_CANCEL )
+		{
+			Close();
+			return;
+		}
+		const int i = id - BTN_TRAVEL_STOP;
+		if ( i >= 0 && i < RPGData().GetLocationCount() )
+		{
+			engine->ClientCmd( CFmtStr( "rpg_travel %s\n", RPGData().GetLocation( i ).id.Get() ) );
+			PlayUISound( "ambient/levels/labs/electric_explosion1.wav" );
+			Close();
+		}
+	}
+	virtual void PaintScreen()
+	{
+		DrawDimmer( 200 );
+		const int sw = ScreenW(), sh = ScreenH();
+		const int W = S( 640 ), H = S( 520 );
+		const int x0 = ( sw - W ) / 2, y0 = ( sh - H ) / 2, x1 = x0 + W, y1 = y0 + H;
+		DrawWindow( x0, y0, x1, y1 );
+		HFont fTitle = GetFont( FONT_TITLE ), fBody = GetFont( FONT_BODY ), fSmall = GetFont( FONT_BODY_SMALL );
+		wchar_t w[256];
+		Localize( "#HL2RPM_UI_TR_Title", w, sizeof( w ) );
+		DrawText( fTitle, x0 + S( 30 ), y0 + S( 24 ), clrAmber, w );
+		Localize( "#HL2RPM_UI_TR_Time", w, sizeof( w ) );
+		DrawText( fSmall, x0 + S( 30 ), y0 + S( 30 ) + FontTall( fTitle ), clrTextDim, w );
+
+		const CRPGCharacterData &c = RPGClient().Data();
+		char szMap[128];
+		Q_FileBase( engine->GetLevelName(), szMap, sizeof( szMap ) );
+		const int rowH = S( 44 );
+		int y = y0 + S( 110 ), n = 0;
+		for ( int i = 0; i < RPGData().GetLocationCount(); ++i )
+		{
+			const RPGLocationDef_t &loc = RPGData().GetLocation( i );
+			if ( !loc.travel || !c.HasLocation( loc.id.Get() ) )
+				continue;
+			const bool bHere = !Q_stricmp( loc.map.Get(), szMap );
+			Localize( loc.name.Get(), w, sizeof( w ) );
+			if ( bHere )
+			{
+				DrawRect( x0 + S( 30 ), y, x1 - S( 30 ), y + rowH - S( 6 ), Fade( clrAccentDim, 0.4f ) );
+				DrawText( fBody, x0 + S( 46 ), y + ( rowH - S( 6 ) - FontTall( fBody ) ) / 2, clrText, w );
+				wchar_t wh[64];
+				Localize( "#HL2RPM_UI_TR_Here", wh, sizeof( wh ) );
+				DrawTextRight( fSmall, x1 - S( 46 ), y + ( rowH - S( 6 ) - FontTall( fSmall ) ) / 2, clrAccent, wh );
+			}
+			else
+				TextButton( BTN_TRAVEL_STOP + i, x0 + S( 30 ), y, x1 - S( 30 ), y + rowH - S( 6 ), w );
+			y += rowH;
+			if ( ++n >= 7 )
+				break;
+		}
+		if ( n == 0 )
+		{
+			Localize( "#HL2RPM_UI_TR_None", w, sizeof( w ) );
+			DrawText( fBody, x0 + S( 30 ), y, clrTextFaint, w );
+		}
+		Localize( "#HL2RPM_UI_Sleep_Cancel", w, sizeof( w ) );
+		TextButton( BTN_TRAVEL_CANCEL, x0 + S( 30 ), y1 - S( 70 ), x0 + S( 200 ), y1 - S( 26 ), w );
+	}
+};
+
+// ---------------------------------------------------------------------------
 class CRPGReaderSystem : public CAutoGameSystem, public IRPGClientListener
 {
 public:
-	CRPGReaderSystem() : CAutoGameSystem( "CRPGReaderSystem" ), m_pReader( NULL ), m_pSleep( NULL ) {}
+	CRPGReaderSystem() : CAutoGameSystem( "CRPGReaderSystem" ), m_pReader( NULL ), m_pSleep( NULL ), m_pTravel( NULL ) {}
 	virtual bool Init()
 	{
 		RPGClient().AddListener( this );
@@ -262,6 +348,8 @@ public:
 			m_pReader = new CRPGReader();
 		if ( !m_pSleep )
 			m_pSleep = new CRPGSleep();
+		if ( !m_pTravel )
+			m_pTravel = new CRPGTravel();
 	}
 	virtual void LevelShutdownPreEntity()
 	{
@@ -269,6 +357,8 @@ public:
 			m_pReader->Close();
 		if ( m_pSleep && m_pSleep->IsOpen() )
 			m_pSleep->Close();
+		if ( m_pTravel && m_pTravel->IsOpen() )
+			m_pTravel->Close();
 	}
 	virtual bool OnRPGOpenUI( const char *pszScreen, const char *pszParam, int iSource )
 	{
@@ -276,6 +366,11 @@ public:
 		if ( !Q_stricmp( pszScreen, "read" ) || !Q_stricmp( pszScreen, "note" ) || !Q_stricmp( pszScreen, "terminal" ) )
 		{
 			m_pReader->Show( pszScreen, pszParam ? pszParam : "" );
+			return true;
+		}
+		if ( !Q_stricmp( pszScreen, "travel" ) )
+		{
+			m_pTravel->Show();
 			return true;
 		}
 		if ( !Q_stricmp( pszScreen, "sleep" ) )
@@ -288,5 +383,6 @@ public:
 private:
 	CRPGReader *m_pReader;
 	CRPGSleep *m_pSleep;
+	CRPGTravel *m_pTravel;
 };
 static CRPGReaderSystem g_RPGReaderSystem;

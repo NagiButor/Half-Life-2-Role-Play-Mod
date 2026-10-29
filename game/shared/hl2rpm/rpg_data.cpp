@@ -460,6 +460,7 @@ void CRPGData::LoadLocations()
 		d.name = pSub->GetString( "name", CFmtStr( "#RPG_Loc_%s", d.id.Get() ) );
 		d.map = pSub->GetString( "map" );
 		d.xp = Max( 0, pSub->GetInt( "xp", 20 ) );
+		d.travel = pSub->GetBool( "travel", false );
 	}
 	pKV->deleteThis();
 }

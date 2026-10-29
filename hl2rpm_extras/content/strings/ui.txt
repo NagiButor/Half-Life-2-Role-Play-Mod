@@ -201,6 +201,7 @@
 	"HL2RPM_UI_Use_Sleep"            { "ru" "Спать"        "en" "Sleep" }
 	"HL2RPM_UI_Use_Read"             { "ru" "Читать"       "en" "Read" }
 	"HL2RPM_UI_Use_Use"              { "ru" "Использовать" "en" "Use" }
+	"HL2RPM_UI_Use_Travel"           { "ru" "Ехать"        "en" "Ride" }
 
 	// ---- чтение и сон ----
 	"HL2RPM_UI_Reader_Close"         { "ru" "[E] закрыть   колесо мыши - прокрутка"   "en" "[E] close   mouse wheel - scroll" }
@@ -226,4 +227,14 @@
 	"HL2RPM_UI_BT_YourCredits"       { "ru" "ВАШИ КРЕДИТЫ"               "en" "YOUR CREDITS" }
 	"HL2RPM_UI_BT_Hint"              { "ru" "ЛКМ — 1 шт.   ПКМ — 5 шт.   Колесо — прокрутка   Esc — уйти"   "en" "LMB — 1   RMB — 5   Wheel — scroll   Esc — leave" }
 	"HL2RPM_UI_BT_Leave"             { "ru" "УЙТИ"                       "en" "LEAVE" }
+
+	// ---- трамвай (быстрое перемещение, rpg_reader.cpp CRPGTravel) ----
+	"HL2RPM_UI_TR_Title"             { "ru" "МАРШРУТ ТРАМВАЯ"            "en" "TRAM ROUTE" }
+	"HL2RPM_UI_TR_Time"              { "ru" "В пути около получаса. Остановки — только открытые районы."   "en" "About half an hour on the way. Stops: districts you have discovered." }
+	"HL2RPM_UI_TR_Here"              { "ru" "вы здесь"                   "en" "you are here" }
+	"HL2RPM_UI_TR_None"              { "ru" "Других остановок вы пока не знаете."   "en" "You don't know any other stops yet." }
+	"HL2RPM_UI_Fail_TravelUnknown"   { "ru" "Туда трамвай не ходит"      "en" "The tram doesn't go there" }
+	"HL2RPM_UI_Fail_TravelHere"      { "ru" "Вы уже здесь"               "en" "You are already here" }
+	"HL2RPM_UI_Fail_TravelSuspicion" { "ru" "С хвостом в трамвай не садятся"   "en" "You don't board a tram with a tail" }
+	"HL2RPM_UI_Fail_TravelNoStop"    { "ru" "Здесь нет остановки"        "en" "There is no stop here" }
 }

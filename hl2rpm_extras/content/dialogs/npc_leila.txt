@@ -97,7 +97,18 @@
 				"1" { "require_flag" "lm01_route=roofs"  "line" "Лукич слышал водосток над облавой. Говорит, вы скрипели красиво."  "line_en" "Lukich heard the drainpipe above the raid. He says you creaked beautifully." }
 				"2" { "require_flag" "lm01_route=simple"  "line" "ГО пропустила дурачка с макулатурой. Я двадцать лет учу этому взрослых."  "line_en" "Civil Protection let a simpleton with waste paper through. I've spent twenty years teaching adults to do that." }
 			}
-			"options" { "0" { "text" "(Ждать)"  "text_en" "(Wait)"  "next" "21" } }
+			"options"
+			{
+				"1" { "text" "(Ждать)"  "text_en" "(Wait)"  "require_noflag" "lm01_lie_failed"  "hide_if_unmet" "1"  "next" "21" }
+				"2" { "text" "(Ждать)"  "text_en" "(Wait)"  "require_flag" "lm01_lie_failed"  "hide_if_unmet" "1"  "next" "22" }
+			}
+		}
+		"22"
+		{
+			"line"    "Половину пачки забрала облава. Половина — тоже дошла. Поздравляю: теперь вас можно повесить вместе с нами. Для чистой карты — вокзал, подсобка за камерой хранения. Спросите юнита, который любит пиво. Но сначала Фарид: ему нужны руки."
+			"line_en" "The raid took half the bundle. Half of it got through, too. Congratulations: now you can be hanged together with us. For a clean card — the station, the back room behind the luggage office. Ask for the unit who likes beer. But Farid first: he needs hands."
+			"effects" { "rep" "lambda:-5"  "set_flag" "lm01_done" }
+			"options" { "0" { "text" "Спасибо."  "text_en" "Thank you."  "exit" "1"  "close" "1" } }
 		}
 		"21"
 		{

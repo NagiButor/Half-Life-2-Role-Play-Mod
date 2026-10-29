@@ -58,7 +58,7 @@ static int s_iUseHintKind = 0;
 static char s_szUseHint[160] = "";
 static float s_flUseHintChanged = 0.0f;
 static const char *s_pszUseVerbs[] = { "", "#HL2RPM_UI_Use_Talk", "#HL2RPM_UI_Use_Take", "#HL2RPM_UI_Use_Sleep",
-	"#HL2RPM_UI_Use_Read", "#HL2RPM_UI_Use_Use" };
+	"#HL2RPM_UI_Use_Read", "#HL2RPM_UI_Use_Use", "#HL2RPM_UI_Use_Travel" };
 
 static void __MsgFunc_RPG_UseHint( bf_read &msg )
 {

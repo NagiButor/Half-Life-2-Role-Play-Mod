@@ -147,3 +147,26 @@ def spot(m, name, pos, yaw=0, **kw):
     keys = dict(targetname=name, angles="0 %g 0" % yaw)
     keys.update(kw)
     return m.add_entity("info_target", pos, **keys)
+
+
+TRAM_MAPS = ("rp_c17_01_trainstation", "rp_c17_02_plaza", "rp_c17_04_oldtown", "rp_c17_08_opora")
+
+
+def tram_stop(m, this_map, arrive, yaw, prop_pos, prop_yaw):
+    """A tram stop (fast travel, RPG_SPEC 11.2): the sign pole opens the route screen (prop_rpg_usable
+    use_action travel); info_landmark lm_travel lets changelevel2 in and out, the player is put at
+    info_target travel_arrive; the tiny trigger_transition keeps NPCs near the stop from riding along.
+    changelevel2 needs a "connection" back: the new map must have a trigger_changelevel to the old one,
+    so every stop gets untouchable ones (spawnflags 2) to the other tram maps."""
+    x, y, z = arrive
+    for i, dest in enumerate(d for d in TRAM_MAPS if d != this_map):
+        m.add_brush_entity("trigger_changelevel", [m.make_box((x - 8 + 20 * i, y - 8, z + 440), (x + 8 + 20 * i, y + 8, z + 456),
+                                                              "TOOLS/TOOLSTRIGGER")],
+                           map=dest, landmark="lm_travel", spawnflags="2", targetname="tram_link_%d" % i)
+    m.add_entity("info_landmark", (x, y, z + 24), targetname="lm_travel")
+    m.add_entity("info_target", (x, y, z), targetname="travel_arrive", angles="0 %g 0" % yaw)
+    m.add_brush_entity("trigger_transition", [m.make_box((x - 8, y - 8, z + 400), (x + 8, y + 8, z + 416),
+                                                         "TOOLS/TOOLSTRIGGER")], targetname="lm_travel")
+    return m.add_entity("prop_rpg_usable", prop_pos, targetname="tram_stop", model="models/props_c17/signpole001.mdl",
+                        angles="0 %g 0" % prop_yaw, solid="6", use_action="travel", name="#HL2RPM_Hint_TramStop",
+                        DefaultAnim="", disableshadows="0")

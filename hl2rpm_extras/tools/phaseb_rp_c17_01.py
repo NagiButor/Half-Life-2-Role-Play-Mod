@@ -12,7 +12,7 @@ the people of the prologue and their map hooks (Part V/01 MQ-00 scenes 1-5, MQ-0
            medic Mitra's corner; city exit: npc_cp_checkpoint and a gate until
            checkpoint_trainstation_passed; locker 113 opens once the old man told about it
 """
-from slice_kit import (npc_citizen, npc_cp, sign, prop, logic_rpg, trigger_box, clip_brush, rename,
+from slice_kit import (tram_stop, npc_citizen, npc_cp, sign, prop, logic_rpg, trigger_box, clip_brush, rename,
                        strip_baked_fakes, timecycle, spot, lower)
 
 TRAIN = "intro_train_2"
@@ -197,6 +197,7 @@ def locker_113(m, log):
 
 def clock_and_fakes(m, log):
     timecycle(m, (-4825, -2085, 120), 8.0)
+    tram_stop(m, "rp_c17_01_trainstation", (-3480, 60, FLOOR), 270, (-3480, 176, FLOOR), 270)
     # the dream set (far west, the Black Mesa flash) keeps its beams
     strip_baked_fakes(m, log, keep_box=((-16384, -16384, -16384), (-8000, -8000, 16384)))
 

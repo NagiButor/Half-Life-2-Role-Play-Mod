@@ -1,3 +1,5 @@
+<p align="center"><img src="hl2rpm_extras/art/steam/store/main_capsule_616x353_ru.png" alt="Half-Life 2: Role-Playing Mod"></p>
+
 # Half-Life 2: Role-Playing Mod (HL2RPM)
 
 [English](README.md) · **Русский**
@@ -33,6 +35,12 @@ GO-01 «Добровольцы» (вступить в Гражданскую о�
 LM-01 «Знак лямбды» (самиздат через облаву на «Шлюз-3»), SM-01 «Баня» (посылка для чёрного рынка Кадара).
 Начать — **Новая игра → Пролог: Прибытие** или `map rp_c17_01_trainstation`.
 
+<p align="center">
+  <img src="hl2rpm_extras/art/readme/plaza_night.jpg" width="49%"> <img src="hl2rpm_extras/art/readme/oldtown_street.jpg" width="49%">
+  <img src="hl2rpm_extras/art/readme/barter.jpg" width="49%"> <img src="hl2rpm_extras/art/readme/go01_dialog.jpg" width="49%">
+  <img src="hl2rpm_extras/art/readme/oldtown_bridge.jpg" width="49%"> <img src="hl2rpm_extras/art/readme/train.jpg" width="49%">
+</p>
+
 ## Что есть в моде
 
 ### Ролевая система
@@ -49,6 +57,7 @@ LM-01 «Знак лямбды» (самиздат через облаву на �
 - **Квесты** — этапы, цели с метками на компасе, журнал и заметки.
 - **Инвентарь, лут, торговля** — предметы с весом, обыск тел и контейнеров; у торговцев своя касса и
   склад (в сохранении), цены по навыку Торговли и отношению фракции, торг в диалогах.
+- **Трамвай** — быстрое перемещение между открытыми районами (остановки на вокзале, площади, в «Опоре», Старом городе).
 - **Сон** — на своей кровати: выбор часов, сброс подозрения, проверка комендантского часа.
 - **Сохраняемый мир** — персонаж, квесты, флаги, время и погода переживают сохранения и переходы.
 

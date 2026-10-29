@@ -84,6 +84,11 @@ def PD(model, x, y, z, yaw=0, **kw):
     return M.prop("models/" + model + ".mdl", x, y, z, yaw, cls="prop_dynamic", **kw)
 
 
+def PH(model, x, y, z, yaw=0, **kw):
+    """models with propdata (breakable / physics): prop_physics, frozen with motion disabled if asked"""
+    return M.prop("models/" + model + ".mdl", x, y, z, yaw, cls="prop_physics", **kw)
+
+
 def light(x, y, z, bright=80, color="255 214 160", name=None):
     kv = dict(_light="%s %d" % (color, bright), _lightHDR="-1 -1 -1 1", _lightscaleHDR="1",
               _quadratic_attn="1", _linear_attn="0", _constant_attn="0", style="0")
@@ -266,7 +271,7 @@ for i, (xx, zz) in enumerate(((-860, 96), (-820, 108), (-780, 92), (-720, 104), 
 P("props_c17/FurnitureTable002a", -720, 680, z, 0)
 P("props_lab/desklamp01", -740, 680, z + 30, 200, block=False)
 P("props_c17/chair02a", -770, 690, z, 300)
-P("props_lab/clipboard", -700, 676, z + 30, 40, block=False)
+PH("props_lab/clipboard", -700, 676, z + 30, 40, block=False)
 P("props_c17/FurnitureShelf001a", -872, 560, z, 0)
 light(-768, 600, 112, 60, "255 210 150", name="lukich_lamp")
 door_prop(-848 + 4, 520, 8, 270, name="lukich_door")
@@ -318,7 +323,7 @@ P("props_c17/furniturestove001a", 1460, -1150, z, 180)
 light(1392, -1180, 120, 45, "255 200 140")
 door_prop(1368 + 4, -1110, 8, 270, name="booth_door")
 for i, (xx, yy, yaw) in enumerate(((1180, -960, 10), (1560, -980, 170), (1700, -940, 190))):
-    PD("props_canal/boat001a", xx, yy, -126, yaw, on_floor=False, block=False)
+    PH("props_canal/boat001a", xx, yy, -126, yaw, on_floor=False, block=False, spawnflags="8")
 cam("Shlyuz-3", 1250, -900, 0, 6, -30)
 
 # ================================================================ street furniture, lamps, market
@@ -331,7 +336,7 @@ for i in range(6):
     x = 1240 + 110 * i
     P("props_c17/FurnitureTable002a", x, 470, 0, 0)
     P(("props_junk/cardboard_box002a", "props_junk/garbage_metalcan001a", "props_c17/clock01",
-       "props_junk/garbage_glassbottle001a", "props_lab/clipboard", "props_junk/cardboard_box004a")[i],
+       "props_junk/garbage_glassbottle001a", "props_junk/garbage_newspaper001a", "props_junk/cardboard_box004a")[i],
       x, 470, 30, rnd.randint(0, 359), block=False)
 for x in (-1700, -300, 1000, 1900):
     P("props_junk/trashbin01a", x, 470, 0, 90)

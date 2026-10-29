@@ -30,6 +30,7 @@ enum RPGUseHint_t
 	RPG_HINT_SLEEP,
 	RPG_HINT_READ,
 	RPG_HINT_USE,
+	RPG_HINT_TRAVEL,	// остановка трамвая
 };
 
 // prop_rpg_usable (rpg_entities.cpp): действие и подпись
@@ -60,6 +61,8 @@ static int ClassifyUse( CBaseEntity *pEnt, CUtlString &label )
 			return RPG_HINT_SLEEP;
 		if ( pszAction && ( !Q_stricmp( pszAction, "note" ) || !Q_stricmp( pszAction, "terminal" ) ) )
 			return RPG_HINT_READ;
+		if ( pszAction && !Q_stricmp( pszAction, "travel" ) )
+			return RPG_HINT_TRAVEL;
 		return RPG_HINT_USE;
 	}
 	// предметы и оружие на земле

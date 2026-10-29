@@ -14,7 +14,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from slice_kit import npc_citizen, npc_cp, prop, trigger_box, timecycle, lower  # noqa: E402
+from slice_kit import npc_citizen, npc_cp, prop, trigger_box, timecycle, lower, tram_stop  # noqa: E402
 
 FL0, FL2 = 8, 264           # floors of storey 0 and 2 (make_opora.FL)
 
@@ -79,6 +79,7 @@ def duty_desk(m, log):
 
 def world(m, log):
     timecycle(m, (-640, -600, 40), 8.0)
+    tram_stop(m, "rp_c17_08_opora", (-2000, -600, -8), 0, (-2000, -450, 0), 270)
     # entering the compound through the pedestrian door: the location, and GO-01 knows the hero came
     trigger_box(m, "trigger_rpg", [((150, -360, -8), (480, -200, 120))], targetname="rpg_opora_enter",
                 discover="C17-08", once="1", spawnflags="1")

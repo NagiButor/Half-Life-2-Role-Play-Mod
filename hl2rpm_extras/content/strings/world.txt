@@ -29,6 +29,7 @@
 	"HL2RPM_Sign_Apt20"         { "ru" "КВ. 20"    "en" "APT. 20" }
 	"HL2RPM_Hint_Bed"           { "ru" "Кровать"   "en" "Bed" }
 	"HL2RPM_Hint_Bunk"          { "ru" "Койка"     "en" "Bunk" }
+	"HL2RPM_Hint_TramStop"      { "ru" "Остановка трамвая"   "en" "Tram stop" }
 	"HL2RPM_Hint_Terminal"      { "ru" "Терминал участка"   "en" "Precinct terminal" }
 	"HL2RPM_Sign_Ration"        { "ru" "РАЗДАЧА · ПН / ЧТ"  "en" "RATIONS · MON / THU" }
 }
