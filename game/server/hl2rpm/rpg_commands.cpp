@@ -13,6 +13,11 @@
 #include "hl2rpm/rpg_entities.h"
 #include "hl2rpm/rpg_formulas.h"
 #include "player.h"
+#include "ai_basenpc.h"
+#include "ai_network.h"
+#include "ai_node.h"
+#include "ai_link.h"
+#include "filesystem.h"
 #include "tier1/fmtstr.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -22,6 +27,122 @@ static CBasePlayer *CommandPlayer()
 {
 	CBasePlayer *pPlayer = UTIL_GetCommandClient();
 	return pPlayer ? pPlayer : RPG_GetPlayer();
+}
+
+// ---------------------------------------------------------------------------
+// Проверка проходимости (dev): маршрут по сетке узлов уровня (A* по связям для человека, шагом)
+// от игрока до точки - в cfg/_route.txt для cl_autowalk_file (client/hl2rpm/rpg_autowalk.cpp).
+// Нет маршрута - между точками нет прохода по узлам (или рядом с точкой нет видимого узла).
+// ---------------------------------------------------------------------------
+static int RouteNearestNode( const Vector &p, CBaseEntity *pIgnore )
+{
+	int iBest = -1;
+	float flBest = 1024.0f * 1024.0f;
+	for ( int i = 0; i < g_pBigAINet->NumNodes(); ++i )
+	{
+		CAI_Node *pNode = g_pBigAINet->GetNode( i );
+		if ( !pNode || pNode->GetType() != NODE_GROUND )
+			continue;
+		const Vector o = pNode->GetOrigin();
+		const float d2 = o.DistToSqr( p );
+		if ( d2 >= flBest )
+			continue;
+		// дойти по прямой телом игрока (заборы-пропы, барьеры, func_brush - тоже стены)
+		trace_t tr;
+		UTIL_TraceHull( p + Vector( 0, 0, 20 ), o + Vector( 0, 0, 20 ), Vector( -12, -12, 0 ), Vector( 12, 12, 40 ),
+			MASK_PLAYERSOLID, pIgnore, COLLISION_GROUP_PLAYER_MOVEMENT, &tr );
+		if ( tr.fraction < 1.0f || tr.startsolid )
+			continue;
+		iBest = i;
+		flBest = d2;
+	}
+	return iBest;
+}
+
+CON_COMMAND_F( rpg_route_dump, "Dev: rpg_route_dump <x y z> [from x y z] - node-graph route for a person, written to cfg/_route.txt", FCVAR_CHEAT )
+{
+	CBasePlayer *pPlayer = CommandPlayer();
+	if ( !pPlayer || args.ArgC() < 4 || !g_pBigAINet )
+	{
+		Msg( "usage: rpg_route_dump <x y z> [from x y z]\n" );
+		return;
+	}
+	Vector goal( atof( args[1] ), atof( args[2] ), atof( args[3] ) );
+	Vector from = pPlayer->GetAbsOrigin();
+	if ( args.ArgC() >= 7 )
+		from.Init( atof( args[4] ), atof( args[5] ), atof( args[6] ) );
+	const int iStart = RouteNearestNode( from, pPlayer ), iGoal = RouteNearestNode( goal, pPlayer );
+	const int N = g_pBigAINet->NumNodes();
+	if ( iStart < 0 || iGoal < 0 )
+	{
+		Msg( "[route] NO ROUTE: no visible node near the %s (%d nodes on the map)\n", iStart < 0 ? "start" : "goal", N );
+		return;
+	}
+	// Dijkstra (узлов сотни)
+	CUtlVector<float> dist;
+	CUtlVector<int> prev;
+	CUtlVector<bool> done;
+	dist.SetCount( N );
+	prev.SetCount( N );
+	done.SetCount( N );
+	for ( int i = 0; i < N; ++i )
+	{
+		dist[i] = FLT_MAX;
+		prev[i] = -1;
+		done[i] = false;
+	}
+	dist[iStart] = 0.0f;
+	for ( ;; )
+	{
+		int u = -1;
+		for ( int i = 0; i < N; ++i )
+			if ( !done[i] && dist[i] < FLT_MAX && ( u < 0 || dist[i] < dist[u] ) )
+				u = i;
+		if ( u < 0 || u == iGoal )
+			break;
+		done[u] = true;
+		CAI_Node *pNode = g_pBigAINet->GetNode( u );
+		for ( int l = 0; l < pNode->NumLinks(); ++l )
+		{
+			CAI_Link *pLink = pNode->GetLinkByIndex( l );
+			if ( !pLink || ( pLink->m_LinkInfo & bits_LINK_OFF ) || !( pLink->m_iAcceptedMoveTypes[HULL_HUMAN] & bits_CAP_MOVE_GROUND ) )
+				continue;
+			const int v = pLink->DestNodeID( u );
+			if ( v < 0 || v >= N || done[v] )
+				continue;
+			const float w = dist[u] + ( g_pBigAINet->GetNode( v )->GetOrigin() - pNode->GetOrigin() ).Length();
+			if ( w < dist[v] )
+			{
+				dist[v] = w;
+				prev[v] = u;
+			}
+		}
+	}
+	if ( dist[iGoal] == FLT_MAX )
+	{
+		Msg( "[route] NO ROUTE between node %d (%.0f %.0f %.0f) and node %d (%.0f %.0f %.0f)\n", iStart,
+			g_pBigAINet->GetNode( iStart )->GetOrigin().x, g_pBigAINet->GetNode( iStart )->GetOrigin().y, g_pBigAINet->GetNode( iStart )->GetOrigin().z,
+			iGoal, g_pBigAINet->GetNode( iGoal )->GetOrigin().x, g_pBigAINet->GetNode( iGoal )->GetOrigin().y, g_pBigAINet->GetNode( iGoal )->GetOrigin().z );
+		return;
+	}
+	CUtlVector<int> path;
+	for ( int v = iGoal; v >= 0; v = prev[v] )
+		path.AddToHead( v );
+	CUtlString text;
+	for ( int i = 0; i < path.Count(); ++i )
+	{
+		const Vector &p = g_pBigAINet->GetNode( path[i] )->GetOrigin();
+		text.Append( CFmtStr( "%.0f %.0f %.0f\n", p.x, p.y, p.z ) );
+	}
+	text.Append( CFmtStr( "%.0f %.0f %.0f\n", goal.x, goal.y, goal.z ) );
+	Msg( "[route] %d nodes, %.0f units: node %d -> node %d\n", path.Count(), dist[iGoal], iStart, iGoal );
+	FileHandle_t fh = filesystem->Open( "cfg/_route.txt", "wb", "MOD" );
+	if ( fh )
+	{
+		filesystem->Write( text.Get(), text.Length(), fh );
+		filesystem->Close( fh );
+	}
+	Msg( "[route] %d waypoints -> cfg/_route.txt\n", path.Count() + 1 );
 }
 
 // ---------------------------------------------------------------------------

@@ -43,7 +43,7 @@ static int ClassifyUse( CBaseEntity *pEnt, CUtlString &label )
 		return RPG_HINT_NONE;
 	// люди и всё, у кого есть разговор
 	const char *pszName = STRING( pEnt->GetEntityName() );
-	if ( pszName && pszName[0] && RPGDialog::Has( pszName ) )
+	if ( pEnt->IsNPC() ? RPGDialog::HasFor( pEnt ) : ( pszName && pszName[0] && RPGDialog::Has( pszName ) ) )
 	{
 		const char *pszSpeaker = RPGDialog::GetSpeaker( pEnt );
 		if ( pszSpeaker )

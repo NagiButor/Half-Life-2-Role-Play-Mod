@@ -577,6 +577,7 @@ if ERRORLEVEL 1 exit /b 1
     <ClInclude Include="hl2rpm\rpg_ui_common.h" />
     <ClInclude Include="hl2rpm\rpg_dialog_panel.h" />
     <ClInclude Include="hl2rpm\rpg_screen.h" />
+    <ClInclude Include="hl2rpm\rpg_language.h" />
     <ClInclude Include="vgui_lootpanel.h" />
     <ClInclude Include="vgui_schemevisualizer.h" />
     <ClInclude Include="vgui_video.h" />
@@ -1170,6 +1171,8 @@ if ERRORLEVEL 1 exit /b 1
     <ClCompile Include="hl2rpm\rpg_bracelet.cpp" />
     <ClCompile Include="hl2rpm\rpg_reader.cpp" />
     <ClCompile Include="hl2rpm\rpg_barter.cpp" />
+    <ClCompile Include="hl2rpm\rpg_language.cpp" />
+    <ClCompile Include="hl2rpm\rpg_autowalk.cpp" />
     <ClCompile Include="..\..\public\tier0\memoverride.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>

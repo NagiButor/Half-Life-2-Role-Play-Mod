@@ -164,7 +164,7 @@ static const char *s_pszCondTypeNames[RPG_COND_COUNT] =
 {
 	"", "attr", "skill", "faction", "civil", "item", "perk", "trait", "flag", "noflag", "humanity",
 	"resonance", "influence", "suspicion", "credits", "level", "act", "time", "disposition",
-	"quest_state", "quest_stage", "note", "location", "chargen", "zone", "suit"
+	"quest_state", "quest_stage", "note", "location", "chargen", "zone", "suit", "npc_var", "law"
 };
 
 const char *RPG_ConditionTypeName( int type )
@@ -488,11 +488,25 @@ bool RPGCondition_t::Parse( int iType, const char *pszBody, CUtlString *pError )
 	case RPG_COND_NOTE:
 	case RPG_COND_LOCATION:
 	case RPG_COND_SUIT:
+	case RPG_COND_LAW:
 		id = Trimmed( p );
 		bOk = !id.IsEmpty();
 		if ( bOk && type == RPG_COND_SUIT && RPG_SuitTypeFromKey( id.Get() ) < 0 )
 			bOk = false;
 		break;
+	case RPG_COND_NPCVAR:
+	{
+		// "i/n": вариант i (0..n-1) из n
+		const char *pSlash = Q_strstr( p, "/" );
+		bOk = pSlash != NULL;
+		if ( bOk )
+		{
+			value = atoi( p );
+			value2 = atoi( pSlash + 1 );
+			bOk = value2 > 0 && value >= 0 && value < value2;
+		}
+		break;
+	}
 	default:
 		bOk = false;
 		break;
@@ -730,6 +744,39 @@ bool RPGCondition_t::Test( const RPGEvalContext_t &ctx, bool *pUnknown ) const
 			bResult = ( iSuit == RPG_SuitTypeFromKey( id.Get() ) );
 		break;
 	}
+	case RPG_COND_NPCVAR:
+	{
+		// по имени собеседника (у генериков разные имена - разный «характер»), без имени - по индексу
+		const char *pszName = ( s_pWorldQuery && ctx.pNPC ) ? s_pWorldQuery->GetNPCName( ctx.pNPC ) : NULL;
+		if ( !ctx.pNPC )
+		{
+			bUnknown = true;
+			bResult = true;
+			break;
+		}
+		unsigned int h = 2166136261u;
+		if ( pszName && pszName[0] )
+		{
+			for ( const char *q = pszName; *q; ++q )
+				h = ( h ^ (unsigned char)( *q | 0x20 ) ) * 16777619u;
+		}
+		else
+			h = (unsigned int)ctx.pNPC->entindex() * 2654435761u;
+		bResult = (int)( ( h >> 4 ) % (unsigned int)value2 ) == value;
+		break;
+	}
+	case RPG_COND_LAW:
+	{
+		const int v = s_pWorldQuery ? s_pWorldQuery->LawQuery( ctx.pPlayer, ctx.pNPC, id.Get() ) : -1;
+		if ( v < 0 )
+		{
+			bUnknown = true;
+			bResult = true;
+		}
+		else
+			bResult = v > 0;
+		break;
+	}
 	default:
 		bResult = false;
 		break;
@@ -766,7 +813,11 @@ void RPGCondition_t::Describe( CUtlString &out ) const
 	case RPG_COND_NOTE:
 	case RPG_COND_LOCATION:
 	case RPG_COND_SUIT:
+	case RPG_COND_LAW:
 		out.Append( id.Get() );
+		return;
+	case RPG_COND_NPCVAR:
+		out.Append( CFmtStr( "%d/%d", value, value2 ) );
 		return;
 	case RPG_COND_ACT:
 		if ( tier == -3 )
@@ -994,7 +1045,8 @@ RPGEvalResult_t RPGConditionList_t::Evaluate( const RPGEvalContext_t &ctx ) cons
 				res.failTerm = t;
 				const RPGCondition_t &c = term.alternatives[0];
 				c.Describe( res.reason );
-				if ( c.type != RPG_COND_TRAIT && c.type != RPG_COND_NOTE && c.type != RPG_COND_LOCATION && c.type != RPG_COND_TIME && c.type != RPG_COND_SUIT )
+				if ( c.type != RPG_COND_TRAIT && c.type != RPG_COND_NOTE && c.type != RPG_COND_LOCATION && c.type != RPG_COND_TIME && c.type != RPG_COND_SUIT &&
+					c.type != RPG_COND_NPCVAR && c.type != RPG_COND_LAW )
 					res.reason.Append( CFmtStr( " (%d)", c.GetCurrentValue( ctx ) ) );
 			}
 		}
@@ -1022,7 +1074,7 @@ static const char *s_pszEffectNames[RPG_EFF_COUNT] =
 	"give_item", "take_item", "set_flag", "clear_flag", "add_flag", "disposition", "disposition_npc",
 	"grant_quest", "complete_quest", "fail_quest", "set_stage", "quest_event", "discover", "damage",
 	"heal", "start_combat", "open_barter", "open_chargen", "open_levelup", "fire", "notify", "sound",
-	"act", "note", "wait", "haggle"
+	"act", "note", "wait", "haggle", "law"
 };
 
 const char *RPG_EffectTypeName( int type )
@@ -1181,6 +1233,7 @@ bool RPGEffectList_t::AddKey( const char *pszKey, const char *pszValue )
 		case RPG_EFF_DISCOVER:
 		case RPG_EFF_NOTE:
 		case RPG_EFF_SOUND:
+		case RPG_EFF_LAW:
 			e.id = pszItem;
 			break;
 		case RPG_EFF_NOTIFY:
@@ -1367,6 +1420,7 @@ void RPGEffect_t::Describe( CUtlString &out ) const
 	case RPG_EFF_SOUND:
 	case RPG_EFF_NOTIFY:
 	case RPG_EFF_OPEN_BARTER:
+	case RPG_EFF_LAW:
 		out.Append( id.Get() );
 		break;
 	default:

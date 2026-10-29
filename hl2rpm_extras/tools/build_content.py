@@ -102,6 +102,9 @@ SPEC_QUESTS = ["mq00_arrival", "mq01_temp_pass", "mq02_papers", "sq01_can", "go0
 SPEC_MAPS = {"rp_c17_01_trainstation", "rp_c17_02_plaza", "rp_c17_03_block7", "rp_c17_04_oldtown", "rp_c17_08_opora"}
 SPEC_LOCATIONS = {"C17-00", "C17-01", "C17-02", "C17-03", "C17-04", "C17-07", "C17-08"}
 NO_VOICE = {"", "-", "—", "none", "text", "silent"}
+# закон Альянса (game/server/hl2rpm/rpg_law.cpp): условие law <что>, эффект law=<действие>
+LAW_QUERIES = {"contraband", "armed", "corrupt", "debt", "record", "papers", "stop"}
+LAW_ACTIONS = {"release", "frisk", "arrest", "flee", "pay_debt"}
 
 # ---------------------------------------------------------------------------
 # Ключи (RPG_SPEC §3, §4, §5, §6 + старые ключи dialog_definitions.cpp)
@@ -111,6 +114,8 @@ COND_KEYS = {"require_attr", "require_skill", "require_faction", "require_civil"
              "require_resonance", "require_suspicion", "require_credits", "require_level",
              "require_act", "require_time", "require_disposition", "require_quest_state",
              "require_quest_stage", "require",
+             # общие реплики (характер генерика) и закон Альянса (rpg_law.cpp)
+             "require_npc_var", "require_law",
              # старые
              "require_rep", "require_quest", "require_stage"}
 EFFECT_KEYS = {"xp", "rep", "civil", "suspicion", "humanity", "resonance", "influence", "credits",
@@ -118,7 +123,7 @@ EFFECT_KEYS = {"xp", "rep", "civil", "suspicion", "humanity", "resonance", "infl
                "disposition_npc", "grant_quest", "complete_quest", "fail_quest", "set_stage",
                "quest_event", "discover", "damage", "heal", "start_combat", "open_barter",
                "open_chargen", "open_levelup", "fire", "notify", "sound",
-               "act", "note", "wait", "haggle"}
+               "act", "note", "wait", "haggle", "law"}
 LIST_EFFECTS = {"rep", "give_item", "take_item", "set_flag", "clear_flag", "add_flag",
                 "disposition_npc", "grant_quest", "complete_quest", "fail_quest", "set_stage",
                 "quest_event", "discover"}
@@ -863,6 +868,16 @@ class Builder(object):
         if k in ("require_rep", "require_stage"):
             if not is_int(v):
                 E("ожидается число")
+            return
+        if k == "require_npc_var":
+            m = re.fullmatch(r"(\d+)/(\d+)", v)
+            if not m or int(m.group(2)) <= 0 or int(m.group(1)) >= int(m.group(2)):
+                E("формат «i/n», 0 <= i < n")
+            return
+        if k == "require_law":
+            if v.lstrip("!") not in LAW_QUERIES:
+                E("одно из: %s (можно с !)" % ", ".join(sorted(LAW_QUERIES)))
+            return
 
     def check_effect(self, c, src, where):
         k = c.k
@@ -954,6 +969,9 @@ class Builder(object):
                     E("формат «target,Input,param,delay»")
             elif base in ("notify", "sound"):
                 pass
+            elif base == "law":
+                if it not in LAW_ACTIONS and not re.fullmatch(r"fine:\d+", it):
+                    E("одно из: %s, fine:N" % ", ".join(sorted(LAW_ACTIONS)))
 
     # ------------------------------------------------------------- токены
     def text_issues(self, text, src, line, where, key, lang, option=False):

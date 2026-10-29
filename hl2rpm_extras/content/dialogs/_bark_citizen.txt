@@ -1,0 +1,104 @@
+// Общие реплики горожанина (мужчины) - у каждого человека в мире есть ответ на E (Fallout: «прохожий»).
+// Выдаётся NPC без своего диалога: ключ rpg_dialog "_bark_citizen" на карте или фракция citizen.
+// «Характер» - вариант по имени NPC (require_npc_var i/n): один и тот же человек всегда говорит одно.
+// Подпись - loot_displayname NPC («Гражданин», «Пассажир»), иначе speaker ниже.
+"Dialog"
+{
+	"entity"        "_bark_citizen"
+	"voice"         "citizen_m"
+	"speaker"       "Гражданин"   "speaker_en" "Citizen"
+	"auto_face_npc" "1"
+	"greetings"
+	{
+		"1" { "require_suspicion" ">=50"  "node" "50" }
+		"2" { "require_npc_var" "0/8"  "node" "1" }
+		"3" { "require_npc_var" "1/8"  "node" "2" }
+		"4" { "require_npc_var" "2/8"  "node" "3" }
+		"5" { "require_npc_var" "3/8"  "node" "4" }
+		"6" { "require_npc_var" "4/8"  "node" "5" }
+		"7" { "require_npc_var" "5/8"  "node" "6" }
+		"8" { "require_npc_var" "6/8"  "node" "7" }
+		"9" { "node" "8" }
+	}
+	"nodes"
+	{
+		"1"
+		{
+			"line"    "Не стой так близко. Сканеры любят, когда люди сбиваются в кучу."
+			"line_en" "Don't stand so close. The scanners love it when people bunch up."
+			"emotion" "вполголоса, не поворачивая головы"
+			"options"
+			{
+				"1" { "text" "А что они делают?"  "text_en" "What do they do?"  "next" "11" }
+				"0" { "text" "(Отойти)"  "text_en" "(Step away)"  "exit" "1"  "close" "1" }
+			}
+		}
+		"11"
+		{
+			"line"    "Фотографируют. А потом за кем-то приходят. Не всегда за тем, кого сфотографировали."
+			"line_en" "They take pictures. And then somebody gets picked up. Not always the one in the picture."
+			"end"     "1"
+		}
+		"2"
+		{
+			"line"    "Поезд опоздал на два часа. Говорят, на полпути кого-то сняли. Никто не видел - кого."
+			"line_en" "The train was two hours late. They say somebody was taken off halfway. Nobody saw who."
+			"options" { "0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" } }
+		}
+		"3"
+		{
+			"line"    "Двенадцать лет я был инженером. Теперь я «единица трудового резерва». Звучит гордо, правда?"
+			"line_en" "I was an engineer for twelve years. Now I'm a “labour reserve unit”. Sounds proud, doesn't it?"
+			"emotion" "горько усмехается"
+			"options" { "0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" } }
+		}
+		"4"
+		{
+			"line"    "Ищешь, где поесть, - раздача на площади. Ищешь, с кем поговорить, - не здесь и не со мной."
+			"line_en" "If you're looking for food, the dispenser's on the square. If you're looking for someone to talk to - not here, not me."
+			"options" { "0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" } }
+		}
+		"5"
+		{
+			"line"    "Воду из-под крана не пей, пока не отстоится. Говорят, в неё что-то добавляют. Я ничего не говорил."
+			"line_en" "Don't drink the tap water until it settles. They say they put something in it. I didn't say anything."
+			"options" { "0" { "text" "(Кивнуть)"  "text_en" "(Nod)"  "exit" "1"  "close" "1" } }
+		}
+		"6"
+		{
+			"line"    "Новенький? Совет бесплатный: не смотри юнитам в маску. Они это чувствуют."
+			"line_en" "New here? Free advice: don't look the units in the mask. They can feel it."
+			"options"
+			{
+				"1" { "text" "А если они смотрят на меня?"  "text_en" "And if they look at me?"  "next" "12" }
+				"0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" }
+			}
+		}
+		"12"
+		{
+			"line"    "Тогда иди шагом, держи руки на виду и документы - в кармане, а не в голове."
+			"line_en" "Then you walk, keep your hands in sight and your papers in your pocket, not in your head."
+			"end"     "1"
+		}
+		"7"
+		{
+			"line"    "Говорят, за городом ещё остался лес. Настоящий. Я не верю. Но мне нравится, что так говорят."
+			"line_en" "They say there's still a forest outside the city. A real one. I don't believe it. But I like that people say so."
+			"options" { "0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" } }
+		}
+		"8"
+		{
+			"line"    "Не сейчас. Пожалуйста."
+			"line_en" "Not now. Please."
+			"emotion" "отводит взгляд"
+			"end"     "1"
+		}
+		"50"
+		{
+			"line"    "Отойди от меня. На тебя уже смотрят - а значит, и на меня."
+			"line_en" "Get away from me. They're already watching you - which means me too."
+			"emotion" "испуганно, шёпотом"
+			"end"     "1"
+		}
+	}
+}

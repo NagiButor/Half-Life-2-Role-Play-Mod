@@ -31,10 +31,14 @@
 | 2 | С учётной картой — что угодно. С временным — ящики. | With an account card, anything. With a temporary pass, crates. |
 | 3 | Вот и славно. Носите. | Good. Carry. |
 
-## Реплики (9; записано RU 0, EN 0)
+## Реплики (13; записано RU 0, EN 0)
 
 | ID | Контекст (квест · NPC · узел) | RU | EN | Эмоция / ремарка |
 |---|---|---|---|---|
+| `D__BARK_CLERK_N1` | mq00_arrival · _bark_clerk · узел 1 | Бланк заполняют чернилами. Карандашом - назад, в конец очереди. | Forms are filled in ink. In pencil - back to the end of the queue. |  |
+| `D__BARK_CLERK_N2` | mq00_arrival · _bark_clerk · узел 2 | Перерыв. Нет, перерывов здесь не бывает. Просто отойдите от окна. | Break. No, there are no breaks here. Just step away from the window. |  |
+| `D__BARK_CLERK_N3` | mq00_arrival · _bark_clerk · узел 3 | Номер в очереди? Нет номера - нет очереди. Нет очереди - нет вас. | Your number in the queue? No number - no queue. No queue - no you. |  |
+| `D__BARK_CLERK_N10` | mq00_arrival · _bark_clerk · узел 10 | Новоприбывшие - в четвёртое окно. Здесь только продление и утерянные карты. | New arrivals - window four. This one is renewals and lost cards only. |  |
 | `MQ01_S3_N1_CLERK` | mq01_temp_pass · npc_bureau_clerk · узел 1 | Временный? Только разовые. Грузчик, вокзал, перрон три. Двадцать кредитов и отметка в статусе. Следующий. | Temporary? One-off jobs only. Loader, the station, platform three. Twenty credits and a note in your status. Next. | не поднимая глаз от бланков, скороговоркой |
 | `MQ01_S3_N2_CLERK` | mq01_temp_pass · npc_bureau_clerk · узел 2 | Наряд. Перрон три, бригадир Сундберг. Не потеряйте - второго не дам. | Work order. Platform three, foreman Sundberg. Don't lose it - you won't get another. |  |
 | `MQ01_S3_N3_CLERK` | mq01_temp_pass · npc_bureau_clerk · узел 3 | С учётной картой - что угодно. С временным - ящики. Карта - в Регистрационном отделе. | With a registration card - anything you like. With a temporary pass - crates. Cards are at the Registration Office. |  |

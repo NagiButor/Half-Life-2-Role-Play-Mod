@@ -196,10 +196,13 @@ bool VGui_Startup( CreateInterfaceFn appSystemFactory )
 // HL2RPM: "Graphics" page in the Options dialog (hl2rpm_options_graphics.cpp)
 extern void HL2RPM_CreateOptionsInjector();
 extern void HL2RPM_DestroyOptionsInjector();
+extern void HL2RPM_Language_Init();
 
 void VGui_CreateGlobalPanels( void )
 {
 	HL2RPM_CreateOptionsInjector();
+	// HL2RPM: the game language chosen in Options -> Game (hl2rpm/rpg_language.cpp)
+	HL2RPM_Language_Init();
 
 	VPANEL gameToolParent = enginevgui->GetPanel( PANEL_CLIENTDLL_TOOLS );
 	VPANEL toolParent = enginevgui->GetPanel( PANEL_TOOLS );

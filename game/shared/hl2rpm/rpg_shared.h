@@ -180,6 +180,8 @@ enum RPGNotifyKind_t
 	RPG_NOTIFY_CHECK = 13,		// результат проверки: token = подпись, value = 1/0, extra = вид
 	RPG_NOTIFY_ZONE = 14,		// value = новая зона (0/1/2)
 	RPG_NOTIFY_FAIL = 15,		// отказ действия: token = токен причины, extra = параметр
+	RPG_NOTIFY_LAW = 16,		// закон (rpg_law.cpp): token = событие (check/search/detain/fled/walked_off/alarm/
+								// alarm_end/frisk_found/frisk_clean/arrested), value = штраф, extra = изъятые классы через запятую
 	RPG_NOTIFY_OPEN_UI = 20,	// token = экран (chargen/levelup/barter/note/terminal/read/sleep),
 								// value = entindex источника, extra = параметр (trader id, note id, часы)
 };

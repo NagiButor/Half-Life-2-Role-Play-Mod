@@ -331,6 +331,47 @@ bool RPGDialog::Has( const char *pszEntityName )
 	return FindDialog( pszEntityName ) != NULL;
 }
 
+// диалог для NPC: заданный явно, свой по targetname, общий по rpg_dialog, реплика фракции
+static const char *DefaultBarkFor( CAI_BaseNPC *pAI )
+{
+	const bool bFemale = Q_stristr( STRING( pAI->GetModelName() ), "female" ) != NULL;
+	const char *pszFaction = pAI->GetRPGFaction();
+	if ( pszFaction && pszFaction[0] )
+	{
+		if ( !Q_stricmp( pszFaction, "cp" ) ) return "_bark_cp";
+		if ( !Q_stricmp( pszFaction, "vort" ) || !Q_stricmp( pszFaction, "vortigaunts" ) ) return "_bark_vort";
+		if ( !Q_stricmp( pszFaction, "overwatch" ) ) return NULL;		// Надзор не разговаривает
+		return bFemale ? "_bark_citizen_f" : "_bark_citizen";
+	}
+	if ( pAI->ClassMatches( "npc_citizen" ) ) return bFemale ? "_bark_citizen_f" : "_bark_citizen";
+	if ( pAI->ClassMatches( "npc_metropolice" ) ) return "_bark_cp";
+	if ( pAI->ClassMatches( "npc_vortigaunt" ) ) return "_bark_vort";
+	return NULL;
+}
+
+static const RPGDialog_t *ResolveDialog( CBaseEntity *pNPC, const char *pszOverride = NULL )
+{
+	if ( !pNPC )
+		return NULL;
+	if ( pszOverride && pszOverride[0] )
+		return FindDialog( pszOverride );
+	const RPGDialog_t *pDlg = FindDialog( STRING( pNPC->GetEntityName() ) );
+	if ( pDlg )
+		return pDlg;
+	CAI_BaseNPC *pAI = pNPC->MyNPCPointer();
+	if ( !pAI )
+		return NULL;
+	if ( pAI->GetRPGDialog()[0] && ( pDlg = FindDialog( pAI->GetRPGDialog() ) ) != NULL )
+		return pDlg;
+	const char *pszBark = DefaultBarkFor( pAI );
+	return pszBark ? FindDialog( pszBark ) : NULL;
+}
+
+bool RPGDialog::HasFor( CBaseEntity *pNPC )
+{
+	return ResolveDialog( pNPC ) != NULL;
+}
+
 // ===========================================================================
 // Разговор
 // ===========================================================================
@@ -411,11 +452,22 @@ static void SendLongString( CBasePlayer *pPlayer, const char *pszText )
 	}
 }
 
+static const RPGDialog_t *FindDialog( const char *pszEntity );
+
 static const char *SpeakerFor( CBaseEntity *pNPC, const RPGDialog_t *pDlg )
 {
+	CAI_BaseNPC *pAI = pNPC ? pNPC->MyNPCPointer() : NULL;
+	// общий диалог (_bark_*, _law_stop): имя самого NPC - loot_displayname карты или подпись его своего диалога
+	if ( pDlg->entity.Get()[0] == '_' && pNPC )
+	{
+		if ( pAI && pAI->GetLootDisplayName()[0] )
+			return pAI->GetLootDisplayName();
+		const RPGDialog_t *pOwn = FindDialog( STRING( pNPC->GetEntityName() ) );
+		if ( pOwn && pOwn != pDlg && pOwn->speaker.Length() )
+			return pOwn->speaker.Get();
+	}
 	if ( pDlg->speaker.Length() )
 		return pDlg->speaker.Get();
-	CAI_BaseNPC *pAI = pNPC ? pNPC->MyNPCPointer() : NULL;
 	if ( pAI && pAI->GetLootDisplayName()[0] )
 		return pAI->GetLootDisplayName();
 	return "";
@@ -426,10 +478,10 @@ const char *RPGDialog::GetSpeaker( CBaseEntity *pNPC )
 	if ( !pNPC )
 		return NULL;
 	const char *pszName = STRING( pNPC->GetEntityName() );
-	const RPGDialog_t *pDlg = FindDialog( pszName );
+	const RPGDialog_t *pDlg = ResolveDialog( pNPC );
 	if ( !pDlg )
 		return NULL;
-	if ( RPG_GetCharacter()->Data().IsFlagSet( CFmtStr( "dlg_spoiled_%s", pszName ) ) )
+	if ( pszName && pszName[0] && RPG_GetCharacter()->Data().IsFlagSet( CFmtStr( "dlg_spoiled_%s", pszName ) ) )
 		return NULL;
 	CAI_BaseNPC *pAI = pNPC->MyNPCPointer();
 	if ( pAI && ( !pAI->IsAlive() || ( UTIL_GetLocalPlayer() && pAI->IRelationType( UTIL_GetLocalPlayer() ) == D_HT ) ) )
@@ -742,9 +794,11 @@ static void EndConversation( CBasePlayer *pPlayer, bool bSendEnd )
 	s_Conv.bActive = false;
 	if ( bSendEnd && pPlayer )
 		SendEnd( pPlayer );
+	s_Conv.Reset();
+	if ( entity.IsEmpty() )
+		return;		// безымянный генерик (общая реплика): ни «уже говорили», ни событий квеста
 	CRPGCharacter *pChar = RPG_GetCharacter();
 	pChar->SetFlag( CFmtStr( "dlg_spoken_%s", entity.Get() ), 1 );
-	s_Conv.Reset();
 	// квесты: «поговорить с ...»
 	if ( pPlayer )
 		RPG_QuestEvent( pPlayer, "talk", entity.Get() );
@@ -755,26 +809,37 @@ bool RPGDialog::IsActive()
 	return s_Conv.bActive;
 }
 
+CBaseEntity *RPGDialog::GetActiveNPC()
+{
+	return s_Conv.bActive ? s_Conv.hNPC.Get() : NULL;
+}
+
 void RPGDialog::Stop()
 {
 	EndConversation( RPG_GetPlayer() );
 }
 
-bool RPGDialog::Start( CBasePlayer *pPlayer, CBaseEntity *pNPC, int iNode )
+bool RPGDialog::Start( CBasePlayer *pPlayer, CBaseEntity *pNPC, int iNode, const char *pszDialog )
 {
 	if ( !pPlayer || !pNPC )
 		return false;
 	const char *pszName = STRING( pNPC->GetEntityName() );
-	const RPGDialog_t *pDlg = FindDialog( pszName );
+	const RPGDialog_t *pDlg = ResolveDialog( pNPC, pszDialog );
 	if ( !pDlg )
 		return false;
+	// второе нажатие E / второй обработчик +use в том же разговоре - не начинать заново
+	if ( s_Conv.bActive && s_Conv.hNPC.Get() == pNPC && s_Conv.pDlg == pDlg && iNode < 0 )
+		return true;
 
 	CRPGCharacter *pChar = RPG_GetCharacter();
 	// испорчен: по флагу (наш) или по старому списку (урон по NPC, вход SpoilDialog)
-	if ( DialogDefinitions::IsEntitySpoiled( pszName ) )
-		pChar->SetFlag( CFmtStr( "dlg_spoiled_%s", pszName ), 1 );
-	if ( pChar->Data().IsFlagSet( CFmtStr( "dlg_spoiled_%s", pszName ) ) )
-		return false;
+	if ( pszName && pszName[0] )
+	{
+		if ( DialogDefinitions::IsEntitySpoiled( pszName ) )
+			pChar->SetFlag( CFmtStr( "dlg_spoiled_%s", pszName ), 1 );
+		if ( pChar->Data().IsFlagSet( CFmtStr( "dlg_spoiled_%s", pszName ) ) )
+			return false;
+	}
 	CAI_BaseNPC *pAI = pNPC->MyNPCPointer();
 	if ( pAI && ( !pAI->IsAlive() || pAI->IRelationType( pPlayer ) == D_HT ) )
 		return false;

@@ -365,6 +365,7 @@ if ERRORLEVEL 1 exit /b 1
     <ClInclude Include="..\..\game\shared\hl2rpm\rpg_quest_data.h" />
     <ClInclude Include="hl2rpm\rpg_dialog.h" />
     <ClInclude Include="..\..\game\shared\hl2rpm\rpg_dialog_shared.h" />
+    <ClInclude Include="hl2rpm\rpg_law.h" />
     <ClInclude Include="item_combine_soldier_suit.h" />
     <ClInclude Include="logicrelay.h" />
     <ClInclude Include="..\..\public\map_utils.h" />
@@ -1131,6 +1132,7 @@ if ERRORLEVEL 1 exit /b 1
     <ClCompile Include="hl2rpm\rpg_dialog.cpp" />
     <ClCompile Include="hl2rpm\rpg_usehint.cpp" />
     <ClCompile Include="hl2rpm\rpg_streaming.cpp" />
+    <ClCompile Include="hl2rpm\rpg_law.cpp" />
     <ClCompile Include="item_combine_soldier_suit.cpp" />
     <ClCompile Include="item_world.cpp" />
     <ClCompile Include="..\..\public\keyframe\keyframe.cpp">

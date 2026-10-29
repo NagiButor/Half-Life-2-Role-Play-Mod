@@ -5,6 +5,7 @@
 //=============================//
 
 #include "cbase.h"
+#include "hl2rpm/rpg_law.h"
 #include "hl2rpm/rpg_character.h"
 #include "hl2rpm/rpg_conditions.h"
 #include "ai_basenpc.h"
@@ -137,6 +138,7 @@ void RPGEffectList_t::Apply( CBasePlayer *pPlayer, CBaseEntity *pNPC, CBaseEntit
 			pChar->SetFlag( szFlag, Max( 1, pChar->Data().GetFlagInt( RPG_FLAG_DAY, 1 ) ) );
 			break;
 		}
+		case RPG_EFF_LAW:			RPG_Law_Effect( pPlayer, pNPC, e.id.Get() ); break;
 		case RPG_EFF_WAIT:
 			if ( pPlayer && e.amount > 0 )
 			{

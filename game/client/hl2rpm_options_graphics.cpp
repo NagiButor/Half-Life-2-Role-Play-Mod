@@ -1,6 +1,6 @@
 //========= HL2RPM ============================================================//
 //
-// Purpose: "Graphics" and "Effects" pages inside the standard Options dialog (GameUI).
+// Purpose: "Graphics", "Effects" and "Game" pages inside the standard Options dialog (GameUI).
 //
 // GameUI.dll is closed source, so the pages are injected at runtime: a hidden
 // ticking panel watches for the "OptionsDialog" panel and calls its (virtual)
@@ -12,8 +12,10 @@
 //
 // The pages drive the renderer settings added by the deferred renderer, the
 // weather system and the post-processing. Engine settings (resolution, AA,
-// texture detail...) stay on the Video tab. Both pages are the same class,
-// filled from a table (GfxPageDesc_t): the settings, their choices and presets.
+// texture detail...) stay on the Video tab. The "Game" page has the language
+// (hl2rpm/rpg_language.cpp), subtitles, the dialog and HUD settings. All pages are
+// the same class, filled from a table (GfxPageDesc_t): the settings, their choices
+// and presets (the Game page has none).
 //
 //=============================================================================//
 
@@ -77,6 +79,14 @@ static const GfxChoice_t s_DoFChoices[] =
 static const GfxChoice_t s_SharpenChoices[] =
 {
 	{ "#HL2RPM_Gfx_Off", 0 }, { "#HL2RPM_Gfx_Q_Low", 0.2f }, { "#HL2RPM_Gfx_Q_Medium", 0.4f }, { "#HL2RPM_Gfx_Q_High", 0.65f },
+};
+static const GfxChoice_t s_LanguageChoices[] =
+{
+	{ "#HL2RPM_Game_Lang_Steam", 0 }, { "#HL2RPM_Game_Lang_Russian", 1 }, { "#HL2RPM_Game_Lang_English", 2 },
+};
+static const GfxChoice_t s_ReadSpeedChoices[] =
+{
+	{ "#HL2RPM_Game_Speed_Slow", 10 }, { "#HL2RPM_Game_Speed_Normal", 16 }, { "#HL2RPM_Game_Speed_Fast", 26 },
 };
 
 struct GfxChoiceList_t
@@ -260,6 +270,55 @@ static const float s_flFxPresets[GFX_PRESET_COUNT][FX_SETTING_COUNT] =
 	{	1,	1,	2,	1,	1,	1,	1,	1,	1,	1,	1,	0.4f	},	// ultra
 };
 
+// ---------------------------------------------------------------------------
+// Page "Game": language, subtitles, dialogs, the RPG interface
+// ---------------------------------------------------------------------------
+enum GameSetting_e
+{
+	GAME_LANGUAGE = 0,		// cl_hl2rpm_language 0 as in Steam / 1 Russian / 2 English
+	GAME_SUBTITLES,			// closecaption 0/1
+	GAME_DLG_AUTOCONTINUE,	// cl_rpg_dialog_autocontinue 0/1
+	GAME_DLG_READSPEED,		// cl_rpg_dialog_readspeed 10/16/26
+	GAME_DLG_AUTOFACE,		// cl_rpg_dialog_autoface 0/1
+	GAME_HUD,				// cl_rpg_hud 0/1
+	GAME_BREENCAST_CC,		// cl_hl2rpm_breencast_captions 0/1
+
+	GAME_SETTING_COUNT
+};
+
+static const char *s_pszGameConVars[GAME_SETTING_COUNT] =
+{
+	"cl_hl2rpm_language",
+	"closecaption",
+	"cl_rpg_dialog_autocontinue",
+	"cl_rpg_dialog_readspeed",
+	"cl_rpg_dialog_autoface",
+	"cl_rpg_hud",
+	"cl_hl2rpm_breencast_captions",
+};
+
+static const char *s_pszGameLabels[GAME_SETTING_COUNT] =
+{
+	"#HL2RPM_Game_Language",
+	"#HL2RPM_Game_Subtitles",
+	"#HL2RPM_Game_DlgAutoContinue",
+	"#HL2RPM_Game_DlgReadSpeed",
+	"#HL2RPM_Game_DlgAutoFace",
+	"#HL2RPM_Game_Hud",
+	"#HL2RPM_Game_BreencastCaptions",
+};
+
+static const GfxChoiceList_t s_GameChoices[GAME_SETTING_COUNT] =
+{
+	CHOICES( s_LanguageChoices ),
+	CHOICES( s_OnOffChoices ),
+	CHOICES( s_OnOffChoices ),
+	CHOICES( s_ReadSpeedChoices ),
+	CHOICES( s_OnOffChoices ),
+	CHOICES( s_OnOffChoices ),
+	CHOICES( s_OnOffChoices ),
+};
+
 struct GfxPageDesc_t
 {
 	const char *pszPanelName;		// also how the injector finds an already added page
@@ -269,7 +328,7 @@ struct GfxPageDesc_t
 	const char * const *ppszConVars;
 	const char * const *ppszLabels;
 	const GfxChoiceList_t *pChoices;
-	const float *pflPresets;		// [ GFX_PRESET_COUNT ][ nSettings ]
+	const float *pflPresets;		// [ GFX_PRESET_COUNT ][ nSettings ]; NULL - no presets
 	int iRestartSetting;			// a change of this one needs a restart (-1: none)
 	const char *pszHint;
 };
@@ -286,6 +345,13 @@ static const GfxPageDesc_t s_EffectsPage =
 	"HL2RPMEffectsPage", "#HL2RPM_Options_Effects", "#HL2RPM_Fx_Preset",
 	FX_SETTING_COUNT, s_pszFxConVars, s_pszFxLabels, s_FxChoices, &s_flFxPresets[0][0],
 	-1, "#HL2RPM_Fx_Hint",
+};
+
+static const GfxPageDesc_t s_GamePage =
+{
+	"HL2RPMGamePage", "#HL2RPM_Options_Game", "",
+	GAME_SETTING_COUNT, s_pszGameConVars, s_pszGameLabels, s_GameChoices, NULL,
+	-1, "#HL2RPM_Game_Hint",
 };
 
 // ---------------------------------------------------------------------------
@@ -380,6 +446,11 @@ CHL2RPMGraphicsPage::CHL2RPMGraphicsPage( Panel *pParent, const GfxPageDesc_t &d
 	for ( int i = 0; i < GFX_PRESET_COUNT; i++ )
 		m_pPreset->AddItem( s_pszPresetLabels[i], new KeyValues( "preset", "index", i ) );
 	m_pPreset->AddItem( "#HL2RPM_Gfx_Q_Custom", new KeyValues( "preset", "index", GFX_PRESET_CUSTOM ) );
+	if ( !m_Desc.pflPresets )
+	{
+		m_pPresetLabel->SetVisible( false );
+		m_pPreset->SetVisible( false );
+	}
 
 	for ( int s = 0; s < m_Desc.nSettings; s++ )
 	{
@@ -445,9 +516,12 @@ void CHL2RPMGraphicsPage::PerformLayout()
 	const int iRow = clamp( ( GetTall() - 12 - 34 - iFooter ) / Max( 1, m_Desc.nSettings ), 22, 30 );
 	int y = 12;
 
-	m_pPresetLabel->SetBounds( x0, y, iLabelWide, 22 );
-	m_pPreset->SetBounds( x1, y, iComboWide, 22 );
-	y += 34;
+	if ( m_Desc.pflPresets )
+	{
+		m_pPresetLabel->SetBounds( x0, y, iLabelWide, 22 );
+		m_pPreset->SetBounds( x1, y, iComboWide, 22 );
+		y += 34;
+	}
 
 	for ( int s = 0; s < m_Desc.nSettings; s++ )
 	{
@@ -504,6 +578,8 @@ float CHL2RPMGraphicsPage::GetChoiceValue( int iSetting ) const
 
 int CHL2RPMGraphicsPage::DetectPreset() const
 {
+	if ( !m_Desc.pflPresets )
+		return GFX_PRESET_CUSTOM;
 	for ( int p = 0; p < GFX_PRESET_COUNT; p++ )
 	{
 		bool bMatch = true;
@@ -517,7 +593,7 @@ int CHL2RPMGraphicsPage::DetectPreset() const
 
 void CHL2RPMGraphicsPage::SelectPreset( int iPreset )
 {
-	if ( iPreset < 0 || iPreset >= GFX_PRESET_COUNT )
+	if ( iPreset < 0 || iPreset >= GFX_PRESET_COUNT || !m_Desc.pflPresets )
 		return;
 
 	m_bLoading = true;
@@ -578,14 +654,16 @@ void CHL2RPMGraphicsPage::OnApplyChanges()
 	}
 	if ( m_Desc.iRestartSetting >= 0 )
 		m_flLoadedRestartValue = GetChoiceValue( m_Desc.iRestartSetting );
+	// a language change re-labelled every menu item: the combo boxes take the new text of their item
+	LoadFromConVars();
 	engine->ClientCmd_Unrestricted( "host_writeconfig\n" );
 }
 
 // ---------------------------------------------------------------------------
 // Injector: waits for the Options dialog and adds the pages to it
 // ---------------------------------------------------------------------------
-static ConVar cl_options_graphics_select( "cl_options_graphics_select", "0", 0, "Dev: open the Options dialog on the Graphics page (2 = the Effects page)" );
-static ConVar cl_options_graphics_page( "cl_options_graphics_page", "1", FCVAR_ARCHIVE, "Add the HL2RPM Graphics and Effects pages to the Options dialog" );
+static ConVar cl_options_graphics_select( "cl_options_graphics_select", "0", 0, "Dev: open the Options dialog on the Graphics page (2 = Effects, 3 = Game)" );
+static ConVar cl_options_graphics_page( "cl_options_graphics_page", "1", FCVAR_ARCHIVE, "Add the HL2RPM Graphics, Effects and Game pages to the Options dialog" );
 
 class CHL2RPMOptionsInjector : public Panel
 {
@@ -633,13 +711,17 @@ public:
 		pEffects->AddActionSignalTarget( hDialog );
 		pDialog->AddPage( pEffects, s_EffectsPage.pszTitle );
 
+		CHL2RPMGraphicsPage *pGame = new CHL2RPMGraphicsPage( NULL, s_GamePage );
+		pGame->AddActionSignalTarget( hDialog );
+		pDialog->AddPage( pGame, s_GamePage.pszTitle );
+
 		// the tabs are laid out in one row without scrolling: two more tabs don't fit into the
 		// dialog's width (the last one was cut off - unreachable). Wider, still centered.
 		{
 			int dx, dy, dw, dh;
 			ipanel()->GetPos( hDialog, dx, dy );
 			ipanel()->GetSize( hDialog, dw, dh );
-			const int iExtra = 150;
+			const int iExtra = 240;
 			ipanel()->SetSize( hDialog, dw + iExtra, dh );
 			ipanel()->SetPos( hDialog, Max( 0, dx - iExtra / 2 ), dy );
 			pPanel->InvalidateLayout( true );
@@ -647,7 +729,8 @@ public:
 
 		if ( cl_options_graphics_select.GetBool() && pDialog->GetPropertySheet() )
 		{
-			pDialog->GetPropertySheet()->SetActivePage( ( cl_options_graphics_select.GetInt() == 2 ) ? pEffects : pPage );
+			const int iSel = cl_options_graphics_select.GetInt();
+			pDialog->GetPropertySheet()->SetActivePage( iSel == 3 ? pGame : ( iSel == 2 ? pEffects : pPage ) );
 
 			// the dialog opened from a console command starts off screen: center it
 			int sw, sh, dw, dh;

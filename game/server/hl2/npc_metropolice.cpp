@@ -23,6 +23,7 @@
 #include "grenade_frag.h"
 #include "mapbase/GlobalStrings.h"
 #endif
+#include "hl2rpm/rpg_law.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -4708,7 +4709,14 @@ void CNPC_MetroPolice::IncrementPlayerCriminalStatus( void )
 	{
 		AddLookTarget( pPlayer, 0.8f, 5.0f );
 
-		if ( m_nNumWarnings < METROPOLICE_MAX_WARNINGS )
+		// HL2RPM: толчок и замечание юнита - это подозрение, а что дальше (документы, досмотр,
+		// задержание) решает закон Альянса (hl2rpm/rpg_law.cpp). Свой счёт замечаний вёл бы юнита
+		// к избиению дубинкой мимо него - красные вспышки без урона, пока герой стоит рядом
+		if ( RPG_Law_CopWarned( this, pPlayer ) )
+		{
+			m_nNumWarnings = 0;
+		}
+		else if ( m_nNumWarnings < METROPOLICE_MAX_WARNINGS )
 		{
 			m_nNumWarnings++;
 		}
@@ -4725,6 +4733,37 @@ void CNPC_MetroPolice::IncrementPlayerCriminalStatus( void )
 	AnnounceHarrassment();
 
 	m_bKeepFacingPlayer = true;
+}
+
+//-----------------------------------------------------------------------------
+// HL2RPM: закон Альянса решил дело (задержание, конец тревоги, hl2rpm/rpg_law.cpp): юнит забывает
+// замечания, удары и погоню - иначе юнит с полным счётом замечаний держит дубинку наготове и бьёт
+// героя, оказавшегося рядом
+//-----------------------------------------------------------------------------
+void CNPC_MetroPolice::RPG_ForgivePlayer( void )
+{
+	m_nNumWarnings = 0;
+	m_iNumPlayerHits = 0;
+	m_flChasePlayerTime = 0;
+	m_bKeepFacingPlayer = false;
+	m_bPlayerTooClose = false;
+	m_flBatonDebounceTime = 0;
+	ClearCondition( COND_METROPOLICE_PLAYER_TOO_CLOSE );
+	Forget( bits_MEMORY_PLAYER_HARASSED );
+	SetBatonState( false );
+
+	CBasePlayer *pPlayer = UTIL_PlayerByIndex( 1 );
+	if ( pPlayer && GetEnemy() == pPlayer )
+	{
+		SetEnemy( NULL );
+		if ( GetEnemies() )
+			GetEnemies()->ClearMemory( pPlayer );
+	}
+	if ( GetState() == NPC_STATE_COMBAT && !GetEnemy() )
+	{
+		SetState( NPC_STATE_ALERT );
+		ClearSchedule( "HL2RPM: the law settled it" );
+	}
 }
 
 //-----------------------------------------------------------------------------

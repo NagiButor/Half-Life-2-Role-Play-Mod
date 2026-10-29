@@ -218,29 +218,31 @@ def fix_kept_logic(m, log):
 
 
 def setup_doors(m, log):
-    """Doors for free roaming. Names for quests are documented in the map guide."""
+    """Doors for free roaming. Names for quests are documented in the map guide. Renames go through
+    slice_kit.rename: the area portal of the customs gate names its door (target), with a plain
+    targetname change it never opened."""
+    from slice_kit import rename
     # customs gate -> CP corridor (was barney_door_1: open, locked, ignore +use)
-    d = one(m, "barney_door_1")
-    d.set("targetname", "cp_post_door")
+    rename(m, "barney_door_1", "cp_post_door")
+    d = one(m, "cp_post_door")
     d.set("spawnflags", "0")          # closed, unlocked, usable
-    # CP office (Barney's security room): locked (safe, quest)
-    d = one(m, "barney_door_2")
-    d.set("targetname", "cp_office_door")
-    d.set("spawnflags", "2048")       # locked, usable (rattles)
+    # CP duty room (Barney's security room): the only way from the corridor to the exit checkpoint (the
+    # storage room's other doors open onto the restricted razor-train platform) - closed, unlocked
+    rename(m, "barney_door_2", "cp_office_door")
+    d = one(m, "cp_office_door")
+    d.set("spawnflags", "0")
     remove_outputs(d, lambda o, p: True)
     slot = one(m, "barney_door_2_slot")
     slot.set("targetname", "cp_office_door_slot")
     slot.set("parentname", "cp_office_door")
     # interrogation room: locked
-    d = one(m, "introom_door_1")
-    d.set("targetname", "cp_interrogation_door")
+    rename(m, "introom_door_1", "cp_interrogation_door")
+    d = one(m, "cp_interrogation_door")
     d.set("spawnflags", "2048")
     remove_outputs(d, lambda o, p: True)
-    # storage room (exit checkpoint) <-> CP office: closed, unlocked
-    d = one(m, "storage_room_door")
-    d.set("targetname", "cp_checkpoint_office_door")
-    d.set("spawnflags", "0")
-    remove_outputs(d, lambda o, p: True)
+    # storage room (exit checkpoint) <-> CP duty room: an open doorway now - the door leaf, opened from
+    # the duty room, stood right in the way to the exit doorway of the checkpoint
+    m.delete(one(m, "storage_room_door"))
     # storage room west doors to the razor-train platform (were locked): stay locked
     for i, nm in ((752345, "cp_checkpoint_west_door_1"), (752510, "cp_checkpoint_west_door_2")):
         e = by_id(m, i)
@@ -277,6 +279,13 @@ def setup_transitions(m, log):
         else:
             m.delete(e)
     assert n == 1, n
+    # Valve's transition volume took the whole CP wing (storage room, duty room, corridor): the slice's
+    # units and Gannon would ride along into the plaza. Only the courtyard passage by the landmark now
+    for e in m.entities("trigger_transition"):
+        if lower(e.get("targetname")) == lower(LANDMARK):
+            for s in e.children_named("solid"):
+                e.remove_child(s)
+            e.add_child(m.make_box((-3232, -240, -72), (-2960, 96, 200), "TOOLS/TOOLSTRIGGER"), 0)
     log.append("transition %s -> %s" % (LANDMARK, NEXT_MAP))
 
 
@@ -289,9 +298,6 @@ PLAYER_START_ANGLES = "0 15 0"
 def setup_start_and_dream(m, log):
     m.add_entity("info_player_start", PLAYER_START, angles=PLAYER_START_ANGLES, spawnflags="1",
                  targetname="spawn_train")
-    # passengers: male_07 is the player's model - give the second passenger another face
-    e = one(m, "citizen_train_2")
-    e.set("model", "models/humans/group01/male_04.mdl")
     # wake-up relay (was logic_start_train after the G-Man intro)
     st = one(m, "logic_start_train")
     keep = []
@@ -362,6 +368,11 @@ def setup_start_and_dream(m, log):
         m.add_output(cp, *o)
     arr = m.add_entity("logic_relay", at(0, 192, 0), targetname="sp00_relay_arrived", spawnflags="1")
     m.add_output(arr, "OnTrigger", "rpg_sp00", "SetFlag", "mq00_train_arrived", 0, 1)
+    # safety net: waking up and arriving always leave both dream cameras (a repeated or late trigger of the
+    # dream relays could leave the black camera on - the player stood frozen in the void)
+    for rel, t in ((st, 0.1), (arr, 0)):
+        m.add_output(rel, "OnTrigger", "viewcontrol_black", "Disable", "", t, -1)
+        m.add_output(rel, "OnTrigger", "camera_hl1_scene", "Disable", "", t, -1)
     la = m.add_entity("logic_auto", at(0, 224, 0), spawnflags="1")
     m.add_output(la, "OnNewGame", "sp00_relay_start", "Trigger", "", 0.2, 1)
     m.add_entity("info_target", (-14576, -13860, -1212), targetname="spot_gman_dream", angles="0 270 0")
@@ -656,6 +667,11 @@ def main():
     m = VMF.load(a.src)
     log = []
     strip_story(m, log)
+    # Valve's people go (queue, herding cops, scenes, act-busy): the slice puts its own (phase B).
+    # The sweeping vortigaunt stays with his broom scripts - he is Savva now
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from slice_kit import strip_original_life
+    strip_original_life(m, log, keep=("vort_sweepy",))
     fix_kept_logic(m, log)
     setup_doors(m, log)
     setup_transitions(m, log)

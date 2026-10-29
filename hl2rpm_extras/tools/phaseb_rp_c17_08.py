@@ -80,6 +80,8 @@ def duty_desk(m, log):
 def world(m, log):
     timecycle(m, (-640, -600, 40), 8.0)
     tram_stop(m, "rp_c17_08_opora", (-2000, -600, -8), 0, (-2000, -450, 0), 270)
+    # an arrested player comes to in the precinct yard, by the pedestrian door (rpg_law.cpp)
+    m.add_entity("info_target", (315, -150, FL0), targetname="rpg_arrest_release", angles="0 90 0")
     # entering the compound through the pedestrian door: the location, and GO-01 knows the hero came
     trigger_box(m, "trigger_rpg", [((150, -360, -8), (480, -200, 120))], targetname="rpg_opora_enter",
                 discover="C17-08", once="1", spawnflags="1")

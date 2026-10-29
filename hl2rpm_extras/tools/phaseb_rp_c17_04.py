@@ -69,6 +69,8 @@ def street(m, log):
 def world(m, log):
     timecycle(m, (-1900, 224, 40), 10.0)
     tram_stop(m, "rp_c17_04_oldtown", (-1500, 300, 0), 0, (-1500, 470, 0), 270)
+    # an arrested player comes to at the tram stop (rpg_law.cpp)
+    m.add_entity("info_target", (-1460, 300, 0), targetname="rpg_arrest_release", angles="0 0 0")
     trigger_box(m, "trigger_rpg", [((-2048, 64, -8), (-1900, 512, 160))], targetname="rpg_oldtown_enter",
                 discover="C17-04", once="1", spawnflags="1")
     trigger_box(m, "trigger_rpg", [((1240, -1280, -8), (1560, -1024, 160))], targetname="rpg_lock3_enter",

@@ -347,6 +347,37 @@ bool RPG_FormatNotify( int iKind, const char *pszToken, int iValue, const char *
 		RPG_LocalizeUTF8( iValue == RPG_ZONE_RESTRICTED ? "#HL2RPM_UI_Notify_ZoneRestricted" : ( iValue ? "#HL2RPM_UI_Notify_ZoneEnter" : "#HL2RPM_UI_Notify_ZoneLeave" ),
 			szText, nText, iValue == RPG_ZONE_RESTRICTED ? "Restricted zone" : ( iValue ? "Alliance control zone" : "You left the control zone" ) );
 		break;
+	case RPG_NOTIFY_LAW:
+	{
+		// изъятое: классы через запятую -> имена
+		char szItems[256] = "";
+		if ( pszExtra && pszExtra[0] )
+		{
+			CUtlStringList parts;
+			V_SplitString( pszExtra, ",", parts );
+			for ( int i = 0; i < parts.Count(); ++i )
+			{
+				ItemName( parts[i], sz1, sizeof( sz1 ) );
+				if ( i )
+					Q_strncat( szItems, ", ", sizeof( szItems ) );
+				Q_strncat( szItems, sz1, sizeof( szItems ) );
+			}
+		}
+		const char *pszKey = pszToken ? pszToken : "";
+		if ( !Q_stricmp( pszKey, "arrested" ) || !Q_stricmp( pszKey, "frisk_found" ) )
+		{
+			FormatToken( szText, nText, CFmtStr( "#HL2RPM_UI_Law_%s", pszKey ), "Fine: %s1 cr.", CFmtStr( "%d", iValue ) );
+			if ( szItems[0] )
+			{
+				FormatToken( sz2, sizeof( sz2 ), "#HL2RPM_UI_Law_Confiscated", "Confiscated: %s1", szItems );
+				Q_strncat( szText, " ", nText );
+				Q_strncat( szText, sz2, nText );
+			}
+		}
+		else
+			RPG_LocalizeUTF8( CFmtStr( "#HL2RPM_UI_Law_%s", pszKey ), szText, nText, pszKey );
+		break;
+	}
 	case RPG_NOTIFY_FAIL:
 	case RPG_NOTIFY_GENERIC:
 		Q_strncpy( sz2, pszExtra ? pszExtra : "", sizeof( sz2 ) );

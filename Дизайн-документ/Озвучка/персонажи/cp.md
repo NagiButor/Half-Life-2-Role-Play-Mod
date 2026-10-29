@@ -32,10 +32,42 @@
 | 2 | Стоять. Руки — на стену. | Freeze. Hands on the wall. |
 | 3 | Без записи. Зал регистрации — прямо, окна с первого по шестое. Не задерживай поток. | No record. Registration hall straight ahead, windows one through six. Don't hold up the line. |
 
-## Реплики (53; записано RU 13, EN 13)
+## Реплики (96; записано RU 25, EN 25)
 
 | ID | Контекст (квест · NPC · узел) | RU | EN | Эмоция / ремарка |
 |---|---|---|---|---|
+| `D__BARK_CP_N1` | _bark_cp · узел 1 | Проходи. Не задерживайся. | Move along. Don't linger. | ваниль/готовый звук: npc/metropolice/vo/movealong.wav |
+| `D__BARK_CP_N2` | _bark_cp · узел 2 | Вопрос, гражданин? Нет? Вот и хорошо. | A question, citizen? No? Good. |  |
+| `D__BARK_CP_N3` | _bark_cp · узел 3 | Соблюдай порядок. Порядок - это безопасность. Безопасность - это я. | Keep order. Order is safety. Safety is me. |  |
+| `D__BARK_CP_N4` | _bark_cp · узел 4 | Отойди. Ты загораживаешь обзор. | Step aside. You're blocking the view. | ваниль/готовый звук: npc/metropolice/vo/movebackrightnow.wav |
+| `D__BARK_CP_N5` | _bark_cp · узел 5 | Что уставился? Шагом. Мимо. | What are you staring at? Walk. Past. | ваниль/готовый звук: npc/metropolice/vo/move.wav |
+| `D__BARK_CP_N30` | _bark_cp · узел 30 | Гражданин. Ещё один вопрос - и будет проверка. Ты этого хочешь? | Citizen. One more question and there'll be a check. Is that what you want? | ваниль/готовый звук: npc/metropolice/vo/firstwarningmove.wav |
+| `D__BARK_CP_N31` | _bark_cp · узел 31 | Правильно. | Correct. |  |
+| `D__BARK_CP_N40` | _bark_cp · узел 40 | Юнит. Не мешай работать. Хочешь болтать - иди в «Опору», к сержанту. | Unit. Don't get in the way. Want to chat - go to Opora, to the sergeant. |  |
+| `D__LAW_STOP_N10` | _law_stop · узел 10 | Гражданин. Стоять. Документы. | Citizen. Halt. Papers. | ваниль/готовый звук: npc/metropolice/vo/citizen.wav |
+| `D__LAW_STOP_N10_V1` | _law_stop · узел 10 · вариант 1 [require_law record] | Опять ты. Документы. И без фокусов. | You again. Papers. And no tricks. |  |
+| `D__LAW_STOP_N11` | _law_stop · узел 11 | ...Порядок. Проходи. И не бегай в зоне контроля. | ...In order. Move along. And no running in the control zone. | ваниль/готовый звук: npc/metropolice/vo/movealong3.wav |
+| `D__LAW_STOP_N12` | _law_stop · узел 12 | Без записи по городу не ходят. Зал регистрации, четвёртое окно. Шагом. | Nobody walks the city without a record. Registration hall, window four. Walk. |  |
+| `D__LAW_STOP_N13` | _law_stop · узел 13 | ...Проходи. Опоздаешь - это уже не моя забота. | ...Move along. If you're late, that's not my problem. |  |
+| `D__LAW_STOP_N14` | _law_stop · узел 14 | Ложь представителю ГО. Руки на виду. Досмотр. | Lying to Civil Protection. Hands where I can see them. Search. | ваниль/готовый звук: npc/metropolice/vo/search.wav |
+| `D__LAW_STOP_N15` | _law_stop · узел 15 | ...Не видел. И тебя тоже не видел. Проваливай. | ...Didn't see it. Didn't see you either. Get lost. |  |
+| `D__LAW_STOP_N16` | _law_stop · узел 16 | Взятка должностному лицу? Это запись в деле. Руки на виду. | Bribing an officer? That goes on your record. Hands where I can see them. |  |
+| `D__LAW_STOP_N20` | _law_stop · узел 20 | Стоять. Руки на виду. Досмотр. | Halt. Hands where I can see them. Search. | ваниль/готовый звук: npc/metropolice/vo/search.wav |
+| `D__LAW_STOP_N21` | _law_stop · узел 21 | Чисто. Проходи. И сбавь обороты, гражданин. | Clean. Move along. And dial it down, citizen. |  |
+| `D__LAW_STOP_N21_V1` | _law_stop · узел 21 · вариант 1 [require_law contraband] | А это что? Изъято. Штраф - на месте. В следующий раз поедешь в участок. | And what's this? Confiscated. The fine is on the spot. Next time you ride to the precinct. |  |
+| `D__LAW_STOP_N22` | _law_stop · узел 22 | ...Ничего не видел. Пошёл. | ...Didn't see a thing. Go. |  |
+| `D__LAW_STOP_N23` | _law_stop · узел 23 | ...Недоразумение. Ладно. Исчезни, пока я не передумал. | ...A misunderstanding. Fine. Disappear before I change my mind. |  |
+| `D__LAW_STOP_N24` | _law_stop · узел 24 | Попытка подкупа. К стене. | Attempted bribery. Against the wall. |  |
+| `D__LAW_STOP_N30` | _law_stop · узел 30 | Гражданин, вы задержаны. Руки за голову. Сопротивление бесполезно. | Citizen, you are under arrest. Hands behind your head. Resistance is useless. | ваниль/готовый звук: npc/metropolice/vo/holditrightthere.wav |
+| `D__LAW_STOP_N31` | _law_stop · узел 31 | Правильное решение. Пройдёмте. | The right decision. Come with me. | ваниль/готовый звук: npc/metropolice/vo/prepareforjudgement.wav |
+| `D__LAW_STOP_N32` | _law_stop · узел 32 | ...Последнее предупреждение. Ещё раз попадёшься - пойдёшь по статье. Исчезни. | ...Final warning. Get caught again and you go down by the book. Disappear. |  |
+| `D__LAW_STOP_N33` | _law_stop · узел 33 | Ошибка - это ты. Пройдёмте. | The mistake is you. Come with me. |  |
+| `D__LAW_STOP_N34` | _law_stop · узел 34 | ...Я тебя не видел. И чтобы я тебя больше не видел. Пошёл вон. | ...I didn't see you. And make sure I don't again. Get out. |  |
+| `D__LAW_STOP_N35` | _law_stop · узел 35 | Взятка при задержании. Ещё одна статья. Пройдёмте. | A bribe during arrest. One more charge. Come with me. |  |
+| `D__LAW_STOP_N40` | _law_stop · узел 40 | За тобой неоплаченный штраф. Платишь сейчас - или платишь в участке. | You have an unpaid fine. Pay it now - or pay it at the precinct. |  |
+| `D__LAW_STOP_N41` | _law_stop · узел 41 | Запись погашена. Свободен. | Record cleared. You're free to go. |  |
+| `D__LAW_STOP_N41_V1` | _law_stop · узел 41 · вариант 1 [require_law debt] | Не всё. Остаток - до конца цикла. Свободен. | Not all of it. The rest - by the end of the cycle. You're free to go. |  |
+| `D__LAW_STOP_N42` | _law_stop · узел 42 | Нет денег - есть смена в карантинной зоне. Подумай. А пока - документы. | No money means a shift in the quarantine zone. Think about it. For now - papers. |  |
 | `GN_CP_CHK_N1_XRAY4` | npc_cp_checkpoint · узел 1 | Гражданин. Документы. | Citizen. Papers. | вокодер, без интонации |
 | `GN_CP_CHK_N1_XRAY4_LOW` | npc_cp_checkpoint · узел 1 · простак (АНА ≤ 3) | Эй. Ты. Бумага есть? | Hey. You. Got paper? | вокодер, без интонации |
 | `GN_CP_CHK_N2_XRAY4` | npc_cp_checkpoint · узел 2 | Проходи. Не задерживай поток. | Move along. Don't hold up the line. | ваниль/готовый звук: npc/metropolice/vo/movealong3.wav |
@@ -51,6 +83,17 @@
 | `GN_CP_CHK_N31_XRAY4` | npc_cp_checkpoint · узел 31 | Чисто. Проходи. И сбавь обороты, гражданин. | Clean. Move along. And dial it down, citizen. |  |
 | `GN_CP_CHK_N32_XRAY4` | npc_cp_checkpoint · узел 32 | ...Не видел. Проходи. | ...Didn't see a thing. Move along. |  |
 | `GN_CP_CHK_N33_XRAY4` | npc_cp_checkpoint · узел 33 | Взятка должностному лицу. Это уже запись в деле. К стене. | Bribing an officer. That goes on your record. Against the wall. |  |
+| `D_NPC_CP_CUSTOMS_N1` | npc_cp_customs · узел 1 | Прибывшие - в зал регистрации. Не толпиться, не бегать, вопросов не задавать. | Arrivals - to the registration hall. No crowding, no running, no questions. | ваниль/готовый звук: npc/metropolice/vo/movealong.wav |
+| `D_NPC_CP_CUSTOMS_N10` | npc_cp_customs · узел 10 | Бывший зал ожидания, за перроном. Окна вдоль стены, с первого по шестое. Новоприбывшие - четвёртое. | The old waiting room, past the platform. Windows along the wall, one to six. New arrivals - window four. |  |
+| `D_NPC_CP_CUSTOMS_N11` | npc_cp_customs · узел 11 | Через эти ворота, по коридору, через дежурную часть - там КПП. Без записи не выпустят. Сначала - окно четыре. | Through this gate, down the corridor, through the duty room - the checkpoint is there. No record, no exit. Window four first. |  |
+| `D_NPC_CP_CUSTOMS_N12` | npc_cp_customs · узел 12 | Это - предупреждение. Следующее будет дубинкой. Зал регистрации. Шагом. | That is a warning. The next one comes with a baton. Registration hall. Walk. |  |
+| `D_NPC_CP_CUSTOMS_N20` | mq00_arrival · npc_cp_customs · узел 20 | Запись есть? Выход в город - через ворота, по коридору, в дежурку. Там КПП. Документы держи в руке. | Got a record? The way into the city - through the gate, down the corridor, into the duty room. The checkpoint is there. Keep your papers in your hand. |  |
+| `D_NPC_CP_CUSTOMS_N30` | npc_cp_customs · узел 30 | Тебя уже проверили. Проходи, не загораживай поток. | You've been checked already. Move along, don't block the flow. | ваниль/готовый звук: npc/metropolice/vo/movealong3.wav |
+| `D_NPC_CP_DUTYROOM_N1` | npc_cp_dutyroom · узел 1 | Дежурная часть. Посторонним - нельзя. Без записи на КПП не пропустят: регистрация - в зале ожидания, окно четыре. | Duty room. No unauthorized persons. Without a record the checkpoint won't let you through: registration is in the waiting room, window four. |  |
+| `D_NPC_CP_DUTYROOM_N20` | mq00_arrival · npc_cp_dutyroom · узел 20 | КПП - в ту дверь, на склад. Юнит проверит пропуск. Не задерживайся. | The checkpoint is through that door, in the storeroom. The unit will check your pass. Don't linger. |  |
+| `D_NPC_CP_DUTYROOM_N21` | npc_cp_dutyroom · узел 21 | Сержант Гэннон. Набирает добровольцев. Хочешь носить маску, а не смотреть в неё, - подойди к нему. | Sergeant Gannon. He's recruiting volunteers. If you'd rather wear the mask than stare into it - go see him. |  |
+| `D_NPC_CP_DUTYROOM_N30` | npc_cp_dutyroom · узел 30 | Проверен - проходи. Выход - через склад, во двор. | Checked - move along. The way out is through the storeroom, into the yard. |  |
+| `D_NPC_CP_DUTYROOM_N40` | npc_cp_dutyroom · узел 40 | Очнулся? Штраф списан, вещи - в протоколе. В следующий раз поедешь дальше, на Нова Проспект. Свободен. | Awake? The fine's been charged, your things are in the report. Next time you'll ride further - to Nova Prospekt. You're free to go. |  |
 | `MQ01_S2_N1_STIK4` | mq01_temp_pass · npc_cp_stik4 · узел 1 | Талон. Браслет. ...Временный. Паёк, вода. Следующий. | Coupon. Bracelet. ...Temporary. One ration, one water. Next. | монотонно, без пауз; вокодер |
 | `MQ01_S2_N2_STIK4` | mq01_temp_pass · npc_cp_stik4 · узел 2 | Временный. В сторону. Досмотр. ...Чисто. Талон давай. | Temporary. Step aside. Search. ...Clean. Coupon, then. |  |
 | `MQ01_S2_N3_STIK4` | mq01_temp_pass · npc_cp_stik4 · узел 3 | Без талона нет выдачи. Следующий. | No coupon, no rations. Next. |  |

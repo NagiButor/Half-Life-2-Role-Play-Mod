@@ -63,6 +63,28 @@
 Пороги: 25 проверка документов, 50 досмотр, 75 задержание, 100 тревога (`OnSuspicion25/50/75/100`
 у `logic_rpg_watch`; NPC ГО с `rpg_faction cp` становятся враждебны на 100 до сброса).
 
+**Закон** (server `game/server/hl2rpm/rpg_law.cpp`, Part I/06 §3, Part I/07 §3) — что ГО делает с подозрением:
+- **25+ «Внимание»**: юнит ГО, который видит героя 4 с, подходит проверить документы (не чаще
+  `rpg_law_attention_interval` 75 с); **50+ «Досмотр»** — подходит сразу; **75+ «Задержание»** — бегом.
+  Юнит подходит на 110 ед. и начинает диалог `_law_stop` (узел по подозрению): документы / ложь /
+  взятка / досмотр / сдаться / бежать. Ушёл из виду дольше 6 с или дальше 1400 ед. — «скрылся»: +20
+  (с задержания — +100, тревога); ушёл, не дослушав, — +15. После проверки юнит возвращается на пост.
+- **100 «Тревога»**: голос Надзора, ГО бьёт и стреляет — для юнитов снимается `gordon_precriminal`
+  (`m_iGordonPrecriminalOverride` = 2 на время тревоги; без этого `CNPC_MetroPolice::IRelationType`
+  оставляет к игроку нейтралитет при любом отношении — так «тревога ничего не делала»), юниты в 2000 ед.
+  знают, где герой. Выход: скрыться до спада ниже 25 — или **сдаться**: присесть без оружия рядом с
+  юнитом (240 ед., 1.2 с). Удар ГО, который уложил бы героя (здоровье ≤ 10), — **задержание**.
+- **Задержание**: затемнение, штраф (сдался в разговоре 30, при тревоге 40, уложили 80 кр.; не хватает —
+  долг `law_debt`, юнит при встрече требует погасить), изъятие контрабанды (`contraband > 0` в items.txt,
+  неизвестное оружие), ГС −5/−15, флаг `law_arrests`, +2/4 ч, подозрение 0, здоровье не ниже 60 %; герой
+  приходит в себя у `info_target rpg_arrest_release` карты (вокзал — дежурка ГО, площадь — портик вокзала),
+  иначе на месте. Юниты ГО после задержания и конца тревоги забывают прежнее (замечания, погоня, дубинка).
+- **Толчок**: метрокоп отталкивает героя, который упёрся в него (и делает замечание), — +6 подозрения
+  (не чаще раза в 3 с; в форме ГО/Надзора и в разговоре — нет). Своего счёта замечаний с избиением
+  дубинкой у юнитов больше нет: дальше — обычная лестница закона.
+- «Берёт» (условие `law corrupt`): скрытый флаг юнита по имени (~30 %), `npc_gannon*` — всегда.
+- Тест: `rpg_law_test <подозрение>`, `rpg_law_arrest [0|1|2]`, `rpg_law_debug 1`, `rpg_law_enable 0`.
+
 **Уровни ГС**: ≤−75 Антигражданин, −74..−40 Злостный нарушитель, −39..−15 Под наблюдением,
 −14..19 Гражданин, 20..49 Благонадёжный, ≥50 Лоялист. Ключи: `anticitizen`, `malicious`, `watched`,
 `citizen`, `reliable`, `loyalist`, плюс `temppass` (флаг `civil_temp_pass`).
@@ -134,6 +156,8 @@ BuyPriceMult × (1 − h)) ), продажи = floor( База × min(0.9, sell_
 | `require_time` | `day` / `night` / `curfew` / `H-H` | `night` |
 | `require_disposition` | `op N` (собеседник) | `>=30` |
 | `require_quest_state` / `require_quest_stage` | как раньше | `mq01_pass:active` |
+| `require_npc_var` | `i/n` — «характер» генерика: вариант i из n по имени собеседника | `2/8` |
+| `require_law` | `contraband` / `armed` / `corrupt` / `debt` / `record` / `papers` / `stop`, можно `!` | `!corrupt` |
 | `hide_if_unmet` | 1 | скрыть вместо «красного» |
 
 Операторы: `>= <= > < = !=`.
@@ -157,6 +181,7 @@ BuyPriceMult × (1 − h)) ), продажи = floor( База × min(0.9, sell_
 | `open_barter` / `open_chargen` / `open_levelup` | 1 / trader id |
 | `haggle` | `+10` (торговец собеседника), `kadar:-5` — цены лучше/хуже на N % до конца суток |
 | `fire` | `target,Input,param,delay` (I/O карты) |
+| `law` | `release` (проверка окончена), `frisk` (досмотр: изъять контрабанду, штраф 30), `arrest`, `flee`, `fine:N`, `pay_debt` |
 | `notify` | токен |
 | `sound` | звук/саундскрипт |
 
@@ -207,6 +232,18 @@ BuyPriceMult × (1 − h)) ), продажи = floor( База × min(0.9, sell_
 	}
 }
 ```
+
+**Кто отвечает на E**: у каждого NPC есть ответ — свой диалог по targetname (точное имя или шаблон
+`npc_cp_*`), иначе общий по ключу NPC `rpg_dialog` (`_bark_citizen`, `_bark_citizen_f`, `_bark_cp`,
+`_bark_queue`, `_bark_clerk` — файлы с `_` в начале), иначе реплика фракции (citizen → `_bark_citizen`,
+женская модель → `_bark_citizen_f`, cp → `_bark_cp`). Подпись общего диалога — `loot_displayname` NPC
+(токены `#HL2RPM_Speaker_*`), затем `speaker` его своего диалога. Старое окно диалога (`dialog_definitions`,
+`vgui_dialogpanel`) больше не открывается — раньше E на любом NPC без диалога открывало пустое окно.
+
+**Варианты узла**: эффекты узла применяются всегда, плюс эффекты первого подходящего варианта; вариант
+заменяет `line`, `sound`, `auto_next`, `end`. Взаимоисключающие исходы — двумя вариантами с
+противоположными условиями или двумя опциями с одним текстом (`require_law corrupt` / `!corrupt`,
+`hide_if_unmet 1`), не «эффектами узла по умолчанию».
 
 **Узел**: `line`, `line_low_ana`, `speaker` (другой говорящий в сцене), `actor` (targetname, кто
 «говорит»: поворот, сцена, звук), `choreo`, `sound`, `vo`, `emotion`, `effects`, `variants`,
@@ -285,7 +322,7 @@ BuyPriceMult × (1 − h)) ), продажи = floor( База × min(0.9, sell_
 
 | Класс | Что делает |
 |---|---|
-| `logic_rpg` | входы: `ApplyEffects` (ключ `effects`, формат §4 как `ключ=значение, ...`), `AddXP`, `SetFlag`, `ClearFlag`, `AddRep "<f> <d>"`, `AddCivil`, `AddSuspicion`, `AddCredits`, `AddHumanity`, `AddResonance`, `GiveItem`, `TakeItem`, `GrantQuest`, `CompleteQuest`, `FailQuest`, `SetQuestStage`, `QuestEvent`, `Discover`, `SetAct`, `OpenCharGen`, `OpenBarter`, `Notify`, `Test` (ключ `condition`) / `TestCondition <выр>` → `OnTrue`/`OnFalse`; `OnMapSpawn` с `test_on_spawn 1` — для слоёв по флагам |
+| `logic_rpg` | входы: `ApplyEffects` (ключ `effects`, формат §4 как `ключ=значение, ...`), `AddXP`, `SetFlag`, `ClearFlag`, `AddRep "<f> <d>"`, `AddCivil`, `AddSuspicion`, `AddCredits`, `AddHumanity`, `AddResonance`, `GiveItem`, `TakeItem`, `GrantQuest`, `CompleteQuest`, `FailQuest`, `SetQuestStage`, `QuestEvent`, `Discover`, `SetAct`, `OpenCharGen`, `OpenBarter`, `Notify`, `Test` (ключ `condition`) / `TestCondition <выр>` → `OnTrue`/`OnFalse`; `OnMapSpawn` с `test_on_spawn 1` — для слоёв по флагам | С `test_on_spawn 1` условие ещё и перепроверяется, когда меняются флаги/предметы персонажа (выходы — только при смене результата): барьеры и слои карты по флагам открываются сразу.
 | `trigger_rpg` | браш: игрок вошёл → `condition`, `effects`, `quest_event`, `discover`, `once`; `OnPass`/`OnFail` |
 | `trigger_rpg_zone` | браш: зона контроля Альянса (`zone 1` обычная, `2` запретная): подозрение растёт только тут; HUD показывает «глаз» |
 | `prop_rpg_usable` | модель с действием по +use (§11): записка/терминал → окно чтения и «Заметки», кровать → сон, иначе эффекты; `condition`, `effects`, `once` |

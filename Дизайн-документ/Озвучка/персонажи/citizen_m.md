@@ -31,10 +31,21 @@
 | 2 | Лучше не разговаривайте со мной. Сканер... | Better not talk to me. The scanner... |
 | 3 | Я иду домой. Просто дом сегодня далеко. | I'm going home. It's just that home is far away tonight. |
 
-## Реплики (8; записано RU 0, EN 0)
+## Реплики (19; записано RU 0, EN 0)
 
 | ID | Контекст (квест · NPC · узел) | RU | EN | Эмоция / ремарка |
 |---|---|---|---|---|
+| `D__BARK_CITIZEN_N1` | _bark_citizen · узел 1 | Не стой так близко. Сканеры любят, когда люди сбиваются в кучу. | Don't stand so close. The scanners love it when people bunch up. | вполголоса, не поворачивая головы |
+| `D__BARK_CITIZEN_N11` | _bark_citizen · узел 11 | Фотографируют. А потом за кем-то приходят. Не всегда за тем, кого сфотографировали. | They take pictures. And then somebody gets picked up. Not always the one in the picture. |  |
+| `D__BARK_CITIZEN_N2` | _bark_citizen · узел 2 | Поезд опоздал на два часа. Говорят, на полпути кого-то сняли. Никто не видел - кого. | The train was two hours late. They say somebody was taken off halfway. Nobody saw who. |  |
+| `D__BARK_CITIZEN_N3` | _bark_citizen · узел 3 | Двенадцать лет я был инженером. Теперь я «единица трудового резерва». Звучит гордо, правда? | I was an engineer for twelve years. Now I'm a “labour reserve unit”. Sounds proud, doesn't it? | горько усмехается |
+| `D__BARK_CITIZEN_N4` | _bark_citizen · узел 4 | Ищешь, где поесть, - раздача на площади. Ищешь, с кем поговорить, - не здесь и не со мной. | If you're looking for food, the dispenser's on the square. If you're looking for someone to talk to - not here, not me. |  |
+| `D__BARK_CITIZEN_N5` | _bark_citizen · узел 5 | Воду из-под крана не пей, пока не отстоится. Говорят, в неё что-то добавляют. Я ничего не говорил. | Don't drink the tap water until it settles. They say they put something in it. I didn't say anything. |  |
+| `D__BARK_CITIZEN_N6` | _bark_citizen · узел 6 | Новенький? Совет бесплатный: не смотри юнитам в маску. Они это чувствуют. | New here? Free advice: don't look the units in the mask. They can feel it. |  |
+| `D__BARK_CITIZEN_N12` | _bark_citizen · узел 12 | Тогда иди шагом, держи руки на виду и документы - в кармане, а не в голове. | Then you walk, keep your hands in sight and your papers in your pocket, not in your head. |  |
+| `D__BARK_CITIZEN_N7` | _bark_citizen · узел 7 | Говорят, за городом ещё остался лес. Настоящий. Я не верю. Но мне нравится, что так говорят. | They say there's still a forest outside the city. A real one. I don't believe it. But I like that people say so. |  |
+| `D__BARK_CITIZEN_N8` | _bark_citizen · узел 8 | Не сейчас. Пожалуйста. | Not now. Please. | отводит взгляд |
+| `D__BARK_CITIZEN_N50` | _bark_citizen · узел 50 | Отойди от меня. На тебя уже смотрят - а значит, и на меня. | Get away from me. They're already watching you - which means me too. | испуганно, шёпотом |
 | `D__EXAMPLE_NPC_N1` | npc_example · узел 1 | Чего уставился? Двор подметаю. Новенький, что ли? | What are you staring at? I'm sweeping the yard. New here, are you? | ворчливо, не поднимая головы |
 | `D__EXAMPLE_NPC_N1_LOW` | npc_example · узел 1 · простак (АНА ≤ 3) | Метла. Двор. Ты новенький? | Broom. Yard. You new? | ворчливо, не поднимая головы |
 | `D__EXAMPLE_NPC_N1_V1` | npc_example · узел 1 · вариант 1 [require_time night] | Ночью тут не гуляют. Совсем новенький? | Nobody walks around here at night. Brand new, are you? | ворчливо, не поднимая головы |

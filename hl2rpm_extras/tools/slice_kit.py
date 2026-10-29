@@ -24,7 +24,8 @@ def lower(s):
 
 
 def npc_citizen(m, name, pos, yaw, model, **kw):
-    """A slice citizen: stands where placed, the dialog key is its targetname."""
+    """A slice citizen: stands where placed. Its dialog is scripts/dialogs/<targetname>; without one the key
+    rpg_dialog names a shared one (_bark_*), and without that the faction's default bark answers."""
     keys = dict(targetname=name, angles="0 %g 0" % yaw, model=model, citizentype="4",
                 expressiontype="Random", spawnflags=CITIZEN_FLAGS, rpg_faction="citizen")
     keys.update(kw)
@@ -36,6 +37,141 @@ def npc_cp(m, name, pos, yaw, **kw):
                 weapondrawn="0", additionalequipment="weapon_stunstick", rpg_faction="cp")
     keys.update(kw)
     return m.add_entity("npc_metropolice", pos, **keys)
+
+
+def idle_seq(m, npc_name, pos, yaw, seq, **kw):
+    """Loop one animation forever on an NPC that stands at pos (sit on a bench, queue, lean, sweep):
+    starts on spawn, no script movement, the post idle loops. The NPC stays talkable."""
+    keys = dict(targetname="ss_" + npc_name, angles="0 %g 0" % yaw, m_iszEntity=npc_name, m_iszIdle=seq,
+                m_iszPlay=seq, m_iszPostIdle=seq, m_fMoveTo="0", m_flRadius="0", m_flRepeat="0",
+                spawnflags="400", onplayerdeath="0")
+    keys.update(kw)
+    return m.add_entity("scripted_sequence", pos, **keys)
+
+
+def life(m, name, pos, yaw, model, seq=None, cls="citizen", **kw):
+    """An ambient person of the slice (ours, talkable): a citizen with a looped idle, or a CP unit standing
+    at a post (CPs stay unscripted: the law system sends them to check the player and back)."""
+    if cls == "cp":
+        e = npc_cp(m, name, pos, yaw, **kw)
+    else:
+        e = npc_citizen(m, name, pos, yaw, model, **kw)
+    if seq:
+        idle_seq(m, name, pos, yaw, seq)
+    return e
+
+
+# ---------------------------------------------------------------------------------------
+# The decompiled retail maps come with Valve's people: Gordon's queue, the cops who herd and push
+# him (ai_goal_police), the choreographed scenes of every citizen, act-busy goals, NPC makers. None
+# of them can be talked to and the police goals block the way. The slice keeps the set (geometry,
+# props, lights, sounds, doors) and the environment that is not a person (cameras, scanners, Breen
+# on the screens, the strider behind the gates, birds) and puts its own people on it.
+# ---------------------------------------------------------------------------------------
+KEEP_NPC_CLASSES = {"npc_combine_camera", "npc_cscanner", "npc_clawscanner", "npc_breen", "npc_strider",
+                    "npc_pigeon", "npc_crow", "npc_seagull", "npc_turret_ceiling", "npc_combinedropship",
+                    "npc_combinegunship", "npc_helicopter"}
+AI_SCRIPT_CLASSES = {"scripted_sequence", "aiscripted_schedule", "ai_goal_actbusy", "ai_goal_actbusy_queue",
+                     "ai_goal_police", "ai_goal_follow", "ai_goal_lead", "ai_goal_assault", "ai_goal_standoff",
+                     "ai_goal_fightfromcover", "ai_script_conditions", "ai_speechfilter", "logic_choreographed_scene",
+                     "scripted_target", "ai_changetarget", "ai_changehintgroup", "assault_rallypoint",
+                     "assault_assaultpoint", "info_npc_spawn_destination", "ai_relationship", "scripted_sentence"}
+_ACTOR_KEYS = ("m_iszentity", "actor", "target1", "target2", "target3", "target4", "target5", "target6", "target7",
+               "target8", "subject", "target", "entity", "goal", "searchname", "policetarget")
+
+
+def strip_original_life(m, log, keep=()):
+    """Remove every original person and everything that drives one (see above); keep = targetnames of people
+    that stay (renamed into slice characters). Returns the set of removed targetnames (outputs to them go too)."""
+    dead = set()
+    dead_classes = set()
+    keep = set(lower(k) for k in keep)
+    n_npc = 0
+    for e in list(m.entities()):
+        cls = lower(e.classname)
+        if cls.startswith("npc_") and cls not in KEEP_NPC_CLASSES and cls != "npc_template_maker" and                 lower(e.get("targetname")) not in keep:
+            dead_classes.add(cls)
+            if e.get("targetname"):
+                dead.add(lower(e.get("targetname")))
+            m.delete(e)
+            n_npc += 1
+
+    def is_dead(v):
+        v = lower(v)
+        if not v or v.startswith("!") or v in keep:
+            return False
+        if v in dead or v in dead_classes:
+            return True
+        if v.endswith("*"):
+            p = v[:-1]
+            return any(d.startswith(p) for d in dead)
+        return False
+
+    # templates: drop the dead members; a template with nothing left goes
+    n_tpl = 0
+    for e in list(m.entities("point_template")):
+        keys = [k for k, _ in e.props if lower(k).startswith("template") and lower(k) != "templatename"]
+        for k in keys:
+            if is_dead(e.get(k)):
+                e.delete(k)
+        if not [k for k, _ in e.props if lower(k).startswith("template")]:
+            dead.add(lower(e.get("targetname")))
+            m.delete(e)
+            n_tpl += 1
+    for e in list(m.entities("npc_template_maker")):
+        if is_dead(e.get("TemplateName")) or lower(e.get("TemplateName")) in dead:
+            dead.add(lower(e.get("targetname")))
+            m.delete(e)
+            n_tpl += 1
+    # what drives people: a script entity that names a removed person (or a class of them) goes
+    n_ai = 0
+    for _ in range(2):   # a scene can name a script entity removed in the first pass
+        for e in list(m.entities()):
+            if lower(e.classname) not in AI_SCRIPT_CLASSES:
+                continue
+            actors = [v for k, v in e.props if lower(k) in _ACTOR_KEYS and v]
+            kill = any(is_dead(v) for v in actors)
+            if lower(e.classname) in ("ai_goal_police", "ai_goal_actbusy", "ai_goal_actbusy_queue", "aiscripted_schedule",
+                                      "ai_script_conditions", "ai_speechfilter", "info_npc_spawn_destination") and \
+                    not any(lower(v) in ("strider_1", "breen") or "scanner" in lower(v) for v in actors):
+                kill = True      # herding / act-busy / makers' destinations of the old crowd: all of them
+            if kill:
+                if e.get("targetname"):
+                    dead.add(lower(e.get("targetname")))
+                m.delete(e)
+                n_ai += 1
+    # templates whose last members were scripts removed above
+    for e in list(m.entities("point_template")):
+        keys = [k for k, _ in e.props if lower(k).startswith("template") and lower(k) != "templatename"]
+        for k in keys:
+            if lower(e.get(k)) in dead:
+                e.delete(k)
+        if not [k for k, _ in e.props if lower(k).startswith("template")]:
+            dead.add(lower(e.get("targetname")))
+            m.delete(e)
+            n_tpl += 1
+    alive = set(lower(e.get("targetname")) for e in m.entities() if e.get("targetname"))
+    dead -= alive
+    n_out = 0
+    for e in m.entities():
+        con = e.child("connections")
+        if not con:
+            continue
+        keep = []
+        for it in con.items:
+            if isinstance(it, Node):
+                keep.append(it)
+                continue
+            sep = "\x1b" if "\x1b" in it[1] else ","
+            tgt = lower(it[1].split(sep)[0])
+            if tgt in dead or (tgt.endswith("*") and is_dead(tgt)):
+                n_out += 1
+                continue
+            keep.append(it)
+        con.items = keep
+    log.append("original life removed: %d NPCs (%s), %d templates/makers, %d scripts/scenes/goals, %d outputs"
+               % (n_npc, " ".join(sorted(dead_classes)), n_tpl, n_ai, n_out))
+    return dead
 
 
 def sign(m, pos, yaw, token, size=24, color="235 225 200", resolution="96", name=None):
@@ -69,7 +205,9 @@ def trigger_box(m, classname, boxes, **keys):
 def clip_brush(m, name, lo, hi, start_disabled=False):
     """Invisible player-blocking func_brush (Disable to let the player through)."""
     sol = [m.make_box(lo, hi, "TOOLS/TOOLSPLAYERCLIP")]
-    return m.add_brush_entity("func_brush", sol, targetname=name, spawnflags="2", Solidity="2",
+    # Solidity 0 "toggle": solid while enabled. ("2" - always solid - stayed solid after Disable: the station exit
+    # was closed even with a checked pass)
+    return m.add_brush_entity("func_brush", sol, targetname=name, spawnflags="2", Solidity="0",
                               StartDisabled="1" if start_disabled else "0", rendermode="10",
                               disableshadows="1")
 
@@ -175,3 +313,44 @@ def tram_stop(m, this_map, arrive, yaw, prop_pos, prop_yaw):
     return m.add_entity("prop_rpg_usable", prop_pos, targetname="tram_stop", model="models/props_c17/signpole001.mdl",
                         angles="0 %g 0" % prop_yaw, solid="6", use_action="travel", name="#HL2RPM_Hint_TramStop",
                         DefaultAnim="", disableshadows="0")
+
+
+_SPECIAL_TARGETS = ("!self", "!player", "!activator", "!caller", "!pvsplayer", "!speechtarget", "!picker",
+                    "!target1", "!target2", "!target3", "!target4", "player", "worldspawn")
+
+
+def prune_missing_outputs(m, log=None):
+    """Drop outputs aimed at entities that do not exist (left behind by the strips); a target is a
+    targetname, a classname, a wildcard of either, or a !special name."""
+    names = set(lower(e.get("targetname")) for e in m.entities() if e.get("targetname"))
+    classes = set(lower(e.classname) for e in m.entities())
+
+    def exists(t):
+        t = lower(t)
+        if not t or t.startswith("!") or t in _SPECIAL_TARGETS:
+            return True
+        if t in names or t in classes:
+            return True
+        if t.endswith("*"):
+            p = t[:-1]
+            return any(n.startswith(p) for n in names) or any(c.startswith(p) for c in classes)
+        return False
+    n = 0
+    for e in m.entities():
+        con = e.child("connections")
+        if not con:
+            continue
+        keep = []
+        for it in con.items:
+            if isinstance(it, Node):
+                keep.append(it)
+                continue
+            sep = "\x1b" if "\x1b" in it[1] else ","
+            if exists(it[1].split(sep)[0]):
+                keep.append(it)
+            else:
+                n += 1
+        con.items = keep
+    if log is not None:
+        log.append("pruned %d outputs to missing entities" % n)
+    return n

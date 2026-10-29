@@ -12664,6 +12664,8 @@ BEGIN_DATADESC( CAI_BaseNPC )
 	DEFINE_KEYFIELD( m_iRPGDisposition,		FIELD_INTEGER, "rpg_disposition" ),
 	DEFINE_FIELD( m_iRPGAlarmPrevDisp,		FIELD_INTEGER ),
 	DEFINE_FIELD( m_iRPGAlarmPrevPriority,	FIELD_INTEGER ),
+	DEFINE_FIELD( m_iRPGAlarmPrevGpc,		FIELD_INTEGER ),
+	DEFINE_KEYFIELD( m_iszRPGDialog,		FIELD_STRING, "rpg_dialog" ),
 	DEFINE_KEYFIELD( m_bHatePlayerOnPlayerDamage, FIELD_BOOLEAN, "hate_on_dmg" ),
 	DEFINE_KEYFIELD( m_bSpoilDialogOnPlayerDamage, FIELD_BOOLEAN, "spoil_on_dmg" ),
 	DEFINE_KEYFIELD( m_bPropagateHateToFactionOnPlayerDamage, FIELD_BOOLEAN, "hate_f_on_dmg" ),
@@ -13719,6 +13721,8 @@ CAI_BaseNPC::CAI_BaseNPC(void)
 	m_iRPGDisposition = 0;
 	m_iRPGAlarmPrevDisp = -1;
 	m_iRPGAlarmPrevPriority = 0;
+	m_iRPGAlarmPrevGpc = -1;
+	m_iszRPGDialog = NULL_STRING;
 	m_bHatePlayerTriggered = false;
 	m_bDialogSpoilTriggered = false;
 	m_bFactionReactionTriggered = false;

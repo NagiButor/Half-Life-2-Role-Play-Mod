@@ -66,6 +66,8 @@ public:
 	virtual bool GetTimeOfDay( float &flHours, float &flSunrise, float &flSunset ) = 0;
 	// RPGSuitType_t надетого костюма
 	virtual int GetSuitType( CBasePlayer *pPlayer ) = 0;
+	// закон (rpg_law.cpp): contraband, armed, corrupt, debt, record, papers, stop; 1/0, -1 - неизвестно
+	virtual int LawQuery( CBasePlayer *pPlayer, CBaseEntity *pNPC, const char *pszWhat ) { return -1; }
 };
 void RPG_SetWorldQuery( IRPGWorldQuery *pQuery );
 IRPGWorldQuery *RPG_GetWorldQuery();
@@ -81,6 +83,8 @@ enum RPGCondType_t
 	RPG_COND_RESONANCE, RPG_COND_INFLUENCE, RPG_COND_SUSPICION, RPG_COND_CREDITS, RPG_COND_LEVEL,
 	RPG_COND_ACT, RPG_COND_TIME, RPG_COND_DISPOSITION, RPG_COND_QUEST_STATE, RPG_COND_QUEST_STAGE,
 	RPG_COND_NOTE, RPG_COND_LOCATION, RPG_COND_CHARGEN, RPG_COND_ZONE, RPG_COND_SUIT,
+	RPG_COND_NPCVAR,	// npc_var i/n: «характер» генерика - вариант i из n по имени NPC
+	RPG_COND_LAW,		// law <что>: см. IRPGWorldQuery::LawQuery
 	RPG_COND_COUNT
 };
 
@@ -175,6 +179,7 @@ enum RPGEffectType_t
 	RPG_EFF_ACT, RPG_EFF_NOTE,
 	RPG_EFF_WAIT,		// wait N: пропустить N игровых часов (смена, ожидание) с затемнением
 	RPG_EFF_HAGGLE,		// haggle [trader:]N: цены торговца лучше на N % до конца игровых суток (N < 0 - хуже)
+	RPG_EFF_LAW,		// law <действие>: release, frisk, arrest, flee, fine:N, pay_debt (rpg_law.cpp)
 	RPG_EFF_COUNT
 };
 

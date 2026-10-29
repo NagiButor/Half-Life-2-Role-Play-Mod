@@ -348,6 +348,31 @@ void CHudRPG::OnRPGNotify( int iKind, const char *pszToken, int iValue, const ch
 		accent = clrBad;
 		pszSound = "buttons/button10.wav";
 		break;
+	case RPG_NOTIFY_LAW:
+	{
+		const char *pszKey = pszToken ? pszToken : "";
+		const bool bBad = !Q_stricmp( pszKey, "alarm" ) || !Q_stricmp( pszKey, "arrested" ) || !Q_stricmp( pszKey, "fled" ) ||
+			!Q_stricmp( pszKey, "detain" ) || !Q_stricmp( pszKey, "frisk_found" ) || !Q_stricmp( pszKey, "walked_off" );
+		accent = bBad ? clrBad : ( !Q_stricmp( pszKey, "alarm_end" ) || !Q_stricmp( pszKey, "frisk_clean" ) ? clrGood : clrAmber );
+		pszSound = bBad ? "buttons/combine_button_locked.wav" : "buttons/combine_button1.wav";
+		// тревога и задержание - ещё и баннером с тем, что теперь делать
+		if ( !Q_stricmp( pszKey, "alarm" ) || !Q_stricmp( pszKey, "arrested" ) )
+		{
+			wchar_t wTitle[160], wSub[256];
+			Localize( CFmtStr( "#HL2RPM_UI_Law_Banner_%s", pszKey ), wTitle, sizeof( wTitle ) );
+			if ( !Q_stricmp( pszKey, "alarm" ) )
+				Localize( "#HL2RPM_UI_Law_Hint_alarm", wSub, sizeof( wSub ) );
+			else
+				V_wcsncpy( wSub, wText, sizeof( wSub ) );
+			AddBanner( "#HL2RPM_UI_Law_Banner_Kicker", wTitle, wSub, clrBad );
+			if ( !Q_stricmp( pszKey, "arrested" ) )
+			{
+				PlayUISound( pszSound );
+				return;		// подробности - в баннере
+			}
+		}
+		break;
+	}
 	case RPG_NOTIFY_ITEM:
 		accent = iValue >= 0 ? clrText : clrTextDim;
 		break;
@@ -581,6 +606,18 @@ void CHudRPG::PaintSuspicion()
 	V_snwprintf( wN, ARRAYSIZE( wN ), L"%d", (int)( susp + 0.5f ) );
 	HFont fNum = GetFont( FONT_HUD_MEDIUM );
 	DrawText( fNum, bx + barW + S( 8 ), barY + S( 2 ) - FontTall( fNum ) / 2, Fade( clrText, a ), wN );
+	// что это значит и что делать (Part I/06 §3): с «Внимания» и выше
+	if ( tier >= RPG_STIER_ATTENTION || c.IsAlarm() )
+	{
+		wchar_t wHint[256];
+		Localize( CFmtStr( "#HL2RPM_UI_Law_Hint_%s", c.IsAlarm() ? "alarm" : RPGFormulas::SuspicionTierKey( tier ) ), wHint, sizeof( wHint ) );
+		if ( wHint[0] && wHint[0] != L'#' )
+		{
+			int tw, th;
+			surface()->GetTextSize( f, wHint, tw, th );
+			DrawText( f, cx - tw / 2, barY + S( 12 ), Fade( c.IsAlarm() ? clrBad : clrTextDim, a ), wHint );
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

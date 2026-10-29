@@ -44,7 +44,7 @@ public:
 	DECLARE_CLASS( CLogicRPG, CLogicalEntity );
 	DECLARE_DATADESC();
 
-	CLogicRPG() : m_bTestOnSpawn( false ) {}
+	CLogicRPG() : m_bTestOnSpawn( false ), m_iLastResult( -1 ) {}
 
 	void ScheduleSpawnTest()
 	{
@@ -67,10 +67,29 @@ public:
 		bool bMet = RPG_TestCondition( pszExpr, pPlayer, NULL, &reason );
 		if ( rpg_debug.GetBool() )
 			Msg( "[rpg] %s test \"%s\": %s %s\n", GetDebugName(), pszExpr, bMet ? "true" : "false", reason.Get() );
+		if ( pszExpr == STRING( m_iszCondition ) )
+			m_iLastResult = bMet ? 1 : 0;
 		if ( bMet )
 			m_OnTrue.FireOutput( pActivator ? pActivator : pPlayer, this );
 		else
 			m_OnFalse.FireOutput( pActivator ? pActivator : pPlayer, this );
+	}
+
+	// test_on_spawn - это «слой карты по флагам»: он держится в согласии с персонажем и во время игры.
+	// Флаги/предметы изменились - условие проверяется заново, выходы - только когда результат сменился
+	// (КПП вокзала: диалог ставит checkpoint_trainstation_passed - барьер на выходе снимается сразу,
+	// а не после перезагрузки карты)
+	void FlagRetest()
+	{
+		if ( !m_bTestOnSpawn || m_iszCondition == NULL_STRING || !STRING( m_iszCondition )[0] )
+			return;
+		CBasePlayer *pPlayer = RPG_GetPlayer();
+		if ( !pPlayer )
+			return;
+		const int iNow = RPG_TestCondition( STRING( m_iszCondition ), pPlayer, NULL ) ? 1 : 0;
+		if ( iNow == m_iLastResult )
+			return;
+		RunTest( STRING( m_iszCondition ), pPlayer );
 	}
 
 	// вход = один ключ эффекта (§4)
@@ -164,16 +183,40 @@ private:
 	string_t m_iszEffects;
 	string_t m_iszCondition;
 	bool m_bTestOnSpawn;
+	int m_iLastResult;		// последний результат условия (-1 - ещё не проверялось)
 	COutputEvent m_OnTrue;
 	COutputEvent m_OnFalse;
 };
 
 LINK_ENTITY_TO_CLASS( logic_rpg, CLogicRPG );
 
+// флаги и предметы персонажа изменились -> логика слоёв (test_on_spawn) проверяется в конце кадра
+class CRPGLogicLayerWatcher : public CAutoGameSystemPerFrame, public IRPGListener
+{
+public:
+	CRPGLogicLayerWatcher() : CAutoGameSystemPerFrame( "CRPGLogicLayerWatcher" ), m_bDirty( false ) {}
+	virtual bool Init() { RPG_AddListener( this ); return true; }
+	virtual void LevelInitPostEntity() { m_bDirty = false; }
+	virtual void OnRPGFlagChanged( CBasePlayer *pPlayer, const char *pszFlag ) { m_bDirty = true; }
+	virtual void OnRPGItemsChanged( CBasePlayer *pPlayer, const char *pszClassname, int iDelta ) { m_bDirty = true; }
+	virtual void FrameUpdatePostEntityThink()
+	{
+		if ( !m_bDirty )
+			return;
+		m_bDirty = false;
+		for ( CBaseEntity *pEnt = gEntList.FindEntityByClassname( NULL, "logic_rpg" ); pEnt; pEnt = gEntList.FindEntityByClassname( pEnt, "logic_rpg" ) )
+			static_cast<CLogicRPG *>( pEnt )->FlagRetest();
+	}
+private:
+	bool m_bDirty;
+};
+static CRPGLogicLayerWatcher g_RPGLogicLayerWatcher;
+
 BEGIN_DATADESC( CLogicRPG )
 	DEFINE_KEYFIELD( m_iszEffects, FIELD_STRING, "effects" ),
 	DEFINE_KEYFIELD( m_iszCondition, FIELD_STRING, "condition" ),
 	DEFINE_KEYFIELD( m_bTestOnSpawn, FIELD_BOOLEAN, "test_on_spawn" ),
+	DEFINE_FIELD( m_iLastResult, FIELD_INTEGER ),
 	DEFINE_THINKFUNC( SpawnTestThink ),
 	DEFINE_INPUTFUNC( FIELD_STRING, "ApplyEffects", InputApplyEffects ),
 	DEFINE_INPUTFUNC( FIELD_STRING, "AddXP", InputAddXP ),
@@ -435,7 +478,14 @@ void RPG_ApplyAlarm( bool bOn )
 				continue;
 			pNPC->m_iRPGAlarmPrevDisp = (int)pNPC->IRelationType( pPlayer );
 			pNPC->m_iRPGAlarmPrevPriority = pNPC->IRelationPriority( pPlayer );
+			// gordon_precriminal (город) делает ГО к игроку нейтральной при любом отношении
+			// (CNPC_MetroPolice::IRelationType): на время тревоги - снять его для юнита
+			pNPC->m_iRPGAlarmPrevGpc = pNPC->GetGordonPrecriminalOverride();
+			pNPC->SetGordonPrecriminalOverride( 2 );
 			pNPC->AddEntityRelationship( pPlayer, D_HT, 99 );
+			// юниты поблизости знают, где нарушитель (подкрепление идёт на голос Надзора)
+			if ( pNPC->GetAbsOrigin().DistToSqr( pPlayer->GetAbsOrigin() ) < 2000.0f * 2000.0f )
+				pNPC->UpdateEnemyMemory( pPlayer, pPlayer->GetAbsOrigin() );
 		}
 		else
 		{
@@ -444,6 +494,9 @@ void RPG_ApplyAlarm( bool bOn )
 			const Disposition_t prev = (Disposition_t)pNPC->m_iRPGAlarmPrevDisp;
 			pNPC->AddEntityRelationship( pPlayer, prev, pNPC->m_iRPGAlarmPrevPriority );
 			pNPC->m_iRPGAlarmPrevDisp = -1;
+			if ( pNPC->m_iRPGAlarmPrevGpc >= 0 )
+				pNPC->SetGordonPrecriminalOverride( pNPC->m_iRPGAlarmPrevGpc );
+			pNPC->m_iRPGAlarmPrevGpc = -1;
 			if ( prev != D_HT && pNPC->GetEnemy() == pPlayer )
 			{
 				pNPC->SetEnemy( NULL );

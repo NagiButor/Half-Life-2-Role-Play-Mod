@@ -140,6 +140,9 @@ public:
 	void	SetBatonState( bool state );
 	bool	BatonActive( void );
 
+	// HL2RPM: закон Альянса решил дело (задержание, конец тревоги) - забыть замечания, дубинку и погоню
+	void	RPG_ForgivePlayer( void );
+
 #ifndef METROPOLICE_USES_RESPONSE_SYSTEM
 	CAI_Sentence< CNPC_MetroPolice > *GetSentences() { return &m_Sentences; }
 #endif

@@ -33,4 +33,6 @@
 	"HL2RPM_Hint_TramStop"      { "ru" "Остановка трамвая"   "en" "Tram stop" }
 	"HL2RPM_Hint_Terminal"      { "ru" "Терминал участка"   "en" "Precinct terminal" }
 	"HL2RPM_Sign_Ration"        { "ru" "РАЗДАЧА · ПН / ЧТ"  "en" "RATIONS · MON / THU" }
+	"HL2RPM_Sign_ToExit"        { "ru" "ВЫХОД В ГОРОД - ЧЕРЕЗ КПП"   "en" "CITY EXIT - VIA CHECKPOINT" }
+	"HL2RPM_Sign_ExitCheckpoint" { "ru" "КПП · ВЫХОД В ГОРОД"   "en" "CHECKPOINT · CITY EXIT" }
 }

@@ -237,4 +237,49 @@
 	"HL2RPM_UI_Fail_TravelHere"      { "ru" "Вы уже здесь"               "en" "You are already here" }
 	"HL2RPM_UI_Fail_TravelSuspicion" { "ru" "С хвостом в трамвай не садятся"   "en" "You don't board a tram with a tail" }
 	"HL2RPM_UI_Fail_TravelNoStop"    { "ru" "Здесь нет остановки"        "en" "There is no stop here" }
+
+	// ---- закон: что ГО делает с подозрением (rpg_law.cpp, HUD rpg_hud.cpp) ----
+	"HL2RPM_UI_Law_check"            { "ru" "Юнит ГО: «Гражданин. Документы». Остановитесь"   "en" "CP unit: “Citizen. Papers.” Stop" }
+	"HL2RPM_UI_Law_search"           { "ru" "Юнит ГО идёт к вам: досмотр. Не бегите"   "en" "A CP unit is coming: a search. Don't run" }
+	"HL2RPM_UI_Law_detain"           { "ru" "Юнит ГО идёт вас задерживать"   "en" "A CP unit is coming to arrest you" }
+	"HL2RPM_UI_Law_fled"             { "ru" "Вы ушли от юнита ГО: подозрение растёт"   "en" "You got away from the CP unit: suspicion rises" }
+	"HL2RPM_UI_Law_walked_off"       { "ru" "Вы ушли, не дослушав юнита: подозрение растёт"   "en" "You walked off on the unit: suspicion rises" }
+	"HL2RPM_UI_Law_alarm"            { "ru" "ТРЕВОГА: Гражданская оборона ищет вас"   "en" "ALARM: Civil Protection is after you" }
+	"HL2RPM_UI_Law_alarm_end"        { "ru" "ГО потеряла ваш след. Тревога снята"   "en" "Civil Protection lost your trail. The alarm is over" }
+	"HL2RPM_UI_Law_frisk_clean"      { "ru" "Досмотр: ничего запрещённого"   "en" "Search: nothing forbidden" }
+	"HL2RPM_UI_Law_frisk_found"      { "ru" "Досмотр: контрабанда. Штраф %s1 кр."   "en" "Search: contraband. Fine %s1 cr." }
+	"HL2RPM_UI_Law_arrested"         { "ru" "Штраф %s1 кр."              "en" "Fine: %s1 cr." }
+	"HL2RPM_UI_Law_Confiscated"      { "ru" "Изъято: %s1"                "en" "Confiscated: %s1" }
+	"HL2RPM_UI_Law_Banner_Kicker"    { "ru" "ГРАЖДАНСКАЯ ОБОРОНА"        "en" "CIVIL PROTECTION" }
+	"HL2RPM_UI_Law_Banner_alarm"     { "ru" "Тревога"                    "en" "Alarm" }
+	"HL2RPM_UI_Law_Banner_arrested"  { "ru" "Вы задержаны"               "en" "You were arrested" }
+	"HL2RPM_UI_Law_Hint_attention"   { "ru" "Не бегите и не держите оружие на виду: юнит может проверить документы"   "en" "Don't run or show a weapon: a unit may check your papers" }
+	"HL2RPM_UI_Law_Hint_search"      { "ru" "ГО остановит для досмотра: контрабанду изымут"   "en" "Civil Protection will stop you for a search: contraband will be taken" }
+	"HL2RPM_UI_Law_Hint_detain"      { "ru" "Вас идут задерживать: сдайтесь, договоритесь - или скройтесь"   "en" "They're coming to arrest you: surrender, talk your way out - or hide" }
+	"HL2RPM_UI_Law_Hint_alarm"       { "ru" "Скройтесь от ГО - или сдайтесь: присядьте без оружия рядом с юнитом"   "en" "Hide from Civil Protection - or surrender: crouch without a weapon next to a unit" }
+
+	// ---- подписи общих собеседников (loot_displayname NPC карт) ----
+	"HL2RPM_Speaker_Citizen"         { "ru" "Гражданин"                  "en" "Citizen" }
+	"HL2RPM_Speaker_CitizenF"        { "ru" "Гражданка"                  "en" "Citizen" }
+	"HL2RPM_Speaker_Passenger"       { "ru" "Пассажир"                   "en" "Passenger" }
+	"HL2RPM_Speaker_PassengerF"      { "ru" "Пассажирка"                 "en" "Passenger" }
+	"HL2RPM_Speaker_CP"              { "ru" "Юнит ГО"                    "en" "CP Unit" }
+	"HL2RPM_Speaker_Clerk"           { "ru" "Регистратор"                "en" "Registrar" }
+
+	// ---- Настройки -> Игра (hl2rpm_options_graphics.cpp, язык - hl2rpm/rpg_language.cpp) ----
+	"HL2RPM_Options_Game"            { "ru" "Игра"                       "en" "Game" }
+	"HL2RPM_Game_Language"           { "ru" "Язык / Language"            "en" "Language / Язык" }
+	"HL2RPM_Game_Lang_Steam"         { "ru" "Как в Steam"                "en" "As in Steam" }
+	"HL2RPM_Game_Lang_Russian"       { "ru" "Русский"                    "en" "Русский" }
+	"HL2RPM_Game_Lang_English"       { "ru" "English"                    "en" "English" }
+	"HL2RPM_Game_Subtitles"          { "ru" "Субтитры"                   "en" "Subtitles" }
+	"HL2RPM_Game_DlgAutoContinue"    { "ru" "Диалоги: автопродолжение"   "en" "Dialogs: auto-continue" }
+	"HL2RPM_Game_DlgReadSpeed"       { "ru" "Диалоги: скорость чтения"   "en" "Dialogs: reading speed" }
+	"HL2RPM_Game_Speed_Slow"         { "ru" "Медленно"                   "en" "Slow" }
+	"HL2RPM_Game_Speed_Normal"       { "ru" "Обычно"                     "en" "Normal" }
+	"HL2RPM_Game_Speed_Fast"         { "ru" "Быстро"                     "en" "Fast" }
+	"HL2RPM_Game_DlgAutoFace"        { "ru" "Диалоги: камера к собеседнику"   "en" "Dialogs: face the speaker" }
+	"HL2RPM_Game_Hud"                { "ru" "Интерфейс RPG"              "en" "RPG interface" }
+	"HL2RPM_Game_Hint"               { "ru" "Язык меняется сразу: меню, диалоги, субтитры и озвучка"   "en" "The language changes at once: menus, dialogs, subtitles and voice" }
+	"HL2RPM_Game_BreencastCaptions"  { "ru" "Субтитры Брин-кастов"       "en" "Breencast subtitles" }
 }

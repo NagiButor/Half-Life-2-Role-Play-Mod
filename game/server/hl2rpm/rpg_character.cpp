@@ -6,6 +6,7 @@
 
 #include "cbase.h"
 #include "hl2rpm/rpg_character.h"
+#include "hl2rpm/rpg_law.h"
 #include "hl2rpm/rpg_formulas.h"
 #include "hl2rpm/rpg_entities.h"
 #include "isaverestore.h"
@@ -1070,6 +1071,7 @@ void CRPGCharacter::SetAlarm( bool bAlarm )
 	m_Data.m_bAlarm = bAlarm;
 	QueueStat( "alarm" );
 	RPG_ApplyAlarm( bAlarm );
+	RPG_Law_OnAlarm( bAlarm );
 	if ( rpg_debug.GetBool() )
 		Msg( "[rpg] alarm %s\n", bAlarm ? "ON" : "off" );
 }
@@ -1337,6 +1339,11 @@ public:
 		if ( !pPlayer )
 			pPlayer = RPG_GetPlayer();
 		return pPlayer ? pPlayer->m_Local.m_iSuitType : -1;
+	}
+
+	virtual int LawQuery( CBasePlayer *pPlayer, CBaseEntity *pNPC, const char *pszWhat )
+	{
+		return RPG_Law_Query( pPlayer, pNPC, pszWhat );
 	}
 
 private:

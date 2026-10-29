@@ -1,6 +1,6 @@
-<p align="center"><img src="hl2rpm_extras/art/steam/store/main_capsule_616x353_en.png" alt="Half-Life 2: Role-Playing Mod"></p>
+<p align="center"><img src="hl2rpm_extras/art/steam/store/main_capsule_616x353_en.png" alt="Half-Life 2: Role Play Mod"></p>
 
-# Half-Life 2: Role-Playing Mod (HL2RPM)
+# Half-Life 2: Role Play Mod (HL2RPM)
 
 **English** · [Русский](README.ru.md)
 
@@ -53,7 +53,16 @@ Start from **New Game → Prologue: Arrival** or `map rp_c17_01_trainstation`.
   green / red), lies, bribes, items, reputation and civil-status conditions; keys 1–9, Esc to leave.
 - **Civil status and suspicion** — your standing with the Combine; suspicion grows in control zones
   (running near Civil Protection, a weapon in hand, restricted areas, failed lies) and decays out of
-  sight. At 100 Civil Protection turns hostile.
+  sight.
+- **Combine law** — suspicion is what Civil Protection does: from 25 a unit comes to check your papers,
+  from 50 it searches you (contraband is taken, a fine), from 75 it arrests you (surrender, talk your way
+  out, slip a corrupt unit some credits — or run). At 100 the alarm goes off: Overwatch announces you,
+  the units hit and shoot; hide — or surrender by crouching without a weapon next to a unit. Knocked
+  down by a baton — you come to in the duty room with a fine and without your contraband.
+- **People who answer** — everybody in the world answers E: an own dialog, a shared one with its own
+  "character", or the faction's bark. The station and the plaza have the mod's own people instead of
+  HL2's characters: passengers, queues at the registration windows, people waiting on benches,
+  Civil Protection posts that tell you the way.
 - **Factions and relations** — ten factions plus personal disposition of every named NPC.
 - **Quests** — stages, objectives with markers on the compass, journal and notes.
 - **Inventory, loot, trade** — items with weight, searching bodies and containers; traders with their own
@@ -61,6 +70,8 @@ Start from **New Game → Prologue: Arrival** or `map rp_c17_01_trainstation`.
 - **Tram** — fast travel between the districts you have discovered (stops in the station, the plaza, "Opora", the Old Town).
 - **Sleep** — beds you own: choose the hours, suspicion resets, curfew is checked.
 - **Persistent world** — character, quests, flags, time and weather survive saves and map transitions.
+- **Language** — Options → Game → Language: as in Steam, Russian or English; switches at once — menus,
+  dialogs, subtitles, signs and voice.
 
 ### Interface
 
@@ -127,7 +138,7 @@ On top of Mapbase there is a deferred renderer (light pre-pass, based on Biohaza
 1. Steam: **Source SDK Base 2013 Singleplayer** (appid 243730), Half-Life 2, Episode One, Episode Two.
 2. In `steamapps\sourcemods`: Mapbase (`mapbase_shared`, `mapbase_hl2`, `mapbase_episodic`).
 3. Unpack `hl2rpm-vX.Y.zip` from Releases into `steamapps\sourcemods` (the archive already contains
-   the `hl2rpm` folder) and restart Steam. The mod appears in the library as **Half-Life 2: Role-Playing Mod**.
+   the `hl2rpm` folder) and restart Steam. The mod appears in the library as **Half-Life 2: Role Play Mod**.
 
 Map sources (`.vmf`) and Hammer++ FGD files are in the `hl2rpm-mapsrc-*.zip` and `hl2rpm-fgds-*.zip`
 archives of the same release; the FGD load order is described in `CLAUDE.md`.

@@ -1,0 +1,67 @@
+// Пост ГО у бывшей таможни вокзала (C17-01): направляет прибывших (вместо «оцепления» Valve, через
+// которое было не пройти). Без записи - в зал регистрации, с записью - к выходу: коридор, дежурка, КПП.
+"Dialog"
+{
+	"entity"        "npc_cp_customs"
+	"voice"         "cp"
+	"speaker"       "Юнит ГО, пост у таможни"   "speaker_en" "CP Unit, Customs Post"
+	"auto_face_npc" "1"
+	"greetings"
+	{
+		"1" { "require_flag" "checkpoint_trainstation_passed"  "node" "30" }
+		"2" { "require_flag" "mq00_registered"  "node" "20" }
+		"3" { "node" "1" }
+	}
+	"nodes"
+	{
+		"1"
+		{
+			"line"    "Прибывшие - в зал регистрации. Не толпиться, не бегать, вопросов не задавать."
+			"line_en" "Arrivals - to the registration hall. No crowding, no running, no questions."
+			"sound"   "npc/metropolice/vo/movealong.wav"
+			"options"
+			{
+				"1" { "text" "Где зал регистрации?"  "text_en" "Where is the registration hall?"  "next" "10" }
+				"2" { "text" "А выход в город?"  "text_en" "And the way into the city?"  "next" "11" }
+				"3" { "text" "Вопросов не задавать - это тоже вопрос?"  "text_en" "No questions - is that a question too?"  "require_attr" "ANA>=7"  "hide_if_unmet" "1"  "next" "12" }
+				"0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" }
+			}
+		}
+		"10"
+		{
+			"line"    "Бывший зал ожидания, за перроном. Окна вдоль стены, с первого по шестое. Новоприбывшие - четвёртое."
+			"line_en" "The old waiting room, past the platform. Windows along the wall, one to six. New arrivals - window four."
+			"options"
+			{
+				"1" { "text" "А выход в город?"  "text_en" "And the way into the city?"  "next" "11" }
+				"0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" }
+			}
+		}
+		"11"
+		{
+			"line"    "Через эти ворота, по коридору, через дежурную часть - там КПП. Без записи не выпустят. Сначала - окно четыре."
+			"line_en" "Through this gate, down the corridor, through the duty room - the checkpoint is there. No record, no exit. Window four first."
+			"options" { "0" { "text" "Понял."  "text_en" "Got it."  "exit" "1"  "close" "1" } }
+		}
+		"12"
+		{
+			"line"    "Это - предупреждение. Следующее будет дубинкой. Зал регистрации. Шагом."
+			"line_en" "That is a warning. The next one comes with a baton. Registration hall. Walk."
+			"effects" { "suspicion" "+5" }
+			"end"     "1"
+		}
+		"20"
+		{
+			"line"    "Запись есть? Выход в город - через ворота, по коридору, в дежурку. Там КПП. Документы держи в руке."
+			"line_en" "Got a record? The way into the city - through the gate, down the corridor, into the duty room. The checkpoint is there. Keep your papers in your hand."
+			"options" { "0" { "text" "Спасибо."  "text_en" "Thanks."  "exit" "1"  "close" "1" } }
+		}
+		"30"
+		{
+			"line"    "Тебя уже проверили. Проходи, не загораживай поток."
+			"line_en" "You've been checked already. Move along, don't block the flow."
+			"sound"   "npc/metropolice/vo/movealong3.wav"
+			"end"     "1"
+		}
+	}
+}

@@ -25,7 +25,8 @@ BLUE = (110, 190, 255)
 AMBER = (255, 170, 60)
 SUB_COL = (214, 224, 234)
 
-SUBTITLES = {'en': 'UNFORESEEN CONSEQUENCES', 'ru': 'НЕПРЕДВИДЕННЫЕ ПОСЛЕДСТВИЯ'}
+# the mod's name: Half-Life 2: Role Play Mod (HL2RPM) - the same in every language
+SUBTITLES = {'en': 'ROLE PLAY MOD', 'ru': 'ROLE PLAY MOD'}
 
 
 def cap_font(path, cap_px):
@@ -114,6 +115,9 @@ def lockup(fonts_dir, lang, C=240, emblem=True, worn=True, seed=5):
 
     sub = SUBTITLES[lang]
     sub_nat = run_width(fs, sub, 0)
+    if sub_nat < 0.72 * text_w:  # a short subtitle: larger letters instead of huge gaps
+        fs = ImageFont.truetype(fs.path, int(fs.size * min(0.72 * text_w / sub_nat, 1.8)))
+        sub_nat = run_width(fs, sub, 0)
     sub_track = (text_w - sub_nat) / (len(sub) - 1)
     if sub_track < 0.08 * fs.size:  # too long to justify -> shrink
         fs = ImageFont.truetype(fs.path, int(fs.size * text_w / (sub_nat + 0.08 * fs.size * (len(sub) - 1))))

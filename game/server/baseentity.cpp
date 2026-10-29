@@ -2849,8 +2849,7 @@ void CBaseEntity::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE u
 		const char *ename = GetEntityName().ToCStr();
 		if ( ename && ename[0] )
 		{
-			const DialogDefinitions::DSDialog *dlg = DialogDefinitions::FindDialogForEntity( ename );
-			if ( dlg || RPGDialog::Has( ename ) )	// HL2RPM: диалоги v2
+			if ( RPGDialog::Has( ename ) || ( IsNPC() && RPGDialog::HasFor( this ) ) )	// HL2RPM: диалоги v2
 			{
 				CBasePlayer *pPlayer = ToBasePlayer( pActivator );
 				if ( pPlayer )
