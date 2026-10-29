@@ -167,6 +167,11 @@ def tram_stop(m, this_map, arrive, yaw, prop_pos, prop_yaw):
     m.add_entity("info_target", (x, y, z), targetname="travel_arrive", angles="0 %g 0" % yaw)
     m.add_brush_entity("trigger_transition", [m.make_box((x - 8, y - 8, z + 400), (x + 8, y + 8, z + 416),
                                                          "TOOLS/TOOLSTRIGGER")], targetname="lm_travel")
+    # the plate on the pole: "TRAM" in the game's language, both faces
+    px, py, pz = prop_pos
+    for k, dyaw in enumerate((0, 180)):
+        sign(m, (px, py, pz + 104), prop_yaw + dyaw, "#HL2RPM_Sign_Tram", size=20, color="250 215 120",
+             name="tram_sign_%d" % k)
     return m.add_entity("prop_rpg_usable", prop_pos, targetname="tram_stop", model="models/props_c17/signpole001.mdl",
                         angles="0 %g 0" % prop_yaw, solid="6", use_action="travel", name="#HL2RPM_Hint_TramStop",
                         DefaultAnim="", disableshadows="0")

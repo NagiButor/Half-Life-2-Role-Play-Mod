@@ -323,7 +323,7 @@ protected:
 			Localize( "#HL2RPM_UI_TR_None", w, sizeof( w ) );
 			DrawText( fBody, x0 + S( 30 ), y, clrTextFaint, w );
 		}
-		Localize( "#HL2RPM_UI_Sleep_Cancel", w, sizeof( w ) );
+		Localize( "#HL2RPM_UI_BT_Leave", w, sizeof( w ) );
 		TextButton( BTN_TRAVEL_CANCEL, x0 + S( 30 ), y1 - S( 70 ), x0 + S( 200 ), y1 - S( 26 ), w );
 	}
 };

@@ -5,6 +5,7 @@
 	// ---- вокзал (C17-01) ----
 	"HL2RPM_Sign_Registration"  { "ru" "РЕГИСТРАЦИЯ ПРИБЫВШИХ"   "en" "ARRIVALS REGISTRATION" }
 	"HL2RPM_Sign_Window1"       { "ru" "ОКНО 1"   "en" "WINDOW 1" }
+	"HL2RPM_Sign_Tram"          { "ru" "ТРАМВАЙ"   "en" "TRAM" }
 	"HL2RPM_Sign_Window2"       { "ru" "ОКНО 2"   "en" "WINDOW 2" }
 	"HL2RPM_Sign_Window3"       { "ru" "ОКНО 3"   "en" "WINDOW 3" }
 	"HL2RPM_Sign_Window4"       { "ru" "ОКНО 4"   "en" "WINDOW 4" }
