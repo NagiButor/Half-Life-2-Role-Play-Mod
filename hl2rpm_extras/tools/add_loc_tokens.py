@@ -88,6 +88,12 @@ TOKENS = [
     ("HL2RPM_Gfx_DoF_Always", "Всегда", "Always"),
     ("HL2RPM_Gfx_Sharpen", "Резкость изображения", "Image sharpening"),
     ("HL2RPM_Fx_Hint", "GI: свет из окон и дверей, тёмные помещения, отражённый свет.", "GI: light through windows and doors, dark rooms, bounced light."),
+    # New Game chapters (cfg/chapterN.cfg) and save names (scripts/chapters.txt)
+    ("hl2rpm_Chapter1_Title", "ПРОЛОГ: ПРИБЫТИЕ", "PROLOGUE: ARRIVAL"),
+    ("hl2rpm_Chapter_Station", "Вокзал Сити 17", "City 17 Station"),
+    ("hl2rpm_Chapter_Plaza", "Привокзальная площадь", "Station Plaza"),
+    ("hl2rpm_Chapter_Block7", "Квартал 7", "Block 7"),
+    ("hl2rpm_Chapter_Opora", "Опорный пункт ГО", "Civil Protection Station"),
 ]
 
 def process(path, russian):

@@ -75,6 +75,8 @@ public:
 
 	// Is the player wearing the HEV suit
 	CNetworkVar( bool, m_bWearingSuit );
+	// HL2RPM: equipped suit type (RPGSuitType_t, hl2rpm/rpg_shared.h): HUD theme, survives save/load
+	CNetworkVar( int, m_iSuitType );
 	CNetworkVar( bool, m_bPoisoned );
 	CNetworkVar( float, m_flStepSize );
 	CNetworkVar( bool, m_bAllowAutoMovement );

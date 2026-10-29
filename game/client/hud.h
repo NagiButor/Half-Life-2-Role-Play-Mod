@@ -149,6 +149,9 @@ public:
 	// User messages
 	void						MsgFunc_ResetHUD(bf_read &msg);
 	void					MsgFunc_CombineSuit(bf_read &msg);
+	// HL2RPM: blue "combine" HUD colours on/off; also re-applied from the networked suit type
+	// (m_Local.m_iSuitType, hl2rpm/c_rpg_character.cpp) after a load, hud_reloadscheme...
+	void					ApplyCombineSuitStyle( bool bOn, bool bPlaySound );
 	void 						MsgFunc_SendAudio(bf_read &msg);
 
 	// Hud Render group

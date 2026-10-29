@@ -1,0 +1,52 @@
+// HL2RPM: предметы (RPG_SPEC §2, §11). Ключ блока - classname.
+//   category   weapon / armor / medicine / food / document / key / note / ammo / misc
+//   kg, value (кр.), contraband 0..3 (I/II/III - Part I/07)
+//   model      модель предмета в мире (у ванильных предметов не задаётся - работают как раньше)
+//   use        heal N | food N | note <id> | readable
+//   armor      citizen / worker / cp / overwatch / rebel / hev  (тип HUD, RPG_SPEC §8)
+// Имена/описания - #RPG_Item_<classname>(_Desc)
+"Items"
+{
+	// ---- документы ----
+	"item_temp_pass"        { "category" "document" "kg" "0.01" "value" "0"   "model" "models/props_c17/paper01.mdl" "use" "readable" }
+	"item_account_card"     { "category" "document" "kg" "0.01" "value" "0"   "model" "models/props_c17/paper01.mdl" "use" "readable" }
+	"item_forged_id_card"   { "category" "document" "kg" "0.01" "value" "600" "contraband" "2" "model" "models/props_c17/paper01.mdl" "use" "readable" }
+	"item_lambda_card"      { "category" "document" "kg" "0.01" "value" "0"   "contraband" "3" "model" "models/props_c17/paper01.mdl" "use" "readable" }
+	"item_ration_coupon"    { "category" "document" "kg" "0.01" "value" "5"   "model" "models/props_c17/paper01.mdl" "use" "readable" }
+	"item_work_order"       { "category" "document" "kg" "0.05" "value" "0"   "model" "models/props_lab/clipboard.mdl" "use" "readable" }
+
+	// ---- записки (окно чтения + «Заметки») ----
+	"item_pocket_note"      { "category" "note" "kg" "0.01" "value" "0" "model" "models/props_c17/paper01.mdl" "use" "note pocket" }
+	"item_citizen_memo"     { "category" "note" "kg" "0.02" "value" "0" "model" "models/props_junk/garbage_newspaper001a.mdl" "use" "note citizen_memo" }
+	"item_letter_113"       { "category" "note" "kg" "0.01" "value" "0" "model" "models/props_c17/paper01.mdl" "use" "note letter_113" }
+
+	// ---- еда ----
+	"item_ration"           { "category" "food" "kg" "0.4"  "value" "10" "model" "models/weapons/w_package.mdl" "use" "food 15" }
+	"item_water_can"        { "category" "food" "kg" "0.35" "value" "3"  "model" "models/props_junk/popcan01a.mdl" "use" "food 4" }
+	"item_chocolate"        { "category" "food" "kg" "0.1"  "value" "25" "model" "models/props_junk/garbage_takeoutcarton001a.mdl" "use" "food 8" }
+
+	// ---- квестовое ----
+	"item_samizdat_package" { "category" "misc" "kg" "0.8"  "value" "0"   "contraband" "1" "model" "models/props_junk/garbage_newspaper001a.mdl" }
+	"item_kadar_package"    { "category" "misc" "kg" "1.2"  "value" "0"   "contraband" "2" "model" "models/props_junk/cardboard_box004a.mdl" }
+	"item_zenit_camera"     { "category" "misc" "kg" "0.7"  "value" "120" "model" "models/props_junk/cardboard_box004a.mdl" }
+
+	// ---- инструменты ----
+	"item_lockpick"         { "category" "key"  "kg" "0.05" "value" "15"  "contraband" "1" "model" "models/props_c17/tools_wrench01a.mdl" }
+
+	// ---- одежда и броня ----
+	"item_suit_worker"      { "category" "armor" "kg" "2.5" "value" "60"  "armor" "worker"    "model" "models/combine_vests/bogvest.mdl"    "mods" { "armor" "5" } }
+	"item_suit_cp"          { "category" "armor" "kg" "4.0" "value" "400" "armor" "cp"        "contraband" "3" "model" "models/combine_vests/prisonvest.mdl" "mods" { "armor" "15" } }
+	"item_suit_rebel"       { "category" "armor" "kg" "3.0" "value" "150" "armor" "rebel"     "contraband" "3" "model" "models/combine_vests/outlandvest.mdl" "mods" { "armor" "10" } }
+	"item_combine_soldier_suit" { "category" "armor" "kg" "8.0" "value" "900" "armor" "overwatch" "contraband" "3" "mods" { "armor" "30" } }
+	"item_suit"             { "category" "armor" "kg" "9.0" "value" "0"   "armor" "hev" "mods" { "armor" "50" } }
+
+	// ---- ванильные (только категория/цена/контрабанда; поведение прежнее) ----
+	"item_healthkit"        { "category" "medicine" "value" "40" }
+	"item_healthvial"       { "category" "medicine" "value" "15" }
+	"item_battery"          { "category" "misc"     "value" "30" }
+	"weapon_stunstick"      { "category" "weapon" "value" "80"  "contraband" "2" }
+	"weapon_crowbar"        { "category" "weapon" "value" "20"  "contraband" "1" }
+	"weapon_pistol"         { "category" "weapon" "value" "150" "contraband" "3" }
+	"weapon_357"            { "category" "weapon" "value" "350" "contraband" "3" }
+	"weapon_smg1"           { "category" "weapon" "value" "300" "contraband" "3" }
+}

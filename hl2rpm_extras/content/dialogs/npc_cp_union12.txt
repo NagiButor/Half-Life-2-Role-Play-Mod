@@ -1,0 +1,182 @@
+// SQ-01 «Подберите банку» - юнит ГО «Юнион-12» у колонны на выходе с вокзала (Part V/08). Канон-оммаж HL2.
+// Реплики приказа - ванильные (npc/metropolice/vo/pickupthecan1, putitinthetrash1). Банку роняет карта:
+// при старте разговора узел 1 - fire can_union12 (prop_physics popcan01a падает к ногам).
+"Dialog"
+{
+	"entity"        "npc_cp_union12"
+	"voice"         "cp"
+	"speaker"       "Юнит ГО «Юнион-12»"   "speaker_en" "CP Unit “Union-12”"
+	"auto_face_npc" "1"
+	"greetings"
+	{
+		"1" { "require_flag" "sq01_result=thrown"  "node" "40" }
+		"2" { "require_flag" "sq01_result"  "node" "41" }
+		"3" { "require_flag" "mq00_registered"  "node" "1" }
+		"4" { "node" "42" }
+	}
+	"nodes"
+	{
+		"1"
+		{
+			"vo"      "SQ01_S1_N1_UNION12"
+			"line"    "Подними банку."
+			"line_en" "Pick up that can."
+			"line_low_ana" "Банка. Подними. Понял?"   "line_low_ana_en" "Can. Pick up. Understand?"
+			"sound"   "npc/metropolice/vo/pickupthecan1.wav"
+			"emotion" "опускает маску, роняет банку на плиты"
+			"effects" { "grant_quest" "sq01_can"  "fire" "union12_drop_can,Trigger,,0" }
+			"options"
+			{
+				"1" { "text" "(Поднять банку)"  "text_en" "(Pick up the can)"  "next" "2" }
+				"2" { "text" "Офицер, урна вон там. Кажется, вы промахнулись."  "text_en" "Officer, the trash can is over there. I think you missed."  "check" "skill:speech:35"  "in_quest" "1"  "next" "4"  "fail_next" "5"  "on_fail_suspicion" "+10" }
+				"3" { "text" "(Поднять, долго разглядывать, сунуть в карман) Банка! Пустая. Моя теперь."  "text_en" "(Pick it up, stare at it for a long time, pocket it) A can! Empty. Mine now."  "require_attr" "ANA<=3"  "hide_if_unmet" "1"  "next" "6"  "suspicion" "-10" }
+				"4" { "text" "Сам подними."  "text_en" "Pick it up yourself."  "next" "7"  "civil" "-3" }
+				"5" { "text" "(Молча пройти мимо)"  "text_en" "(Walk past in silence)"  "next" "8" }
+			}
+		}
+		"2"
+		{
+			"vo"      "SQ01_S1_N2_UNION12"
+			"line"    "А теперь - в урну."
+			"line_en" "Now, put it in the trash can."
+			"sound"   "npc/metropolice/vo/putitinthetrash1.wav"
+			"options"
+			{
+				"1" { "text" "(Бросить в урну)"  "text_en" "(Drop it in the trash can)"  "next" "3"  "civil" "+2"  "set_flag" "sq01_result=binned, pk02_unlocked" }
+				"2" { "text" "(Смять банку в кулаке и бросить в урну)"  "text_en" "(Crush the can in your fist and throw it in the trash)"  "check" "attr:might:7"  "in_quest" "1"  "next" "31"  "fail_next" "3"  "on_success_civil" "+1"  "on_success_suspicion" "+5"  "set_flag" "sq01_result=binned, pk02_unlocked" }
+				"3" { "text" "(Бросить банку в юнита)"  "text_en" "(Throw the can at the unit)"  "next" "9"  "civil" "-3"  "humanity" "+1"  "set_flag" "sq01_result=thrown, sq01_respect" }
+				"4" { "text" "(Сунуть банку в карман) Моя теперь."  "text_en" "(Pocket the can) Mine now."  "require_attr" "ANA<=3"  "hide_if_unmet" "1"  "next" "6"  "suspicion" "-10" }
+			}
+		}
+		"3"
+		{
+			"vo"      "SQ01_S1_N3_UNION12"
+			"line"    "...Проходи."
+			"line_en" "...Move along."
+			"sound"   "npc/metropolice/vo/movealong.wav"
+			"effects" { "complete_quest" "sq01_can"  "fire" "union12_can_binned,Trigger,,0" }
+			"end"     "1"
+		}
+		"31"
+		{
+			"vo"      "SQ01_S1_N31_UNION12"
+			"line"    "...Проходи. Не задерживай поток."
+			"line_en" "...Move along. Don't hold up the line."
+			"emotion" "смотрит на кулак героя"
+			"effects" { "complete_quest" "sq01_can"  "fire" "union12_can_binned,Trigger,,0" }
+			"end"     "1"
+		}
+		"4"
+		{
+			"vo"      "SQ01_S1_N4_UNION12"
+			"line"    "...Остряк. Проходи, пока я добрый."
+			"line_en" "...A wise guy. Move along while I'm in a good mood."
+			"emotion" "пауза, щелчок вокодера; в очереди кто-то давит смешок"
+			"effects" { "set_flag" "sq01_result=quip"  "complete_quest" "sq01_can" }
+			"end"     "1"
+		}
+		"5"
+		{
+			"vo"      "SQ01_S1_N5_UNION12"
+			"line"    "Остряк. Банку. Подними."
+			"line_en" "Wise guy. The can. Pick it up."
+			"sound"   "npc/metropolice/vo/pickupthecan2.wav"
+			"emotion" "включает дубинку - треск разряда"
+			"options"
+			{
+				"1" { "text" "(Поднять банку)"  "text_en" "(Pick up the can)"  "next" "2" }
+				"2" { "text" "Сам подними."  "text_en" "Pick it up yourself."  "next" "7"  "civil" "-3" }
+				"3" { "text" "(Молча пройти мимо)"  "text_en" "(Walk past in silence)"  "next" "8" }
+			}
+		}
+		"6"
+		{
+			"vo"      "SQ01_S1_N6_UNION12"
+			"line"    "...Проходи, убогий."
+			"line_en" "...Move along, simpleton."
+			"emotion" "долго смотрит"
+			"effects" { "set_flag" "sq01_result=pocketed"  "give_item" "item_water_can"  "complete_quest" "sq01_can" }
+			"end"     "1"
+		}
+		"7"
+		{
+			"vo"      "SQ01_S1_N7_UNION12"
+			"line"    "Неподчинение. Пятьсот семь. Подними."
+			"line_en" "Non-compliance. Five-oh-seven. Pick it up."
+			"sound"   "npc/metropolice/vo/pickupthecan3.wav"
+			"emotion" "удар дубинкой, вспышка; пинает банку обратно"
+			"effects" { "damage" "8" }
+			"options"
+			{
+				"1" { "text" "(Поднять банку)"  "text_en" "(Pick up the can)"  "next" "2" }
+				"2" { "text" "Больно... Я понял. Я подниму."  "text_en" "Hurts... I get it. I'll pick it up."  "require_attr" "ANA<=3"  "hide_if_unmet" "1"  "next" "2" }
+				"3" { "text" "Нет."  "text_en" "No."  "next" "10"  "set_flag" "sq01_result=refused" }
+			}
+		}
+		"8"
+		{
+			"vo"      "SQ01_S1_N8_UNION12"
+			"line"    "Я сказал: ПОДНИМИ."
+			"line_en" "I said: PICK IT UP."
+			"emotion" "хватает за плечо и разворачивает"
+			"options"
+			{
+				"1" { "text" "(Поднять банку)"  "text_en" "(Pick up the can)"  "next" "2" }
+				"2" { "text" "Сам подними."  "text_en" "Pick it up yourself."  "next" "7"  "civil" "-3" }
+				"3" { "text" "(Вырваться и идти дальше)"  "text_en" "(Break free and keep walking)"  "next" "10"  "civil" "-3"  "set_flag" "sq01_result=refused" }
+			}
+		}
+		"9"
+		{
+			"vo"      "SQ01_S1_N9_UNION12"
+			"line"    "Пятьсот семь. Ещё раз - и поедешь дальше. На Нова Проспект."
+			"line_en" "Five-oh-seven. Do that again and you'll be riding further. To Nova Prospekt."
+			"emotion" "банка звякает о маску, площадь замолкает; удар, второй - по спине"
+			"effects" { "damage" "12" }
+			"auto_next" "11"
+		}
+		"10"
+		{
+			"vo"      "SQ01_S1_N10_UNION12"
+			"line"    "Руки за голову. Диспетчер, Юнион-двенадцать: пятьсот семь, площадь, один задержанный."
+			"line_en" "Hands behind your head. Dispatch, Union-twelve: five-oh-seven, the square, one detained."
+			"emotion" "по уставу, в рацию"
+			"effects" { "civil" "-3"  "suspicion" "+25"  "set_flag" "sq01_result=arrested"  "complete_quest" "sq01_can" }
+			"end"     "1"
+		}
+		"11"
+		{
+			"vo"      "SQ01_S1_N11_WOMAN"
+			"voice"   "citizen_f"
+			"speaker" "Женщина из очереди"   "speaker_en" "Woman from the Queue"
+			"line"    "Вставай, вставай. Глупо. ...Но спасибо."
+			"line_en" "Get up, get up. That was stupid. ...But thank you."
+			"emotion" "шёпотом, с венгерским акцентом; помогает подняться"
+			"effects" { "complete_quest" "sq01_can" }
+			"end"     "1"
+		}
+		"40"
+		{
+			"vo"      "SQ01_S2_N40_UNION12"
+			"line"    "Я тебя помню."
+			"line_en" "I remember you."
+			"emotion" "постукивает дубинкой по ладони"
+			"end"     "1"
+		}
+		"41"
+		{
+			"vo"      "SQ01_S2_N41_UNION12"
+			"line"    "Проходи, гражданин."
+			"line_en" "Move along, citizen."
+			"sound"   "npc/metropolice/vo/movealong3.wav"
+			"end"     "1"
+		}
+		"42"
+		{
+			"vo"      "SQ01_S2_N42_UNION12"
+			"line"    "Без пропуска здесь не стоят. Назад, в зал."
+			"line_en" "Nobody loiters here without a pass. Back to the hall."
+			"end"     "1"
+		}
+	}
+}

@@ -1,0 +1,67 @@
+// Вдова Росарио Сантос, 70, кв. 17 - всех кормит, прячет кошку Мунинг (Part V/01 MQ-01, V/08 SQ-05).
+"Dialog"
+{
+	"entity"        "npc_rosario"
+	"voice"         "rosario"
+	"speaker"       "Росарио Сантос, кв. 17"   "speaker_en" "Rosario Santos, Apt. 17"
+	"auto_face_npc" "1"
+	"greetings"
+	{
+		"1" { "require_flag" "sq01_result=thrown"  "node" "20" }
+		"2" { "require_flag" "sq01_result=arrested"  "node" "20" }
+		"3" { "require_flag" "dlg_spoken_npc_rosario"  "node" "21" }
+		"4" { "node" "1" }
+	}
+	"nodes"
+	{
+		"1"
+		{
+			"vo"      "MQ01_S1_N1_ROSARIO"
+			"line"    "Anak, вы ничего не слышали? Это мыши. У меня мыши."
+			"line_en" "Anak, you didn't hear anything, did you? It's mice. I have mice."
+			"emotion" "прислушивается к своей двери; ласково-ворчливо"
+			"options"
+			{
+				"1" { "text" "Мыши так не мяукают."  "text_en" "Mice don't meow."  "next" "2" }
+				"2" { "text" "Ничего не слышал."  "text_en" "I didn't hear a thing."  "next" "3"  "disposition" "+5"  "set_flag" "sq05_cat_hint" }
+				"0" { "text" "(Пройти мимо)"  "text_en" "(Walk past)"  "exit" "1"  "close" "1" }
+			}
+		}
+		"2"
+		{
+			"vo"      "MQ01_S1_N2_ROSARIO"
+			"line"    "Большие мыши. Naku... Большие."
+			"line_en" "Big mice. Naku... Big ones."
+			"emotion" "бледнеет"
+			"effects" { "set_flag" "sq05_cat_hint" }
+			"end"     "1"
+		}
+		"3"
+		{
+			"vo"      "MQ01_S1_N3_ROSARIO"
+			"line"    "Вот и умница. Заходите вечером - у меня есть сухари. Настоящие, не из пайка."
+			"line_en" "That's a good boy. Come by in the evening - I have rusks. Real ones, not from the ration."
+			"emotion" "с облегчением, кормящая интонация"
+			"end"     "1"
+		}
+		"20"
+		{
+			"vo"      "SQ01_POST_ROSARIO"
+			"line"    "Anak, зачем ты их дразнишь? Они не забывают. Они записывают."
+			"line_en" "Anak, why do you tease them? They don't forget. They write it down."
+			"emotion" "качает головой, по-матерински"
+			"end"     "1"
+		}
+		"21"
+		{
+			"vo"      "MQ01_S1_N21_ROSARIO"
+			"line"    "Поел сегодня? Diyos ko, худой какой. Держи сухарь."
+			"line_en" "Have you eaten today? Diyos ko, so thin. Here, have a rusk."
+			"options"
+			{
+				"1" { "text" "Спасибо, Росарио."  "text_en" "Thank you, Rosario."  "close" "1"  "require_noflag" "rosario_rusk_today"  "set_flag" "rosario_rusk_today"  "heal" "5" }
+				"0" { "text" "Я сыт, спасибо."  "text_en" "I'm full, thanks."  "exit" "1"  "close" "1" }
+			}
+		}
+	}
+}

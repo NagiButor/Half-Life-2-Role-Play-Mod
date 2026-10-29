@@ -21,6 +21,7 @@
 #include "ai_senses.h"
 
 #include "npc_vortigaunt_episodic.h"
+#include "hl2rpm/rpg_dialog.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -1216,6 +1217,13 @@ void CNPC_Vortigaunt::Precache()
 void CNPC_Vortigaunt::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )
 {
 	m_OnPlayerUse.FireOutput( pActivator, pCaller );
+
+	// HL2RPM: разговор (диалог v2), если он есть
+	if ( pActivator && pActivator->IsPlayer() && RPGDialog::Has( STRING( GetEntityName() ) ) )
+	{
+		RPGDialog::Start( ToBasePlayer( pActivator ), this );
+		return;
+	}
 
 	// Foremost, try and heal a wounded player
 	if ( HealBehaviorAvailable() )

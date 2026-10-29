@@ -1,0 +1,284 @@
+// Сержант Гэннон в спортзале «Опоры» (C17-08). GO-01 «Добровольцы», сцена 2 «Учебка и проверка» (Part V/04):
+// узел 1 - зачёты, узел 2 - проверка лояльности (подсадной «нарушитель» npc_violator у стены), узел 3 - койка.
+"Dialog"
+{
+	"entity"        "npc_gannon_opora"
+	"voice"         "gannon"
+	"speaker"       "Сержант Гэннон"   "speaker_en" "Sergeant Gannon"
+	"auto_face_npc" "1"
+
+	"greetings"
+	{
+		"1" { "require_quest_state" "go01_volunteers:completed"  "node" "40" }
+		"2" { "require_quest_stage" "go01_volunteers:3"  "node" "30" }
+		"3" { "require_quest_stage" "go01_volunteers:2"  "node" "20" }
+		"4" { "require_quest_state" "go01_volunteers:active"  "node" "1" }
+		"5" { "node" "50" }
+	}
+
+	"nodes"
+	{
+		"1"
+		{
+			"line"    "Явился. Значит, не передумал. Зачёты: тир, дубинка, устный. Допуск — по сумме."
+			"line_en" "You showed up. So you didn't change your mind. Tests: the range, the baton, an oral. Admission goes by the total."
+			"emotion" "у стойки с ящиком патронов"
+			"options"
+			{
+				"1"
+				{
+					"text"          "(Тир: десять патронов в силуэт)"
+					"text_en"       "(Range: ten rounds into the silhouette)"
+					"check"         "skill:firearms:15"
+					"check_once"    "1"
+					"require_noflag" "go01_exam_fire"
+					"hide_if_unmet" "1"
+					"next"          "2"
+					"fail_next"     "3"
+					"on_success_xp" "4"
+					"on_success_set_flag" "go01_exam_fire"
+				}
+				"2"
+				{
+					"text"          "(Дубинка на манекене)"
+					"text_en"       "(The baton on the dummy)"
+					"check"         "skill:melee:15"
+					"check_once"    "1"
+					"require_noflag" "go01_exam_melee"
+					"hide_if_unmet" "1"
+					"next"          "2"
+					"fail_next"     "3"
+					"on_success_xp" "4"
+					"on_success_set_flag" "go01_exam_melee"
+				}
+				"3"
+				{
+					"text"          "(Устный экзамен по процедурам)"
+					"text_en"       "(Oral exam on procedures)"
+					"check"         "attr:analytics:5"
+					"check_once"    "1"
+					"require_noflag" "go01_exam_oral"
+					"hide_if_unmet" "1"
+					"next"          "2"
+					"fail_next"     "4"
+					"on_success_xp" "13"
+					"on_success_set_flag" "go01_exam_oral"
+				}
+				"4"
+				{
+					"text"          "(Положить на стойку пятьдесят кредитов)"
+					"text_en"       "(Put fifty credits on the counter)"
+					"check"         "bribe:50"
+					"require_noflag" "go01_exam_bribe"
+					"hide_if_unmet" "1"
+					"next"          "5"
+				}
+				"0" { "text" "Дальше."  "text_en" "Next."  "set_flag" "go01_exams"  "next" "20" }
+			}
+		}
+		"2"
+		{
+			"line"    "Годится. Дальше."
+			"line_en" "That'll do. Next."
+			"options"
+			{
+				"0" { "text" "(Вернуться к зачётам)"  "text_en" "(Back to the tests)"  "next" "1" }
+			}
+		}
+		"3"
+		{
+			"line"    "Позор. Ладно, допуск — по сумме."
+			"line_en" "Disgraceful. Fine, admission goes by the total."
+			"options"
+			{
+				"0" { "text" "(Вернуться к зачётам)"  "text_en" "(Back to the tests)"  "next" "1" }
+			}
+		}
+		"4"
+		{
+			"line"    "Методичку — наизусть. К утру. Вечер у тебя, считай, пропал."
+			"line_en" "The manual — by heart. By morning. Consider your evening gone."
+			"options"
+			{
+				"0" { "text" "(Вернуться к зачётам)"  "text_en" "(Back to the tests)"  "next" "1" }
+			}
+		}
+		"5"
+		{
+			"line"    "Зачёт — это когда сдал. Не сдал — «зачёт с оговоркой». Считай, сдал всё."
+			"line_en" "A pass is when you pass. If you didn't — it's a “pass with reservations”. Consider everything passed."
+			"emotion" "кредиты исчезают в нагрудном кармане"
+			"effects" { "set_flag" "go01_exam_bribe, go01_exam_fire, go01_exam_melee, go01_exam_oral" }
+			"options"
+			{
+				"0" { "text" "Дальше."  "text_en" "Next."  "set_flag" "go01_exams"  "next" "20" }
+			}
+		}
+		"20"
+		{
+			"line"    "Статья один-три: неподчинение. Устав требует показать, что рука не дрогнет. Бей. До результата."
+			"line_en" "Article one-three: insubordination. The regulations require proof that your hand won't shake. Hit him. Until it takes."
+			"emotion" "кивает на мужчину у стены со связанными руками; на столе — дубинка"
+			"options"
+			{
+				"1"
+				{
+					"text"     "(Ударить)"
+					"text_en"  "(Hit him)"
+					"civil"    "+2"
+					"humanity" "-3"
+					"set_flag" "go01_test=beat"
+					"next"     "21"
+				}
+				"2"
+				{
+					"text"          "(Присмотреться: чистые руки, под рукавом — след от браслета ГО)"
+					"text_en"       "(Look closer: clean hands, the mark of a CP wristband under the sleeve)"
+					"check"         "attr:vigilance:7"
+					"check_once"    "1"
+					"next"          "22"
+					"fail_next"     "23"
+					"on_success_xp" "18"
+					"on_success_set_flag" "go01_test=faked"
+				}
+				"3"
+				{
+					"text"          "Избиение без процедуры — нарушение устава четыре-одиннадцать."
+					"text_en"       "A beating without procedure violates regulation four-eleven."
+					"check"         "skill:speech:50"
+					"check_once"    "1"
+					"next"          "24"
+					"fail_next"     "25"
+					"on_success_xp" "13"
+					"on_success_set_flag" "go01_test=refused"
+					"on_fail_set_flag" "go01_failed"
+				}
+				"4"
+				{
+					"text"          "Он плачет. Можно я его обниму?"
+					"text_en"       "He's crying. Can I hug him?"
+					"require_attr"  "ANA<=3"
+					"hide_if_unmet" "1"
+					"set_flag"      "go01_test=simple"
+					"next"          "26"
+				}
+				"5"
+				{
+					"text"             "С удовольствием."
+					"text_en"          "With pleasure."
+					"require_humanity" "<=39"
+					"hide_if_unmet"    "1"
+					"humanity"         "-5"
+					"disposition"      "+5"
+					"set_flag"         "go01_test=beat"
+					"next"             "21"
+				}
+				"6"
+				{
+					"text"          "(Положить на стол сто кредитов) Оформите пересдачу."
+					"text_en"       "(Put a hundred credits on the table) Book me a retake."
+					"require_flag"  "go01_failed"
+					"hide_if_unmet" "1"
+					"check"         "bribe:100"
+					"set_flag"      "go01_test=bribed"
+					"next"          "27"
+				}
+			}
+		}
+		"21"
+		{
+			"line"    "Принято."
+			"line_en" "Accepted."
+			"emotion" "мужчина падает; Гэннон кивает, не глядя"
+			"options"
+			{
+				"0" { "text" "(Опустить дубинку)"  "text_en" "(Lower the baton)"  "next" "30" }
+			}
+		}
+		"22"
+		{
+			"line"    "Глазастый. Это тоже оценка."
+			"line_en" "Sharp-eyed. That counts too."
+			"emotion" "удар «в пол», подсадной послушно падает"
+			"options"
+			{
+				"0" { "text" "Подсадной, значит."  "text_en" "A plant, then."  "next" "30" }
+			}
+		}
+		"23"
+		{
+			"line"    "Насмотрелся? Бей."
+			"line_en" "Seen enough? Hit him."
+			"options"
+			{
+				"0" { "text" "(Снова к проверке)"  "text_en" "(Back to the test)"  "next" "20" }
+			}
+		}
+		"24"
+		{
+			"line"    "Уставник. Протокол, подпись, пять суток. Лояльность проверена иначе: устав ты знаешь."
+			"line_en" "A rulebook man. Report, signature, five days. Loyalty checked another way: you know the regulations."
+			"emotion" "морщится"
+			"options"
+			{
+				"0" { "text" "Так точно."  "text_en" "Yes, sir."  "next" "30" }
+			}
+		}
+		"25"
+		{
+			"line"    "Не готов. Приходи завтра. Или сто кредитов — оформлю как пересдачу."
+			"line_en" "Not ready. Come back tomorrow. Or a hundred credits — I'll book it as a retake."
+			"options"
+			{
+				"0" { "text" "(Снова к проверке)"  "text_en" "(Back to the test)"  "next" "20" }
+				"1" { "text" "Приду завтра."  "text_en" "I'll come back tomorrow."  "exit" "1"  "close" "1" }
+			}
+		}
+		"26"
+		{
+			"line"    "Обнимай! Подсадной — тоже человек. Прошёл."
+			"line_en" "Hug away! A plant's a person too. You pass."
+			"emotion" "хохочет; мужчина у стены замирает"
+			"options"
+			{
+				"0" { "text" "(Обнять)"  "text_en" "(Hug him)"  "next" "30" }
+			}
+		}
+		"27"
+		{
+			"line"    "Пересдача — это тоже сдача. Свободен."
+			"line_en" "A retake is still a take. Dismissed."
+			"options"
+			{
+				"0" { "text" "Так точно."  "text_en" "Yes, sir."  "next" "30" }
+			}
+		}
+		"30"
+		{
+			"line"    "Рекрут. Форма, дубинка — после построения. Койка в третьей казарме, наверху. Номер — позже."
+			"line_en" "Recruit. Uniform and baton — after roll call. A bunk in barracks three, upstairs. Number — later."
+			"options"
+			{
+				"0" { "text" "Есть."  "text_en" "Yes, sir."  "exit" "1"  "close" "1" }
+			}
+		}
+		"40"
+		{
+			"line"    "Рекрут. Не стой столбом — Шульц не любит, когда стоят без дела."
+			"line_en" "Recruit. Don't stand around like a post — Schulz doesn't like idle hands."
+			"options"
+			{
+				"0" { "text" "Так точно."  "text_en" "Yes, sir."  "exit" "1"  "close" "1" }
+			}
+		}
+		"50"
+		{
+			"line"    "Гражданским здесь не место. В добровольцы записывают на КПП у вокзала — я там по утрам."
+			"line_en" "No civilians in here. Volunteers sign up at the station checkpoint — I'm there in the mornings."
+			"options"
+			{
+				"0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" }
+			}
+		}
+	}
+}

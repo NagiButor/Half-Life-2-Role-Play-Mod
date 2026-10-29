@@ -1,0 +1,34 @@
+// HL2RPM: надписи в мире (vgui_text_display на картах среза: таблички, вывески, указатели).
+// Токены HL2RPM_Sign_* - prep_rp_c17_0*.py / phaseb_rp_c17_0*.py.
+"Strings"
+{
+	// ---- вокзал (C17-01) ----
+	"HL2RPM_Sign_Registration"  { "ru" "РЕГИСТРАЦИЯ ПРИБЫВШИХ"   "en" "ARRIVALS REGISTRATION" }
+	"HL2RPM_Sign_Window1"       { "ru" "ОКНО 1"   "en" "WINDOW 1" }
+	"HL2RPM_Sign_Window2"       { "ru" "ОКНО 2"   "en" "WINDOW 2" }
+	"HL2RPM_Sign_Window3"       { "ru" "ОКНО 3"   "en" "WINDOW 3" }
+	"HL2RPM_Sign_Window4"       { "ru" "ОКНО 4"   "en" "WINDOW 4" }
+	"HL2RPM_Sign_Window5"       { "ru" "ОКНО 5"   "en" "WINDOW 5" }
+	"HL2RPM_Sign_Window6"       { "ru" "ОКНО 6"   "en" "WINDOW 6" }
+	"HL2RPM_Sign_Closed"        { "ru" "ЗАКРЫТО"  "en" "CLOSED" }
+	"HL2RPM_Sign_Medpoint"      { "ru" "МЕДПУНКТ"  "en" "MEDICAL POINT" }
+	"HL2RPM_Sign_Checkpoint"    { "ru" "КОНТРОЛЬ ДОКУМЕНТОВ"  "en" "DOCUMENT CHECK" }
+	"HL2RPM_Sign_Platform3"     { "ru" "ПЕРРОН 3 · ГРУЗОВОЙ"  "en" "PLATFORM 3 · FREIGHT" }
+
+	// ---- площадь (C17-02) ----
+	"HL2RPM_Sign_LaborBureau"   { "ru" "БЮРО ТРУДОВЫХ РЕСУРСОВ"  "en" "LABOR RESOURCES BUREAU" }
+
+	// ---- Квартал 7 (C17-03) ----
+	"HL2RPM_Sign_House73"       { "ru" "ДОМ 7/3"   "en" "BUILDING 7/3" }
+	"HL2RPM_Sign_Room11"        { "ru" "11"        "en" "11" }
+	"HL2RPM_Sign_Apt4"          { "ru" "КВ. 4"     "en" "APT. 4" }
+	"HL2RPM_Sign_Apt9"          { "ru" "КВ. 9"     "en" "APT. 9" }
+	"HL2RPM_Sign_Apt11"         { "ru" "КВ. 11"    "en" "APT. 11" }
+	"HL2RPM_Sign_Apt14"         { "ru" "КВ. 14"    "en" "APT. 14" }
+	"HL2RPM_Sign_Apt17"         { "ru" "КВ. 17"    "en" "APT. 17" }
+	"HL2RPM_Sign_Apt20"         { "ru" "КВ. 20"    "en" "APT. 20" }
+	"HL2RPM_Hint_Bed"           { "ru" "Кровать"   "en" "Bed" }
+	"HL2RPM_Hint_Bunk"          { "ru" "Койка"     "en" "Bunk" }
+	"HL2RPM_Hint_Terminal"      { "ru" "Терминал участка"   "en" "Precinct terminal" }
+	"HL2RPM_Sign_Ration"        { "ru" "РАЗДАЧА · ПН / ЧТ"  "en" "RATIONS · MON / THU" }
+}

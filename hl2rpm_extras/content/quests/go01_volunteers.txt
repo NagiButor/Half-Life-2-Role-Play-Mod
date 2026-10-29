@@ -1,0 +1,51 @@
+// GO-01 «Добровольцы» (Part III/09, Part V/04). T2, 250 XP, Акт I. Выдаёт сержант Гэннон на КПП вокзала
+// (npc_gannon), учебка и проверка лояльности - в «Опоре» (npc_gannon_opora), итог - койка в казарме.
+"Quest"
+{
+	"id"        "go01_volunteers"
+	"category"  "side"
+	"title"     "Добровольцы"   "title_en" "Volunteers"
+	"desc"      "Гражданской обороне нужны добровольцы: двойной паёк, койка, форма. Сержант Гэннон ждёт меня в «Опоре» — бывшей школе за площадью."
+	"desc_en"   "Civil Protection needs volunteers: double rations, a bunk, a uniform. Sergeant Gannon is waiting for me at “Opora” — the old school past the plaza."
+	"xp"        "250"
+	"act"       "1"
+	"auto_track" "1"
+	"complete_on_last_stage" "1"
+	"rewards"   { "item_suit_cp" "1"  "weapon_stunstick" "1" }
+	"on_complete" { "set_flag" "go_rank=recruit"  "civil" "+5" }
+	"stages"
+	{
+		"0"
+		{
+			"title" "Явиться в «Опору»"   "title_en" "Report to Opora"
+			"desc"  "Пройти через южные ворота площади в участок «Опора» и найти Гэннона в спортзале."
+			"desc_en" "Go through the south gate of the plaza to the “Opora” precinct and find Gannon in the gym."
+			"marker" "npc_gannon_opora"   "marker_map" "rp_c17_08_opora"
+			"objectives" { "1" { "type" "talk" "target" "npc_gannon_opora" } }
+		}
+		"1"
+		{
+			"title" "Зачёты"   "title_en" "The Tests"
+			"desc"  "Тир, дубинка, устный экзамен. Допуск — по сумме."
+			"desc_en" "Shooting range, baton, an oral exam. Admission goes by the total."
+			"marker" "npc_gannon_opora"   "marker_map" "rp_c17_08_opora"
+			"objectives" { "1" { "type" "flag" "target" "go01_exams" } }
+		}
+		"2"
+		{
+			"title" "Проверка лояльности"   "title_en" "Loyalty Test"
+			"desc"  "Гэннон требует показать, что рука не дрогнет."
+			"desc_en" "Gannon wants proof that my hand won't shake."
+			"marker" "npc_gannon_opora"   "marker_map" "rp_c17_08_opora"
+			"objectives" { "1" { "type" "flag" "target" "go01_test" } }
+		}
+		"3"
+		{
+			"title" "Койка в третьей казарме"   "title_en" "A Bunk in Barracks Three"
+			"desc"  "Казарма — на третьем этаже, в бывших классах. Выспаться перед построением."
+			"desc_en" "The barracks are on the top floor, in the old classrooms. Get some sleep before roll call."
+			"marker" "go01_bunk"   "marker_map" "rp_c17_08_opora"
+			"objectives" { "1" { "type" "flag" "target" "go01_bunk" } }
+		}
+	}
+}

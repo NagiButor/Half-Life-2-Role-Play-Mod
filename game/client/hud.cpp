@@ -899,8 +899,12 @@ void CHud::OnRestore()
 void CHud::MsgFunc_CombineSuit( bf_read &msg )
 {
 	int on = msg.ReadByte();
+	ApplyCombineSuitStyle( on != 0, true );
+}
 
-	if ( on )
+void CHud::ApplyCombineSuitStyle( bool bOn, bool bPlaySound )
+{
+	if ( bOn )
 	{
 		m_bCombineSuitActive = true;
 		Color blueCol( 64, 160, 255, 255 );
@@ -919,7 +923,8 @@ void CHud::MsgFunc_CombineSuit( bf_read &msg )
 		}
 
 		// play a small local sound to indicate equip
-		vgui::surface()->PlaySound( "ui/buttonclick.wav" );
+		if ( bPlaySound )
+			vgui::surface()->PlaySound( "ui/buttonclick.wav" );
 
 		// Per-element HUD drawing will use gHUD.m_clrNormal when combine suit is active.
 	}
@@ -939,7 +944,8 @@ void CHud::MsgFunc_CombineSuit( bf_read &msg )
 			}
 		}
 
-		vgui::surface()->PlaySound( "ui/buttonclick_release.wav" );
+		if ( bPlaySound )
+			vgui::surface()->PlaySound( "ui/buttonclick_release.wav" );
 
 		// Per-element HUD drawing will revert to use gHUD.m_clrDefaultNormal when suit is inactive.
 	}

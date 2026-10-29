@@ -9677,11 +9677,13 @@ bool CBasePlayer::IsFakeClient() const
 void CBasePlayer::EquipSuit( bool bPlayEffects )
 { 
 	m_Local.m_bWearingSuit = true; 
+	m_Local.m_iSuitType = 5;	// HL2RPM: RPG_SUIT_HEV (other suits set their own type after this)
 }
 
 void CBasePlayer::RemoveSuit( void )
 {
 	m_Local.m_bWearingSuit = false;
+	m_Local.m_iSuitType = 0;	// HL2RPM: RPG_SUIT_CITIZEN
 }
 
 //-----------------------------------------------------------------------------

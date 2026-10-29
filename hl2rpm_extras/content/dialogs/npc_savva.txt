@@ -1,0 +1,81 @@
+// MQ-00, сцена 4 «Тень» - вортигонт-уборщик в ошейнике (будущий спутник Савва), Part V/01. Завязка VR-01.
+// Окрик ГО в узле 6 - реплика другого говорящего (speaker), разряд ошейника - на карте (fire).
+"Dialog"
+{
+	"entity"        "npc_savva"
+	"voice"         "savva"
+	"speaker"       "Вортигонт-уборщик"   "speaker_en" "Vortigaunt Janitor"
+	"auto_face_npc" "1"
+	"greetings"
+	{
+		"1" { "require_flag" "mq00_vort_shadow"  "node" "20" }
+		"2" { "node" "1" }
+	}
+	"nodes"
+	{
+		"1"
+		{
+			"vo"      "MQ00_S4_N1_SAVVA"
+			"line"    "...Ты несёшь тень. Длинную. Она пришла с тобой - и пришла раньше тебя."
+			"line_en" "...You carry a shadow. A long one. It came with you - and it came before you."
+			"emotion" "низко, гулко, медленно; метла замерла; ошейник тихо пищит"
+			"options"
+			{
+				"1" { "text" "Ты со мной говоришь?"  "text_en" "Are you talking to me?"  "next" "2" }
+				"2" { "text" "Какую тень?"  "text_en" "What shadow?"  "next" "3" }
+				"3" { "text" "Тебе помочь?"  "text_en" "Do you need help?"  "next" "4" }
+				"4" { "text" "Отойди от меня."  "text_en" "Get away from me."  "next" "5" }
+			}
+		}
+		"2"
+		{
+			"vo"      "MQ00_S4_N2_SAVVA"
+			"line"    "Мы говорим с теми, кто слышит. Ты слышишь. Ты слышал. Ты услышишь."
+			"line_en" "We speak to those who hear. You hear. You heard. You will hear."
+			"emotion" "смешивает времена; спокойно"
+			"auto_next" "6"
+		}
+		"3"
+		{
+			"vo"      "MQ00_S4_N3_SAVVA"
+			"line"    "Тень того, кто ходит между мгновениями. Мы не любим его тень. Но тебя мы помним."
+			"line_en" "The shadow of the one who walks between moments. We do not love his shadow. But you, we remember."
+			"auto_next" "6"
+		}
+		"4"
+		{
+			"vo"      "MQ00_S4_N4_SAVVA"
+			"line"    "Не сейчас. Цепь слушает. Потом. Ты придёшь. Ты пришёл."
+			"line_en" "Not now. The chain is listening. Later. You will come. You came."
+			"emotion" "впервые смотрит прямо; почти шёпот"
+			"effects" { "humanity" "+1" }
+			"auto_next" "6"
+		}
+		"5"
+		{
+			"vo"      "MQ00_S4_N5_SAVVA"
+			"line"    "Отойди. От тени - нельзя."
+			"line_en" "Step away. From the shadow - you cannot."
+			"auto_next" "6"
+		}
+		"6"
+		{
+			"vo"      "MQ00_S4_N6_CP"
+			"voice"   "cp"
+			"speaker" "Гражданская оборона"   "speaker_en" "Civil Protection"
+			"line"    "Биотик! Работать!"
+			"line_en" "Biotic! Get to work!"
+			"emotion" "окрик издали (вокодер); разряд ошейника, вортигонт сгибается и метёт"
+			"effects" { "set_flag" "mq00_vort_shadow"  "fire" "savva_collar_shock,Trigger,,0.2" }
+			"end"     "1"
+		}
+		"20"
+		{
+			"vo"      "MQ00_S4_N20_SAVVA"
+			"line"    "...Метём. Цепь слушает."
+			"line_en" "...We sweep. The chain is listening."
+			"emotion" "не поднимая головы"
+			"end"     "1"
+		}
+	}
+}

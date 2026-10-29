@@ -1452,6 +1452,7 @@ enum
 class CChangeLevel : public CBaseTrigger
 {
 	DECLARE_DATADESC();
+	friend const char *ChangeLevel_GetMapName( CBaseEntity *pEnt );	// HL2RPM
 
 public:
 	DECLARE_CLASS( CChangeLevel, CBaseTrigger );
@@ -1503,6 +1504,13 @@ private:
 
 
 LINK_ENTITY_TO_CLASS( trigger_changelevel, CChangeLevel );
+
+// HL2RPM: карта перехода (метка квеста на другой карте указывает на этот переход)
+const char *ChangeLevel_GetMapName( CBaseEntity *pEnt )
+{
+	CChangeLevel *pChange = dynamic_cast<CChangeLevel *>( pEnt );
+	return pChange ? pChange->m_szMapName : NULL;
+}
 
 // Global Savedata for changelevel trigger
 BEGIN_DATADESC( CChangeLevel )

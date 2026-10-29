@@ -610,6 +610,33 @@
 		0 : "No"
 		1 : "Yes"
 	]
+	//Pravka: HL2RPM RPG keys (RPG_SPEC §7, game/server/ai_basenpc.cpp)
+	rpg_faction(choices) : "RPG faction" : "" : "Faction for reputation and suspicion (cp/overwatch NPCs watch the player)." =
+	[
+		"" : "None"
+		"citizen" : "Citizen"
+		"cp" : "Civil Protection"
+		"overwatch" : "Overwatch"
+		"admin" : "Administration"
+		"vort" : "Vortigaunts"
+		"lambda" : "Lambda"
+		"ferrymen" : "Ferrymen"
+		"reapers" : "Reapers"
+		"freefolk" : "Free Folk"
+		"chorus" : "Chorus"
+		"shareholders" : "Shareholders"
+		"rust" : "Rust"
+		"writtenoff" : "Written-off"
+		"remnant" : "Remnant"
+		"gardeners" : "Gardeners"
+	]
+	rpg_trader(string) : "RPG trader id" : "" : "Trader id from scripts/rpg/traders.txt; the dialog effect open_barter=1 opens this trader."
+	rpg_disposition(integer) : "RPG start disposition" : 0 : "Starting personal disposition toward the player (-100..100)."
+	rpg_stream(choices) : "RPG streamed by distance" : 0 : "Not created with the map: appears when the player comes closer than rpg_stream_radius and goes away out of sight (state kept in the save). For background life - citizens, patrols. The same key works on any entity (props, loot) added by hand." =
+	[
+		0 : "No"
+		1 : "Yes"
+	]
 	spoil_f_on_dmg(choices) : "Propagate spoil to faction on damage" : 0 =
 	[
 		0 : "No"

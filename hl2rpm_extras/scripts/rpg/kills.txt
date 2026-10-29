@@ -1,0 +1,27 @@
+// HL2RPM: опыт за убийства (Part I/05). daily_limit - после N убийств одного класса за игровой день XP не даётся.
+"Kills"
+{
+	"daily_limit" "10"
+	"xp"
+	{
+		"npc_headcrab"          "5"
+		"npc_headcrab_fast"     "8"
+		"npc_headcrab_black"    "10"
+		"npc_zombie"            "15"
+		"npc_zombie_torso"      "10"
+		"npc_fastzombie"        "25"
+		"npc_poisonzombie"      "30"
+		"npc_zombine"           "30"
+		"npc_metropolice"       { "xp" "25" "humanity" "-1" }
+		"npc_combine_s"         "50"
+		"npc_cscanner"          "8"
+		"npc_clawscanner"       "10"
+		"npc_manhack"           "10"
+		"npc_turret_floor"      "30"
+		"npc_antlion"           "15"
+		"npc_antlionguard"      "150"
+		"npc_barnacle"          "10"
+		"npc_vortigaunt"        { "xp" "60" "humanity" "-10" }
+		"npc_citizen"           { "xp" "0" "humanity" "-10" }
+	}
+}

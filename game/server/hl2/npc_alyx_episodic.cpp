@@ -38,6 +38,7 @@
 #include "env_debughistory.h"
 #ifdef MAPBASE
 #include "mapbase/GlobalStrings.h"
+#include "hl2rpm/rpg_dialog.h"
 #endif
 
 extern Vector PointOnLineNearestPoint(const Vector& vStartPos, const Vector& vEndPos, const Vector& vPoint);
@@ -3331,6 +3332,13 @@ void CNPC_Alyx::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE use
 	if ( GetPassengerState() == PASSENGER_STATE_INSIDE && pActivator->IsPlayer() && GetParent() )
 	{
 		GetParent()->Use( pActivator, pCaller, useType, value );
+		return;
+	}
+	// HL2RPM: разговор (диалог v2), если он есть
+	if ( pActivator && pActivator->IsPlayer() && RPGDialog::Has( STRING( GetEntityName() ) ) )
+	{
+		RPGDialog::Start( ToBasePlayer( pActivator ), this );
+		m_OnPlayerUse.FireOutput( pActivator, pCaller );
 		return;
 	}
 	m_bDontUseSemaphore = true;

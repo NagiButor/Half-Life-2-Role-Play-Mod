@@ -1,0 +1,124 @@
+// Сержант Гэннон на КПП у выхода из вокзала (C17-01). GO-01 «Добровольцы», сцена 1 «Вербовка» (Part V/04).
+// Учебка и проверка лояльности - в «Опоре» (npc_gannon_opora). Вход: mq02_done (учётная карта).
+"Dialog"
+{
+	"entity"        "npc_gannon"
+	"voice"         "gannon"
+	"speaker"       "Сержант Гэннон"   "speaker_en" "Sergeant Gannon"
+	"auto_face_npc" "1"
+
+	"greetings"
+	{
+		"1" { "require_quest_state" "go01_volunteers:completed"  "node" "40" }
+		"2" { "require_quest_state" "go01_volunteers:active"  "node" "30" }
+		"3" { "require_noflag" "mq02_done"  "node" "20" }
+		"4" { "require_civil" "<=-15"  "node" "2" }
+		"5" { "node" "1" }
+	}
+
+	"nodes"
+	{
+		"1"
+		{
+			"line"    "Руки не прячь, я не рентген. Гражданской обороне нужны добровольцы. Паёк двойной, койка с матрасом, форма. Бонус — смотреть на людей сверху вниз."
+			"line_en" "Don't hide your hands, I'm not an X-ray. Civil Protection needs volunteers. Double ration, a bunk with a mattress, a uniform. Bonus: you get to look down on people."
+			"emotion" "лениво, не вставая из-за стола"
+			"options"
+			{
+				"1" { "text" "Расскажите про условия."  "text_en" "Tell me about the terms."  "next" "3" }
+				"2" { "text" "А Надзор?"  "text_en" "And Overwatch?"  "next" "4" }
+				"3" { "text" "Бить людей по закону? Беру."  "text_en" "Beating people by the book? I'm in."  "require_humanity" "<=39"  "hide_if_unmet" "1"  "disposition" "+5"  "next" "10" }
+				"4" { "text" "Мне нужен паёк для соседей."  "text_en" "I need rations for my neighbours."  "require_humanity" ">=61"  "hide_if_unmet" "1"  "next" "11" }
+				"5" { "text" "А шапку дадут? Ту, с глазами?"  "text_en" "Do I get the hat? The one with the eyes?"  "require_attr" "ANA<=3"  "hide_if_unmet" "1"  "next" "12" }
+				"6" { "text" "Я согласен."  "text_en" "I'm in."  "next" "10" }
+				"0" { "text" "Я подумаю."  "text_en" "I'll think about it."  "exit" "1"  "close" "1" }
+			}
+		}
+		"2"
+		{
+			"line"    "Статус хуже плинтуса. У нас график, а не курорт. Но людей не хватает — возьмём условно."
+			"line_en" "Your status is lower than a skirting board. This is a duty roster, not a resort. But we're short of people — you're in on probation."
+			"options"
+			{
+				"1" { "text" "Расскажите про условия."  "text_en" "Tell me about the terms."  "next" "3" }
+				"2" { "text" "Я согласен."  "text_en" "I'm in."  "next" "10" }
+				"0" { "text" "Я подумаю."  "text_en" "I'll think about it."  "exit" "1"  "close" "1" }
+			}
+		}
+		"3"
+		{
+			"line"    "Сто кредитов в неделю, двойной паёк, казарма. Работа простая: стоять, смотреть, бить, если смотреть не хватило."
+			"line_en" "A hundred credits a week, double ration, barracks. Simple work: stand, watch, and hit when watching isn't enough."
+			"options"
+			{
+				"0" { "text" "Понятно."  "text_en" "Got it."  "next" "1" }
+			}
+		}
+		"4"
+		{
+			"line"    "Надзор — это погода. С погодой не спорят."
+			"line_en" "Overwatch is the weather. You don't argue with the weather."
+			"options"
+			{
+				"0" { "text" "Понятно."  "text_en" "Got it."  "next" "1" }
+			}
+		}
+		"10"
+		{
+			"line"    "Человек на своём месте. Завтра к восьми — «Опора», бывшая школа за площадью, через южные ворота. На воротах скажешь: доброволец. Опоздаешь — не приходи."
+			"line_en" "A man in his place. Tomorrow by eight — “Opora”, the old school past the plaza, through the south gate. Tell the gate you're a volunteer. Late — don't bother coming."
+			"effects" { "grant_quest" "go01_volunteers" }
+			"options"
+			{
+				"0" { "text" "Буду."  "text_en" "I'll be there."  "exit" "1"  "close" "1" }
+			}
+		}
+		"11"
+		{
+			"line"    "Для себя просят все. Для других — единицы. Слушаю. ...Паёк двойной, делить можешь хоть на десятерых. Завтра к восьми — «Опора», за площадью, южные ворота."
+			"line_en" "Everybody asks for themselves. For others — hardly anyone. I'm listening. ...The ration's double, split it ten ways if you like. Tomorrow by eight — “Opora”, past the plaza, the south gate."
+			"effects" { "grant_quest" "go01_volunteers" }
+			"options"
+			{
+				"0" { "text" "Буду."  "text_en" "I'll be there."  "exit" "1"  "close" "1" }
+			}
+		}
+		"12"
+		{
+			"line"    "Дадут. Глаза — твои, шапка — казённая. Завтра к восьми — «Опора», за площадью. Южные ворота, запомнил? Южные."
+			"line_en" "You'll get it. The eyes are yours, the hat belongs to the state. Tomorrow by eight — “Opora”, past the plaza. The south gate, got it? South."
+			"effects" { "grant_quest" "go01_volunteers" }
+			"options"
+			{
+				"0" { "text" "Южные."  "text_en" "South."  "exit" "1"  "close" "1" }
+			}
+		}
+		"20"
+		{
+			"line"    "Сначала бумаги, сынок. Без учётной карты тебя даже в дворники не возьмут, не то что к нам."
+			"line_en" "Papers first, son. Without a registration card they won't even take you as a janitor, let alone with us."
+			"options"
+			{
+				"0" { "text" "Понял."  "text_en" "Understood."  "exit" "1"  "close" "1" }
+			}
+		}
+		"30"
+		{
+			"line"    "Ты ещё здесь? «Опора», за площадью, южные ворота. Гэннон дважды не зовёт."
+			"line_en" "You're still here? “Opora”, past the plaza, the south gate. Gannon doesn't call twice."
+			"options"
+			{
+				"0" { "text" "Иду."  "text_en" "On my way."  "exit" "1"  "close" "1" }
+			}
+		}
+		"40"
+		{
+			"line"    "Рекрут. Форма тебе идёт, только не пачкай — второй не будет."
+			"line_en" "Recruit. The uniform suits you, just don't get it dirty — there won't be a second one."
+			"options"
+			{
+				"0" { "text" "Так точно."  "text_en" "Yes, sir."  "exit" "1"  "close" "1" }
+			}
+		}
+	}
+}

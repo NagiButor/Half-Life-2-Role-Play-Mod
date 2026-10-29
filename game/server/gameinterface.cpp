@@ -578,6 +578,11 @@ COMPILE_TIME_ASSERT( INTERFACEVERSION_SERVERGAMEDLL_INT == 9 );
 // HL2RPM: quests / inventory in the save game
 extern ISaveRestoreBlockHandler *GetQuestSaveRestoreBlockHandler();
 extern ISaveRestoreBlockHandler *GetInventorySaveRestoreBlockHandler();
+// HL2RPM: RPG character (hl2rpm/rpg_character.cpp)
+extern ISaveRestoreBlockHandler *GetRPGSaveRestoreBlockHandler();
+// HL2RPM: entities streamed by distance (hl2rpm/rpg_streaming.cpp)
+extern ISaveRestoreBlockHandler *GetRPGStreamingSaveRestoreBlockHandler();
+extern const char *RPGStreaming_PrepareMapEntities( const char *pszMap, const char *pszEntities );
 
 bool CServerGameDLL::DLLInit( CreateInterfaceFn appSystemFactory, 
 		CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory, 
@@ -704,6 +709,8 @@ bool CServerGameDLL::DLLInit( CreateInterfaceFn appSystemFactory,
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetDialogSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetQuestSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetInventorySaveRestoreBlockHandler() );
+	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetRPGSaveRestoreBlockHandler() );
+	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetRPGStreamingSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetTemplateSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetDefaultResponseSystemSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetCommentarySaveRestoreBlockHandler() );
@@ -793,6 +800,8 @@ void CServerGameDLL::DLLShutdown( void )
 	// Due to dependencies, these are not autogamesystems
 	ModelSoundsCacheShutdown();
 
+	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetRPGStreamingSaveRestoreBlockHandler() );
+	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetRPGSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetInventorySaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetQuestSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetVScriptSaveRestoreBlockHandler() );
@@ -1014,6 +1023,10 @@ bool CServerGameDLL::LevelInit( const char *pMapName, char const *pMapEntities, 
 
 	//Tony; parse custom manifest if exists!
 	ParseParticleEffectsMap( pMapName, false );
+
+	// HL2RPM: entities marked rpg_stream 1 leave the map's entity list and are streamed by the
+	// player's distance (RPG_SPEC 11.2); on a restore they come back from the save as usual
+	pMapEntities = RPGStreaming_PrepareMapEntities( pMapName, pMapEntities );
 
 	// IGameSystem::LevelInitPreEntityAllSystems() is called when the world is precached
 	// That happens either in LoadGameState() or in MapEntity_ParseAllEntities()

@@ -119,8 +119,13 @@ void CHudLocator::VidInit( void )
 
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
+extern ConVar cl_rpg_hud;	// HL2RPM: hl2rpm/rpg_hud.cpp - метку показывает компас RPG-HUD
+
 bool CHudLocator::ShouldDraw( void )
 {
+	if ( cl_rpg_hud.GetBool() )
+		return false;
+
 	C_BaseHLPlayer *pPlayer = (C_BaseHLPlayer *)C_BasePlayer::GetLocalPlayer();
 	if ( !pPlayer )
 		return false;

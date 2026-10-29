@@ -19,6 +19,7 @@ extern CChoreoScene *BlockingLoadScene( const char *filename );
 // Scene helpers (InstancedScriptedScene, etc.)
 #include "sceneentity.h"
 #include "quest_system.h"
+#include "hl2rpm/rpg_dialog.h"
 #endif
 
 // Helper: escape backslashes and double-quotes for a quoted console argument
@@ -495,6 +496,14 @@ namespace DialogDefinitions
             if (!pKV->LoadFromFile(filesystem, relPath, "MOD"))
             {
                 DevMsg("DialogSystem: failed to load %s\n", relPath);
+                pKV->deleteThis();
+                filename = filesystem->FindNext(findHandle);
+                continue;
+            }
+
+            // HL2RPM: файлы диалогов v2 грузит RPGDialog (hl2rpm/rpg_dialog.cpp)
+            if (RPGDialog::IsV2File(pKV))
+            {
                 pKV->deleteThis();
                 filename = filesystem->FindNext(findHandle);
                 continue;

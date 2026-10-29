@@ -12,6 +12,7 @@
 #include "filesystem.h"
 #include "KeyValues.h"
 #include "isaverestore.h"
+#include "hl2rpm/rpg_character.h"
 
 extern ConVar quest_reward_debug;
 
@@ -451,6 +452,14 @@ namespace InventorySystem
         if (!classname || !classname[0])
             return 0.0f;
 
+        // HL2RPM: scripts/rpg/items.txt "kg" wins over the weight table (per unit, not per bullet)
+        if (!bAmmoUnit)
+        {
+            const float flRPGKg = RPG_GetItemWeight(classname);
+            if (flRPGKg >= 0.0f)
+                return flRPGKg;
+        }
+
         if (!g_bWeightTableLoaded)
             LoadInventoryWeightTable();
 
@@ -517,6 +526,9 @@ namespace InventorySystem
 
     float GetPlayerMaxCarryWeight(CBasePlayer *pPlayer)
     {
+        // HL2RPM: 25 + 3 x MIG kg (+ carry mods), RPG_SPEC 1; the convar is only the fallback without a player
+        if (pPlayer)
+            return RPG_GetCarryWeight(pPlayer);
         return sv_inventory_weight_max.GetFloat();
     }
 
@@ -1134,6 +1146,13 @@ static void CC_Inventory_Use(const CCommand &args)
         return;
     }
     
+    // HL2RPM: RPG items (food, medicine, notes, documents, suits) are used here, not spawned into the world
+    if (RPG_HandleInventoryUse(pPlayer, item))
+    {
+        InventorySystem::SendInventoryToPlayer(pPlayer);
+        return;
+    }
+
     DevMsg("Inventory: player %s used item %s\n", pPlayer->GetPlayerName(), item);
     // New behavior: 'Use' spawns the world entity (like dropping it) so the
     // player can pick it up immediately as a world item (gives armor/ammo/etc.).

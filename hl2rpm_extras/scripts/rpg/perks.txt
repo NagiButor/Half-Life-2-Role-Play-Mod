@@ -1,0 +1,35 @@
+// HL2RPM: перки уровней 2-6 (Part I/04). Перк - на каждом чётном уровне.
+// require - условия RPG_SPEC §3 (характеристики LOV/ANA/MIG/BDI/DUH/AVT, навыки по id).
+"Perks"
+{
+	"PK-01" { "slug" "trusty_crowbar"   "level" "2" "ranks" "2" "require" "MIG>=5, melee>=20"   "mods" { "melee_damage" "x1.15" } }
+	"PK-02" { "slug" "pick_up_the_can"  "level" "2" "require" "AVT>=3" }
+	"PK-03" { "slug" "canal_rat"        "level" "2" "require" "DUH>=5"                         "mods" { "underwater_time" "x1.5" "water_radiation" "x0.5" "lambda_marks_range" "x2" } }
+	"PK-04" { "slug" "runaway"          "level" "2" "require" "LOV>=5"                         "mods" { "speed_suspicion" "x1.15" } }
+	"PK-05" { "slug" "scanner_eye"      "level" "2" "require" "BDI>=6"                         "mods" { "scanner_range" "x2" } }
+	"PK-06" { "slug" "one_of_the_crowd" "level" "2" "require" "AVT>=5, sneak>=20"              "mods" { "suspicion_crowd_decay" "x2" } }
+	"PK-07" { "slug" "scavenger"        "level" "2" "require" "BDI>=5"                         "mods" { "loot_consumables" "+1" } }
+	"PK-08" { "slug" "key_ring"         "level" "2" "require" "lockpick>=20"                   "mods" { "lockpick_break" "x0.5" } }
+	"PK-09" { "slug" "bookworm"         "level" "2" "require" "ANA>=6"                         "mods" { "book_bonus" "+1" "samizdat_hours" "x2" } }
+	"PK-10" { "slug" "hard_worker"      "level" "2" "ranks" "2" "require" "DUH>=5"             "mods" { "shift_pay" "x1.15" "shift_fatigue" "x0.75" } }
+	"PK-11" { "slug" "gunslinger"       "level" "4" "require" "firearms>=30"                   "mods" { "pistol_damage" "x1.15" } }
+	"PK-12" { "slug" "lab_assistant"    "level" "4" "require" "science>=30"                    "mods" { "craft_bonus" "+1" } }
+	"PK-13" { "slug" "orderly"          "level" "4" "require" "medicine>=30"                   "mods" { "medkit_heal" "x1.2" } }
+	"PK-14" { "slug" "jack_of_all"      "level" "4" "require" "repair>=30"                     "mods" { "repair_bonus" "x1.5" } }
+	"PK-15" { "slug" "cp_lockbreaker"   "level" "4" "require" "lockpick>=35"                   "mods" { "lock_tier" "-1" } }
+	"PK-16" { "slug" "subtle_bribe"     "level" "4" "require" "barter>=30"                     "mods" { "bribe_cost" "x0.7" } }
+	"PK-17" { "slug" "cleaner"          "level" "4" "require" "melee>=30"                      "mods" { "melee_zombie" "x1.25" } }
+	"PK-18" { "slug" "quiet_step"       "level" "4" "require" "sneak>=30"                      "mods" { "silent_steps" "+1" } }
+	"PK-19" { "slug" "vort_friend"      "level" "4" "require" "AVT>=5, vr01_done"              "mods" { "vort_prices" "x0.8" } }
+	"PK-20" { "slug" "headcrab_gourmet" "level" "4" "require" "survival>=25"                   "mods" { "food_heal" "x1.25" } }
+	"PK-21" { "slug" "pyrotechnician"   "level" "6" "require" "explosives>=40"                 "mods" { "damage_explosive" "x1.25" "explosive_radius" "x1.15" } }
+	"PK-22" { "slug" "sapper"           "level" "6" "require" "explosives>=40"                 "mods" { "mine_highlight" "+1" } }
+	"PK-23" { "slug" "pulse"            "level" "6" "require" "pulse>=40"                      "mods" { "pulse_damage" "x1.1" } }
+	"PK-24" { "slug" "crossbowman"      "level" "6" "require" "firearms>=45"                   "mods" { "bolt_damage" "x1.3" } }
+	"PK-25" { "slug" "double_agent"     "level" "6" "require" "AVT>=6, speech>=40"             "mods" { "rep_loss_dual" "x0.5" "suspicion_gain" "x0.75" } }
+	"PK-26" { "slug" "borrowed_uniform" "level" "6" "require" "sneak>=40, AVT>=5"              "mods" { "disguise" "x1.3" } }
+	"PK-27" { "slug" "night_shift"      "level" "6" "require" "LOV>=6" }
+	"PK-28" { "slug" "pickpocket"       "level" "6" "require" "sneak>=40, LOV>=6"              "mods" { "plant_items" "+1" } }
+	"PK-29" { "slug" "quartermaster"    "level" "6" "require" "barter>=40"                     "mods" { "trade_sell" "x1.1" "trader_cash" "x1.5" } }
+	"PK-30" { "slug" "iron_stomach"     "level" "6" "require" "DUH>=6"                         "mods" { "food_poison" "x0.5" } }
+}

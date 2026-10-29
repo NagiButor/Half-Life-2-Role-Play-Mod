@@ -1,0 +1,61 @@
+// MQ-01 «Временный пропуск» (Part IV/03, Part V/01). T2, 200 XP. Первый день в Квартале 7.
+"Quest"
+{
+	"id"        "mq01_temp_pass"
+	"category"  "main"
+	"title"     "Временный пропуск"   "title_en" "Temporary Pass"
+	"desc"      "Комната 11 в доме 7/3 - теперь мой дом. Временный пропуск действует неделю. Надо понять, как здесь живут."
+	"desc_en"   "Room 11 in house 7/3 is my home now. The temporary pass is good for a week. I need to figure out how people live here."
+	"xp"        "200"
+	"act"       "1"
+	"auto_track" "1"
+	"complete_on_last_stage" "1"
+	"on_complete"
+	{
+		"set_flag"   "mq01_done, mq02_days_left=7"
+		"notify"     "#HL2RPM_UI_Bracelet_PassExpires"
+		"grant_quest" "mq02_papers"
+	}
+	"stages"
+	{
+		"0"
+		{
+			"title" "Комната 11"   "title_en" "Room 11"
+			"desc"  "На тумбочке - «Памятка гражданина» и талон на первую выдачу."
+			"desc_en" "On the bedside table - a “Citizen's Memo” and a coupon for the first ration issue."
+			"marker" "bed_room11"   "marker_map" "rp_c17_03_block7"
+			"objectives" { "1" { "type" "item" "target" "item_ration_coupon" } }
+		}
+		"1"
+		{
+			"title" "Первая выдача"   "title_en" "First Ration Issue"
+			"desc"  "«Первая выдача. Двор. 10:00». Талон - в щель, браслет - к сканеру. Заодно познакомиться с соседями."
+			"desc_en" "“First issue. Courtyard. 10:00.” Coupon into the slot, bracelet to the scanner. And meet the neighbours while I'm at it."
+			"marker" "npc_cp_stik4"   "marker_map" "rp_c17_02_plaza"
+			"objectives"
+			{
+				"1" { "type" "flag" "target" "mq01_ration_done" }
+				"2" { "type" "talk" "target" "npc_oswaldo"  "optional" "1" }
+				"3" { "type" "talk" "target" "npc_amani"    "optional" "1" }
+				"4" { "type" "talk" "target" "npc_gary"     "optional" "1" }
+				"5" { "type" "talk" "target" "npc_rosario"  "optional" "1" }
+			}
+		}
+		"2"
+		{
+			"title" "Бюро трудовых ресурсов"   "title_en" "Labour Resources Bureau"
+			"desc"  "Без работы нет кредитов. Бюро трудовых ресурсов - в пристройке Администрации у площади."
+			"desc_en" "No work, no credits. The Labour Resources Bureau is in the Administration annex by the square."
+			"marker" "npc_bureau_clerk"   "marker_map" "rp_c17_02_plaza"
+			"objectives" { "1" { "type" "flag" "target" "mq01_shift_done" } }
+		}
+		"3"
+		{
+			"title" "Первая ночь"   "title_en" "The First Night"
+			"desc"  "Комендантский час с 22:00. Лучше быть дома. Лечь спать в комнате 11."
+			"desc_en" "Curfew starts at 22:00. Better be home. Go to sleep in room 11."
+			"marker" "bed_room11"   "marker_map" "rp_c17_03_block7"
+			"objectives" { "1" { "type" "flag" "target" "mq01_slept" } }
+		}
+	}
+}

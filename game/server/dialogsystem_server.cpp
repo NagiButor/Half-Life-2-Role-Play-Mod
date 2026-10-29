@@ -7,6 +7,7 @@
 #include "util.h"
 #include "igameevents.h"
 #include "quest_system.h"
+#include "hl2rpm/rpg_dialog.h"
 
 namespace DialogSystemServer
 {
@@ -28,6 +29,13 @@ namespace DialogSystemServer
         const char *ename = GetEntityNameString(pNPC);
         if (!ename || !ename[0])
         {
+            return;
+        }
+
+        // HL2RPM: диалоги v2 (scripts/dialogs с ключом voice/greetings) - своя система
+        if (RPGDialog::Has(ename))
+        {
+            RPGDialog::Start(pPlayer, pNPC);
             return;
         }
 

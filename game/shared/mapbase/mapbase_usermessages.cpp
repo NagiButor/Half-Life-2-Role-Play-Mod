@@ -54,6 +54,15 @@ void RegisterMapbaseUserMessages( void )
 		usermessages->Register( "Inventory_Update", -1 );
 	if ( usermessages->LookupUserMessage( "Quests_Update" ) == -1 )
 		usermessages->Register( "Quests_Update", -1 );
+	// HL2RPM: RPG character state / notifications (hl2rpm/rpg_shared.h)
+	if ( usermessages->LookupUserMessage( "RPG_State" ) == -1 )
+		usermessages->Register( "RPG_State", -1 );
+	if ( usermessages->LookupUserMessage( "RPG_Notify" ) == -1 )
+		usermessages->Register( "RPG_Notify", -1 );
+	if ( usermessages->LookupUserMessage( "RPG_Dialog" ) == -1 )
+		usermessages->Register( "RPG_Dialog", -1 );
+	if ( usermessages->LookupUserMessage( "RPG_UseHint" ) == -1 )
+		usermessages->Register( "RPG_UseHint", -1 );
 
 #ifdef CLIENT_DLL
 	// TODO: Better placement?

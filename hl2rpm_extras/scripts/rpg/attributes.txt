@@ -1,0 +1,11 @@
+// HL2RPM: характеристики Λ.А.М.Б.Д.А. (Дизайн-документ Part I/02). Порядок фиксирован.
+// Имена и описания - токены #RPG_Attr_<id>(_Desc) из hl2rpm_rpg_<язык>.txt
+"Attributes"
+{
+	"agility"   { "abbr" "LOV" }
+	"analytics" { "abbr" "ANA" }
+	"might"     { "abbr" "MIG" }
+	"vigilance" { "abbr" "BDI" }
+	"spirit"    { "abbr" "DUH" }
+	"authority" { "abbr" "AVT" }
+}

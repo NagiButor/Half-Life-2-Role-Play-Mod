@@ -2229,12 +2229,17 @@ static void __Cmd_Inventory_Open_End(const CCommand &args)
     if (panel) panel->EndInventory();
 }
 
+// HL2RPM: учётный браслет (hl2rpm/rpg_bracelet.cpp) вместо старой панели, если cl_rpg_bracelet 1
+extern bool RPGBracelet_HandleInventoryKey();
+
 // Local command that user keybind will call; forwards request to server
 static void __Cmd_Inventory_Request_Local(const CCommand &args)
 {
     // Toggle: if panel is visible, close it locally; otherwise request from server
     CVGuiLootPanel *lootPanel = GetGlobalLootPanel();
     if (lootPanel && lootPanel->IsVisible())
+        return;
+    if (RPGBracelet_HandleInventoryKey())
         return;
     CVGuiInventoryPanel *panel = GetGlobalInventoryPanel();
     if (panel && panel->IsVisible())

@@ -51,6 +51,7 @@ BEGIN_SEND_TABLE_NOBASE( CPlayerLocalData, DT_Local )
 #endif
 	SendPropInt		(SENDINFO(m_bDrawViewmodel), 1, SPROP_UNSIGNED ),
 	SendPropInt		(SENDINFO(m_bWearingSuit), 1, SPROP_UNSIGNED ),
+	SendPropInt		(SENDINFO(m_iSuitType), 4, SPROP_UNSIGNED ),
 	SendPropBool	(SENDINFO(m_bPoisoned)),
 
 	SendPropFloat	(SENDINFO(m_flStepSize), 16, SPROP_ROUNDUP, 0.0f, 128.0f ),
@@ -183,6 +184,7 @@ BEGIN_SIMPLE_DATADESC( CPlayerLocalData )
 	DEFINE_FIELD( m_vecPunchAngleVel, FIELD_VECTOR ),
 	DEFINE_FIELD( m_bDrawViewmodel, FIELD_BOOLEAN ),
 	DEFINE_FIELD( m_bWearingSuit, FIELD_BOOLEAN ),
+	DEFINE_FIELD( m_iSuitType, FIELD_INTEGER ),
 	DEFINE_FIELD( m_bPoisoned, FIELD_BOOLEAN ),
 	DEFINE_FIELD( m_flStepSize, FIELD_FLOAT ),
 	DEFINE_FIELD( m_bAllowAutoMovement, FIELD_BOOLEAN ),
@@ -219,6 +221,7 @@ CPlayerLocalData::CPlayerLocalData()
 	m_audio.ent.Set( NULL );
 	m_pOldSkyCamera = NULL;
 	m_bDrawViewmodel = true;
+	m_iSuitType = 0;
 }
 
 

@@ -1,0 +1,35 @@
+// MQ-02 «Вопрос документов» (Part IV/03, Part V/01). T3, 500 XP. Нужна запись о переселении или поручитель.
+// Пути среза: В - Лямбда (LM-01 -> Барни), Б - Пайщики (SM-01 -> Кадар), Д - простак (справка Митры), Г - взлом
+// терминала ночью. Любой путь ставит mq02_path=<путь>; карту выдаёт Тамара (кроме Б - поддельная карта сразу).
+"Quest"
+{
+	"id"        "mq02_papers"
+	"category"  "main"
+	"title"     "Вопрос документов"   "title_en" "A Question of Papers"
+	"desc"      "«Вас нет в базе». Без записи о переселении учётную карту не выдают. Временный пропуск истекает через семь дней. Нужен поручитель - или запись."
+	"desc_en"   "“You're not in the database.” Without a resettlement record they won't issue a registration card. The temporary pass expires in seven days. I need a sponsor - or a record."
+	"xp"        "500"
+	"act"       "1"
+	"auto_track" "1"
+	"complete_on_last_stage" "1"
+	"on_complete" { "set_flag" "mq02_done"  "clear_flag" "civil_temp_pass" }
+	"stages"
+	{
+		"0"
+		{
+			"title" "Найти выход"   "title_en" "Find a Way"
+			"desc"  "Варианты: Лямбда (в туалете вокзала - граффити «спроси часовщика»), Пайщики (баня в Старом городе), справка «ограниченно трудоспособного» у фельдшера Митры, или сделать запись самому - ночью, через терминал регистратуры."
+			"desc_en" "Options: Lambda (station toilets - graffiti “ask the watchmaker”), the Shareholders (the bathhouse in Old Town), a “limited work capacity” certificate from medic Mitra, or make the record myself - at night, through the registry terminal."
+			"marker" "npc_tamara"   "marker_map" "rp_c17_01_trainstation"
+			"objectives" { "1" { "type" "flag" "target" "mq02_path" } }
+		}
+		"1"
+		{
+			"title" "Учётная карта"   "title_en" "Registration Card"
+			"desc"  "Запись есть. Вернуться к окну 4 за учётной картой."
+			"desc_en" "The record exists. Go back to window four for the registration card."
+			"marker" "npc_tamara"   "marker_map" "rp_c17_01_trainstation"
+			"objectives" { "1" { "type" "item" "target" "item_account_card;item_forged_id_card" } }
+		}
+	}
+}

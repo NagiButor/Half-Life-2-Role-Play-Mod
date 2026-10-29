@@ -1,0 +1,229 @@
+// HL2RPM: подписи интерфейса RPG (HUD, браслет, диалог, экраны) -> resource/hl2rpm_dialog_<язык>.txt
+// (токены HL2RPM_UI_* лежат в этом файле, чтобы у всех текстов был один двуязычный источник)
+"Strings"
+{
+	// ---- уведомления ----
+	"HL2RPM_UI_Notify_XP"            { "ru" "+%s1 опыта"                 "en" "+%s1 XP" }
+	"HL2RPM_UI_Notify_LevelUp"       { "ru" "Новый уровень: %s1"         "en" "Level up: %s1" }
+	"HL2RPM_UI_Notify_LevelUpHint"   { "ru" "Откройте браслет (TAB), чтобы распределить очки" "en" "Open the bracelet (TAB) to spend your points" }
+	"HL2RPM_UI_Notify_Rep"           { "ru" "%s1 %s2"                    "en" "%s1 %s2" }
+	"HL2RPM_UI_Notify_Civil"         { "ru" "Гражданский статус %s1"     "en" "Civil Status %s1" }
+	"HL2RPM_UI_Notify_Suspicion"     { "ru" "Подозрение: %s1"            "en" "Suspicion: %s1" }
+	"HL2RPM_UI_Notify_Location"      { "ru" "Новая локация: %s1"         "en" "Location discovered: %s1" }
+	"HL2RPM_UI_Notify_ItemGot"       { "ru" "Получено: %s1 ×%s2"         "en" "Received: %s1 ×%s2" }
+	"HL2RPM_UI_Notify_ItemLost"      { "ru" "Отдано: %s1 ×%s2"           "en" "Handed over: %s1 ×%s2" }
+	"HL2RPM_UI_Notify_Note"          { "ru" "Новая запись: %s1"          "en" "New note: %s1" }
+	"HL2RPM_UI_Notify_Credits"       { "ru" "%s1 кр."                    "en" "%s1 cr." }
+	"HL2RPM_UI_Notify_Perk"          { "ru" "Перк: %s1"                  "en" "Perk: %s1" }
+	"HL2RPM_UI_Notify_CheckPass"     { "ru" "[%s1] - успех"              "en" "[%s1] - success" }
+	"HL2RPM_UI_Notify_CheckFail"     { "ru" "[%s1] - провал"             "en" "[%s1] - failed" }
+	"HL2RPM_UI_Notify_ZoneEnter"     { "ru" "Зона контроля Альянса"      "en" "Combine control zone" }
+	"HL2RPM_UI_Notify_ZoneLeave"     { "ru" "Вы покинули зону контроля"  "en" "You left the control zone" }
+	"HL2RPM_UI_Notify_ZoneRestricted" { "ru" "Запретная зона"            "en" "Restricted zone" }
+	"HL2RPM_UI_Notify_QuestStarted"  { "ru" "Новое задание: %s1"         "en" "New task: %s1" }
+	"HL2RPM_UI_Notify_QuestStage"    { "ru" "Задание обновлено: %s1"     "en" "Task updated: %s1" }
+	"HL2RPM_UI_Notify_QuestDone"     { "ru" "Задание выполнено: %s1"     "en" "Task completed: %s1" }
+	"HL2RPM_UI_Notify_QuestFailed"   { "ru" "Задание провалено: %s1"     "en" "Task failed: %s1" }
+	"HL2RPM_UI_Notify_QuestProgress" { "ru" "%s1: %s2"                   "en" "%s1: %s2" }
+	"HL2RPM_UI_SuitEquipped"         { "ru" "Надето: %s1"                "en" "Equipped: %s1" }
+	"HL2RPM_UI_CurfewWake"           { "ru" "Комендантский час. Лучше не выходить."  "en" "Curfew. Better stay inside." }
+
+	// ---- отказы ----
+	"HL2RPM_UI_Fail_Skill"           { "ru" "Не хватает навыка: %s1"     "en" "Not enough skill: %s1" }
+	"HL2RPM_UI_Fail_Perk"            { "ru" "Перк недоступен: %s1"       "en" "Perk unavailable: %s1" }
+	"HL2RPM_UI_Fail_FullHealth"      { "ru" "Вы и так здоровы"           "en" "You are already healthy" }
+	"HL2RPM_UI_Fail_Condition"       { "ru" "Сейчас нельзя"              "en" "Not now" }
+	"HL2RPM_UI_Fail_Chargen"         { "ru" "Карточка гражданина заполнена неверно: %s1" "en" "Citizen record is invalid: %s1" }
+	"HL2RPM_UI_Fail_CannotUse"       { "ru" "Это нельзя использовать"    "en" "You can't use that" }
+	"HL2RPM_UI_Fail_BarterClosed"     { "ru" "Торговец больше не слушает"     "en" "The trader isn't listening anymore" }
+	"HL2RPM_UI_Fail_BarterNoStock"    { "ru" "Этого больше нет"                "en" "Out of stock" }
+	"HL2RPM_UI_Fail_BarterNoCredits"  { "ru" "Не хватает кредитов"             "en" "Not enough credits" }
+	"HL2RPM_UI_Fail_BarterWontBuy"    { "ru" "Это здесь не берут"              "en" "They won't buy that here" }
+	"HL2RPM_UI_Fail_BarterNoItem"     { "ru" "Этого у вас нет"                 "en" "You don't have that" }
+	"HL2RPM_UI_Fail_BarterTraderBroke" { "ru" "Денег на это нет. Касса пуста"  "en" "No money for that. The till is empty" }
+
+	// ---- подозрение ----
+	"HL2RPM_UI_Suspicion_calm"       { "ru" "спокойно"   "en" "calm" }
+	"HL2RPM_UI_Suspicion_attention"  { "ru" "внимание"   "en" "attention" }
+	"HL2RPM_UI_Suspicion_search"     { "ru" "досмотр"    "en" "search" }
+	"HL2RPM_UI_Suspicion_detain"     { "ru" "задержание" "en" "detain" }
+	"HL2RPM_UI_Suspicion_alarm"      { "ru" "ТРЕВОГА"    "en" "ALARM" }
+
+	// ---- диалог ----
+	"HL2RPM_UI_Dlg_Continue"         { "ru" "Дальше ›  [ПРОБЕЛ]"   "en" "Continue ›  [SPACE]" }
+	"HL2RPM_UI_Dlg_TagCivil"         { "ru" "ГС"            "en" "Civil" }
+	"HL2RPM_UI_Dlg_TagCompassion"    { "ru" "Сострадание"   "en" "Compassion" }
+	"HL2RPM_UI_Dlg_TagCruelty"       { "ru" "Жестокость"    "en" "Cruelty" }
+
+	// ---- анкета гражданина (создание персонажа) ----
+	"HL2RPM_UI_CG_Title"             { "ru" "АНКЕТА ГРАЖДАНИНА"   "en" "CITIZEN QUESTIONNAIRE" }
+	"HL2RPM_UI_CG_Subtitle"          { "ru" "БЮРО УЧЁТА · ВОКЗАЛ · ОКНО 4"   "en" "REGISTRY BUREAU · STATION · WINDOW 4" }
+	"HL2RPM_UI_CG_Name"              { "ru" "Фамилия, имя"   "en" "Full name" }
+	"HL2RPM_UI_CG_PassNo"            { "ru" "ФОРМА 17-Г"     "en" "FORM 17-G" }
+	"HL2RPM_UI_CG_Free"              { "ru" "Свободно: %s1"  "en" "Unspent: %s1" }
+	"HL2RPM_UI_CG_Tags"              { "ru" "Специализации: %s1 / 3"  "en" "Specializations: %s1 / 3" }
+	"HL2RPM_UI_CG_Traits"            { "ru" "Особенности: %s1 / 2"    "en" "Peculiarities: %s1 / 2" }
+	"HL2RPM_UI_CG_Hint"              { "ru" "Раскладка теста уже вписана - её можно перераспределить. Сумма Λ.А.М.Б.Д.А. - 34, каждое значение от 1 до 10. Отметьте ровно три специализации (+15 к навыку) и не больше двух особенностей. Наведите курсор на строку, чтобы прочитать описание."  "en" "Your test results are already filled in - you can redistribute them. L.A.M.B.D.A. must add up to 34, each value from 1 to 10. Mark exactly three specializations (+15 to the skill) and at most two peculiarities. Hover over a line to read its description." }
+	"HL2RPM_UI_CG_TamaraSays"        { "ru" "Тамара: %s1"    "en" "Tamara: %s1" }
+	"HL2RPM_UI_CG_NeedName"          { "ru" "Впишите имя"    "en" "Enter a name" }
+	"HL2RPM_UI_CG_NeedSpend"         { "ru" "Не распределено очков: %s1"  "en" "Points left to spend: %s1" }
+	"HL2RPM_UI_CG_NeedRemove"        { "ru" "Лишних очков: %s1"           "en" "Points over the limit: %s1" }
+	"HL2RPM_UI_CG_NeedTags"          { "ru" "Отметьте три специализации"  "en" "Mark three specializations" }
+	"HL2RPM_UI_CG_Derived1"          { "ru" "Здоровье %s1   Груз %s2 кг"   "en" "Health %s1   Carry %s2 kg" }
+	"HL2RPM_UI_CG_Derived2"          { "ru" "Очков навыков за уровень: %s1"  "en" "Skill points per level: %s1" }
+	"HL2RPM_UI_CG_Reset"             { "ru" "СБРОС"          "en" "RESET" }
+	"HL2RPM_UI_CG_Confirm"           { "ru" "ПОДТВЕРДИТЬ"    "en" "CONFIRM" }
+
+	// ---- HUD ----
+	"HL2RPM_UI_Compass_N"            { "ru" "С"    "en" "N" }
+	"HL2RPM_UI_Compass_NE"           { "ru" "СВ"   "en" "NE" }
+	"HL2RPM_UI_Compass_E"            { "ru" "В"    "en" "E" }
+	"HL2RPM_UI_Compass_SE"           { "ru" "ЮВ"   "en" "SE" }
+	"HL2RPM_UI_Compass_S"            { "ru" "Ю"    "en" "S" }
+	"HL2RPM_UI_Compass_SW"           { "ru" "ЮЗ"   "en" "SW" }
+	"HL2RPM_UI_Compass_W"            { "ru" "З"    "en" "W" }
+	"HL2RPM_UI_Compass_NW"           { "ru" "СЗ"   "en" "NW" }
+	"HL2RPM_UI_Compass_Meters"       { "ru" "%s1 м"  "en" "%s1 m" }
+	"HL2RPM_UI_HUD_Suspicion"        { "ru" "ПОДОЗРЕНИЕ"     "en" "SUSPICION" }
+	"HL2RPM_UI_HUD_Health"           { "ru" "ЗДОРОВЬЕ"       "en" "HEALTH" }
+	"HL2RPM_UI_HUD_Ammo"             { "ru" "ПАТРОНЫ"        "en" "AMMO" }
+	"HL2RPM_UI_HUD_Bracelet"         { "ru" "БРАСЛЕТ УЧЁТА"  "en" "REGISTRY BRACELET" }
+	"HL2RPM_UI_HUD_Unregistered"     { "ru" "Не зарегистрирован"  "en" "Unregistered" }
+	"HL2RPM_UI_HUD_Credits"          { "ru" "%s1 кр."        "en" "%s1 cr." }
+	"HL2RPM_UI_HUD_MaskCP"           { "ru" "ГРАЖДАНСКАЯ ОБОРОНА · МАСКА · СИТИ 17"  "en" "CIVIL PROTECTION · MASK · CITY 17" }
+	"HL2RPM_UI_HUD_MaskOW"           { "ru" "НАДЗОР · ТАКТИЧЕСКИЙ ВИЗОР"  "en" "OVERWATCH · TACTICAL VISOR" }
+	"HL2RPM_UI_Banner_LevelUp"       { "ru" "НОВЫЙ УРОВЕНЬ"  "en" "LEVEL UP" }
+	"HL2RPM_UI_Banner_Level"         { "ru" "Уровень %s1"    "en" "Level %s1" }
+	"HL2RPM_UI_Banner_Location"      { "ru" "НОВАЯ ЛОКАЦИЯ"  "en" "LOCATION DISCOVERED" }
+	"HL2RPM_UI_Banner_QuestNew"      { "ru" "НОВОЕ ЗАДАНИЕ"  "en" "NEW TASK" }
+	"HL2RPM_UI_Banner_QuestDone"     { "ru" "ЗАДАНИЕ ВЫПОЛНЕНО"  "en" "TASK COMPLETED" }
+
+	// ---- учётный браслет ----
+	"HL2RPM_UI_BR_Title"             { "ru" "УЧЁТНЫЙ БРАСЛЕТ"   "en" "REGISTRY BRACELET" }
+	"HL2RPM_UI_BR_NameLevel"         { "ru" "%s1  ·  уровень %s2"   "en" "%s1  ·  level %s2" }
+	"HL2RPM_UI_BR_TimeDay"           { "ru" "%s1  ·  ДЕНЬ %s2"   "en" "%s1  ·  DAY %s2" }
+	"HL2RPM_UI_BR_TabCitizen"        { "ru" "ГРАЖДАНИН"   "en" "CITIZEN" }
+	"HL2RPM_UI_BR_TabProperty"       { "ru" "ИМУЩЕСТВО"   "en" "PROPERTY" }
+	"HL2RPM_UI_BR_TabData"           { "ru" "ДАННЫЕ"      "en" "DATA" }
+	"HL2RPM_UI_BR_TabRations"        { "ru" "ПАЙКИ"       "en" "RATIONS" }
+	"HL2RPM_UI_BR_TabRadio"          { "ru" "РАДИО"       "en" "RADIO" }
+	"HL2RPM_UI_BR_Hints"             { "ru" "[TAB] закрыть   [Q] [E] вкладки   [1-5] сразу на вкладку"   "en" "[TAB] close   [Q] [E] tabs   [1-5] jump to a tab" }
+	"HL2RPM_UI_BR_Close"             { "ru" "ЗАКРЫТЬ"     "en" "CLOSE" }
+	"HL2RPM_UI_BR_XP"                { "ru" "Опыт %s1 / %s2"   "en" "XP %s1 / %s2" }
+	"HL2RPM_UI_BR_HpCarry"           { "ru" "Здоровье %s1   Груз %s2 кг"   "en" "Health %s1   Carry %s2 kg" }
+	"HL2RPM_UI_BR_Skills"            { "ru" "Навыки"      "en" "Skills" }
+	"HL2RPM_UI_BR_SkillPoints"       { "ru" "Очки навыков: %s1"   "en" "Skill points: %s1" }
+	"HL2RPM_UI_BR_SkillAddHint"      { "ru" "«+» левой кнопкой - одно очко, правой - пять."   "en" "Left-click “+” for one point, right-click for five." }
+	"HL2RPM_UI_BR_Perks"             { "ru" "Перки"       "en" "Perks" }
+	"HL2RPM_UI_BR_PickPerk"          { "ru" "ВЫБРАТЬ ПЕРК (%s1)"   "en" "CHOOSE A PERK (%s1)" }
+	"HL2RPM_UI_BR_NoPerks"           { "ru" "Перков пока нет: первый - на втором уровне."   "en" "No perks yet: the first one comes at level two." }
+	"HL2RPM_UI_BR_Traits"            { "ru" "Особенности"   "en" "Peculiarities" }
+	"HL2RPM_UI_BR_NoTraits"          { "ru" "Без особенностей."   "en" "No peculiarities." }
+	"HL2RPM_UI_BR_LevelHint"         { "ru" "Новый уровень. Распределите очки навыков кнопками «+» (правая кнопка - по пять) и выберите перк, если он открылся."   "en" "Level up. Spend your skill points with the “+” buttons (right-click spends five) and pick a perk if one is unlocked." }
+	"HL2RPM_UI_BR_CitizenHint"       { "ru" "Наведите курсор на характеристику, навык, перк или особенность, чтобы прочитать описание."   "en" "Hover over an attribute, skill, perk or peculiarity to read its description." }
+	"HL2RPM_UI_BR_PickPerkTitle"     { "ru" "Выбор перка - осталось %s1"   "en" "Choose a perk - %s1 left" }
+	"HL2RPM_UI_BR_Back"              { "ru" "‹ НАЗАД"     "en" "‹ BACK" }
+	"HL2RPM_UI_BR_PerkLevel"         { "ru" "ур. %s1"     "en" "lvl %s1" }
+	"HL2RPM_UI_BR_PerkNeedLevel"     { "ru" "Нужен уровень %s1"   "en" "Requires level %s1" }
+	"HL2RPM_UI_BR_PerkTaken"         { "ru" "Уже взят"    "en" "Already taken" }
+	"HL2RPM_UI_BR_PerkNeed"          { "ru" "Нужно: %s1"  "en" "Requires: %s1" }
+	"HL2RPM_UI_BR_PerkTake"          { "ru" "ВЗЯТЬ ПЕРК"  "en" "TAKE PERK" }
+	"HL2RPM_UI_BR_PerkPickHint"      { "ru" "Выберите перк в списке. Доступные - сверху, серые откроются позже."   "en" "Pick a perk from the list. Available ones are on top; grey ones unlock later." }
+	"HL2RPM_UI_BR_Weight"            { "ru" "Вес %s1 / %s2 кг"   "en" "Weight %s1 / %s2 kg" }
+	"HL2RPM_UI_BR_Wearing"           { "ru" "Надето: %s1"   "en" "Wearing: %s1" }
+	"HL2RPM_UI_BR_Unequip"           { "ru" "СНЯТЬ"       "en" "TAKE OFF" }
+	"HL2RPM_UI_BR_ColItem"           { "ru" "ПРЕДМЕТ"     "en" "ITEM" }
+	"HL2RPM_UI_BR_ColCount"          { "ru" "КОЛ-ВО"      "en" "QTY" }
+	"HL2RPM_UI_BR_ColWeight"         { "ru" "КГ"          "en" "KG" }
+	"HL2RPM_UI_BR_ColValue"          { "ru" "КР."         "en" "CR." }
+	"HL2RPM_UI_BR_CatAll"            { "ru" "Всё"         "en" "All" }
+	"HL2RPM_UI_BR_CatWeapon"         { "ru" "Оружие"      "en" "Weapons" }
+	"HL2RPM_UI_BR_CatArmor"          { "ru" "Одежда"      "en" "Apparel" }
+	"HL2RPM_UI_BR_CatMedicine"       { "ru" "Медицина"    "en" "Medicine" }
+	"HL2RPM_UI_BR_CatFood"           { "ru" "Еда"         "en" "Food" }
+	"HL2RPM_UI_BR_CatDocument"       { "ru" "Документы"   "en" "Documents" }
+	"HL2RPM_UI_BR_CatMisc"           { "ru" "Разное"      "en" "Misc" }
+	"HL2RPM_UI_BR_CatEmpty"          { "ru" "В этой категории ничего нет."   "en" "Nothing in this category." }
+	"HL2RPM_UI_BR_InvEmpty"          { "ru" "Карманы пусты."   "en" "Your pockets are empty." }
+	"HL2RPM_UI_BR_Contraband"        { "ru" "Контрабанда (%s1)"   "en" "Contraband (%s1)" }
+	"HL2RPM_UI_BR_Use"               { "ru" "ИСПОЛЬЗОВАТЬ"   "en" "USE" }
+	"HL2RPM_UI_BR_Wear"              { "ru" "НАДЕТЬ"      "en" "WEAR" }
+	"HL2RPM_UI_BR_Equip"             { "ru" "ВЗЯТЬ В РУКИ"   "en" "EQUIP" }
+	"HL2RPM_UI_BR_Read"              { "ru" "ЧИТАТЬ"      "en" "READ" }
+	"HL2RPM_UI_BR_Drop"              { "ru" "ВЫБРОСИТЬ"   "en" "DROP" }
+	"HL2RPM_UI_BR_PropertyHint"      { "ru" "Выберите предмет - здесь появятся описание, вес, цена и действия. Красная метка - контрабанда: при досмотре её найдут."   "en" "Select an item to see its description, weight, price and actions. A red mark means contraband: a search will find it." }
+	"HL2RPM_UI_BR_Quests"            { "ru" "Задания"     "en" "Tasks" }
+	"HL2RPM_UI_BR_Notes"             { "ru" "Заметки"     "en" "Notes" }
+	"HL2RPM_UI_BR_Relations"         { "ru" "Отношения"   "en" "Relations" }
+	"HL2RPM_UI_BR_NoQuests"          { "ru" "Заданий пока нет."   "en" "No tasks yet." }
+	"HL2RPM_UI_BR_QActive"           { "ru" "АКТИВНО"     "en" "ACTIVE" }
+	"HL2RPM_UI_BR_QDone"             { "ru" "ВЫПОЛНЕНО"   "en" "DONE" }
+	"HL2RPM_UI_BR_QFailed"           { "ru" "ПРОВАЛЕНО"   "en" "FAILED" }
+	"HL2RPM_UI_BR_QCat_main"         { "ru" "ГЛАВНОЕ ЗАДАНИЕ"   "en" "MAIN TASK" }
+	"HL2RPM_UI_BR_QCat_faction"      { "ru" "ЗАДАНИЕ ФРАКЦИИ"   "en" "FACTION TASK" }
+	"HL2RPM_UI_BR_QCat_side"         { "ru" "ПОБОЧНОЕ ЗАДАНИЕ"  "en" "SIDE TASK" }
+	"HL2RPM_UI_BR_QCat_companion"    { "ru" "ЗАДАНИЕ СПУТНИКА"  "en" "COMPANION TASK" }
+	"HL2RPM_UI_BR_Track"             { "ru" "ОТСЛЕЖИВАТЬ"   "en" "TRACK" }
+	"HL2RPM_UI_BR_Untrack"           { "ru" "НЕ ОТСЛЕЖИВАТЬ"   "en" "STOP TRACKING" }
+	"HL2RPM_UI_BR_NoNotes"           { "ru" "Записей нет. Сюда попадают прочитанные записки, терминалы и находки."   "en" "No entries. Notes you read, terminals and findings end up here." }
+	"HL2RPM_UI_BR_NoRelations"       { "ru" "Ни одна фракция вас пока не знает."   "en" "No faction knows you yet." }
+	"HL2RPM_UI_BR_CardTitle"         { "ru" "КАРТОЧКА ГРАЖДАНИНА · СИТИ 17"   "en" "CITIZEN RECORD · CITY 17" }
+	"HL2RPM_UI_BR_CivilValue"        { "ru" "Индекс гражданского статуса %s1"   "en" "Civil status index %s1" }
+	"HL2RPM_UI_BR_Norm_none"         { "ru" "Вы не зарегистрированы: пайка не положено. Бюро учёта - вокзал, окно 4."   "en" "You are not registered: no ration is due. Registry Bureau - the station, window 4." }
+	"HL2RPM_UI_BR_Norm_temppass"     { "ru" "Временный пропуск: один паёк в день выдачи, без «премий». Учётная карточка - в Бюро, окно 4."   "en" "Temporary pass: one ration per distribution day, no “bonuses”. Get your registration card at the Bureau, window 4." }
+	"HL2RPM_UI_BR_Norm_anticitizen"  { "ru" "Антигражданин. Пайковое довольствие отменено. Немедленно явиться в ближайший участок Гражданской обороны."   "en" "Anti-Citizen. Ration allowance revoked. Report to the nearest Civil Protection station immediately." }
+	"HL2RPM_UI_BR_Norm_malicious"    { "ru" "Злостный нарушитель: один паёк в неделю, выдача под надзором ГО."   "en" "Malignant offender: one ration a week, issued under Civil Protection supervision." }
+	"HL2RPM_UI_BR_Norm_watched"      { "ru" "Под наблюдением: один паёк в день выдачи. Каждая выдача фиксируется."   "en" "Under observation: one ration per distribution day. Every issue is logged." }
+	"HL2RPM_UI_BR_Norm_citizen"      { "ru" "Гражданин: два пайка в неделю - в понедельник и в четверг."   "en" "Citizen: two rations a week - on Monday and Thursday." }
+	"HL2RPM_UI_BR_Norm_reliable"     { "ru" "Благонадёжный: два пайка в неделю и талон на воду «>B». Право на «премию» лояльным."   "en" "Reliable: two rations a week plus a >B water coupon. Eligible for the loyalty “bonus”." }
+	"HL2RPM_UI_BR_Norm_loyalist"     { "ru" "Лоялист: три пайка в неделю, премиальный паёк, выдача вне очереди."   "en" "Loyalist: three rations a week, a premium ration, served without queueing." }
+	"HL2RPM_UI_BR_RationsWhere"      { "ru" "Раздача пайков"   "en" "Ration distribution" }
+	"HL2RPM_UI_BR_RationsText"       { "ru" "Дни выдачи - понедельник и четверг, с 07:00. Пункты: Привокзальная площадь, двор Квартала 7, проходная промзоны. Паёк выдаётся по браслету; без учётной карточки - только по временному пропуску. Опоздавшие ждут следующей выдачи. В дни выдачи - длинные очереди, споры, иногда давка: держитесь подальше от ГО."   "en" "Distribution days are Monday and Thursday, from 07:00. Points: Station Plaza, the Block 7 yard, the industrial zone checkpoint. Rations are issued by bracelet; without a registration card - only with a temporary pass. Latecomers wait for the next distribution. Distribution days mean long queues, arguments, sometimes a crush: keep away from Civil Protection." }
+	"HL2RPM_UI_Bracelet_PassExpires" { "ru" "Временный пропуск 17-T действует, пока вы не получите учётную карточку. Он открывает вокзал, Квартал 7 и раздачу - но не дальше."   "en" "Temporary pass 17-T is valid until you receive a registration card. It opens the station, Block 7 and the ration point - but nothing further." }
+	"HL2RPM_UI_BR_StVoice"           { "ru" "Голос Города"   "en" "Voice of the City" }
+	"HL2RPM_UI_BR_StVoiceDesc"       { "ru" "Официальная станция: обращения доктора Брина, объявления Надзора."   "en" "The official station: Dr. Breen's addresses, Overwatch announcements." }
+	"HL2RPM_UI_BR_StLambda"          { "ru" "Частота λ"   "en" "λ Frequency" }
+	"HL2RPM_UI_BR_StLambdaDesc"      { "ru" "Подпольный эфир Лямбды. Слушать - уже нарушение."   "en" "Lambda's underground broadcast. Listening is already an offence." }
+	"HL2RPM_UI_BR_StRemnant"         { "ru" "Волна «Остатка»"   "en" "Remnant Band" }
+	"HL2RPM_UI_BR_StRemnantDesc"     { "ru" "Английские позывные, координаты, помехи."   "en" "English call signs, coordinates, static." }
+	"HL2RPM_UI_BR_StCP"              { "ru" "Канал ГО"    "en" "CP Channel" }
+	"HL2RPM_UI_BR_StCPDesc"          { "ru" "Переговоры патрулей: рейды, коды, номера юнитов."   "en" "Patrol chatter: raids, codes, unit numbers." }
+	"HL2RPM_UI_BR_StLocked"          { "ru" "- не настроено -"   "en" "- not tuned -" }
+	"HL2RPM_UI_BR_OnAir"             { "ru" "В эфире: %s1"   "en" "On air: %s1" }
+	"HL2RPM_UI_BR_RadioWelcome"      { "ru" "«Добро пожаловать в Сити 17»"   "en" "“Welcome to City 17”" }
+	"HL2RPM_UI_BR_RadioInstinct"     { "ru" "«Инстинкт»"   "en" "“Instinct”" }
+	"HL2RPM_UI_BR_RadioCollaboration" { "ru" "«Сотрудничество»"   "en" "“Collaboration”" }
+	"HL2RPM_UI_BR_RadioHint"         { "ru" "Радио браслета играет, пока вы ходите по городу. Новые частоты настраиваются по ходу истории: подполье не вещает для всех."   "en" "The bracelet radio keeps playing while you walk the city. New frequencies get tuned as the story goes: the underground does not broadcast to everyone." }
+
+	// ---- подсказка у прицела ----
+	"HL2RPM_UI_Use_Talk"             { "ru" "Говорить"     "en" "Talk" }
+	"HL2RPM_UI_Use_Take"             { "ru" "Взять"        "en" "Take" }
+	"HL2RPM_UI_Use_Sleep"            { "ru" "Спать"        "en" "Sleep" }
+	"HL2RPM_UI_Use_Read"             { "ru" "Читать"       "en" "Read" }
+	"HL2RPM_UI_Use_Use"              { "ru" "Использовать" "en" "Use" }
+
+	// ---- чтение и сон ----
+	"HL2RPM_UI_Reader_Close"         { "ru" "[E] закрыть   колесо мыши - прокрутка"   "en" "[E] close   mouse wheel - scroll" }
+	"HL2RPM_UI_Sleep_Title"          { "ru" "ОТДЫХ"        "en" "REST" }
+	"HL2RPM_UI_Sleep_Wake"           { "ru" "Сейчас %s1 - проснуться в %s2"   "en" "Now %s1 - wake up at %s2" }
+	"HL2RPM_UI_Sleep_Hours"          { "ru" "%s1 ч"        "en" "%s1 h" }
+	"HL2RPM_UI_Sleep_Curfew"         { "ru" "Проснётесь в комендантский час: на улицу лучше не выходить."   "en" "You will wake up during curfew: better not go outside." }
+	"HL2RPM_UI_Sleep_Go"             { "ru" "СПАТЬ"        "en" "SLEEP" }
+	"HL2RPM_UI_Sleep_Cancel"         { "ru" "ВСТАТЬ"       "en" "GET UP" }
+
+	// ---- торговля (rpg_barter.cpp) ----
+	"HL2RPM_UI_BT_Title"             { "ru" "ТОРГОВЛЯ"                   "en" "TRADE" }
+	"HL2RPM_UI_BT_Goods"             { "ru" "ТОВАР"                      "en" "GOODS" }
+	"HL2RPM_UI_BT_Yours"             { "ru" "ВАШЕ ИМУЩЕСТВО"             "en" "YOUR BELONGINGS" }
+	"HL2RPM_UI_BT_Price"             { "ru" "ЦЕНА, КР."                  "en" "PRICE, CR." }
+	"HL2RPM_UI_BT_SoldOut"           { "ru" "Всё распродано"             "en" "Sold out" }
+	"HL2RPM_UI_BT_NothingToSell"     { "ru" "Продать нечего"             "en" "Nothing to sell" }
+	"HL2RPM_UI_BT_Loading"           { "ru" "…"                          "en" "…" }
+	"HL2RPM_UI_BT_TraderCash"        { "ru" "Касса: %s1"                 "en" "Till: %s1" }
+	"HL2RPM_UI_BT_Terms"             { "ru" "Торговля %s1  ·  покупка / продажа %s2"   "en" "Barter %s1  ·  buy / sell %s2" }
+	"HL2RPM_UI_BT_NotForTrade"       { "ru" "Не продаётся и не покупается"   "en" "Not for trade" }
+	"HL2RPM_UI_BT_NoContraband"      { "ru" "Контрабанду здесь не берут"     "en" "No contraband here" }
+	"HL2RPM_UI_BT_YourCredits"       { "ru" "ВАШИ КРЕДИТЫ"               "en" "YOUR CREDITS" }
+	"HL2RPM_UI_BT_Hint"              { "ru" "ЛКМ — 1 шт.   ПКМ — 5 шт.   Колесо — прокрутка   Esc — уйти"   "en" "LMB — 1   RMB — 5   Wheel — scroll   Esc — leave" }
+	"HL2RPM_UI_BT_Leave"             { "ru" "УЙТИ"                       "en" "LEAVE" }
+}

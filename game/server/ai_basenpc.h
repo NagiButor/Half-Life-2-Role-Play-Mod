@@ -979,6 +979,10 @@ public:
 	void				SetSleepState( AI_SleepState_t sleepState )	{ m_SleepState = sleepState; }
 	const char			*GetLootItems() const { return STRING( m_iszLootItems ); }
 	const char			*GetLootDisplayName() const { return STRING( m_iszLootDisplayName ); }
+	// HL2RPM: RPG keys (rpg_faction / rpg_trader / rpg_disposition, RPG_SPEC 7)
+	const char			*GetRPGFaction() const { return m_iszRPGFaction != NULL_STRING ? STRING( m_iszRPGFaction ) : ""; }
+	const char			*GetRPGTrader() const { return m_iszRPGTrader != NULL_STRING ? STRING( m_iszRPGTrader ) : ""; }
+	int					GetRPGDisposition() const { return m_iRPGDisposition; }
 	void				AddSleepFlags( int flags ) { m_SleepFlags |= flags; }
 	void				RemoveSleepFlags( int flags ) { m_SleepFlags &= ~flags; }
 	bool				HasSleepFlags( int flags ) { return (m_SleepFlags & flags) == flags; }
@@ -1901,6 +1905,12 @@ public:
 	string_t			m_iszPendingWeapon;			// THe NPC should create and equip this weapon.
 	string_t			m_iszLootItems;
 	string_t			m_iszLootDisplayName;
+	// HL2RPM: RPG faction, trader id, start disposition towards the player; alarm state (hl2rpm/rpg_entities.cpp)
+	string_t			m_iszRPGFaction;
+	string_t			m_iszRPGTrader;
+	int					m_iRPGDisposition;
+	int					m_iRPGAlarmPrevDisp;		// relationship to the player before the alarm, -1 = no alarm
+	int					m_iRPGAlarmPrevPriority;
 	bool				m_bIgnoreUnseenEnemies;
 
 private:

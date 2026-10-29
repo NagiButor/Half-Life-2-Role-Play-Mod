@@ -1,0 +1,155 @@
+// Илона Сандерс, ларёк «Благодарность» на привокзальной площади (Part V/04 AD-03, торговец - Part V/11 GN-TR:
+// узел 1 «меню», узел 2 «торг», узел 3 «отказ»). Торговец - kiosk_blagodarnost (scripts/rpg/traders.txt).
+"Dialog"
+{
+	"entity"        "npc_ilona"
+	"voice"         "ilona"
+	"speaker"       "Илона Сандерс"   "speaker_en" "Ilona Sanders"
+	"auto_face_npc" "1"
+
+	"greetings"
+	{
+		"1" { "require_suspicion" ">=50"  "node" "30" }
+		"2" { "require_civil" "<=-40"  "node" "31" }
+		"3" { "require_flag" "dlg_spoken_npc_ilona"  "node" "2" }
+		"4" { "node" "1" }
+	}
+
+	"nodes"
+	{
+		"1"
+		{
+			"line"            "Ларёк «Благодарность». Вода, пайки, иногда шоколад — когда Альянс в настроении. Брать будете или благодарить?"
+			"line_en"         "The “Gratitude” kiosk. Water, rations, chocolate now and then — when the Combine is in a good mood. Buying, or just grateful?"
+			"line_low_ana"    "Это — вода. Это — паёк. Это — нельзя трогать. Тебе чего, милый?"
+			"line_low_ana_en" "This is water. This is a ration. This you don't touch. What do you want, sweetie?"
+			"emotion"         "через прилавок, не переставая считать"
+			"variants"
+			{
+				"1" { "require_civil" "reliable"  "line" "О, хорошая карта. Для хорошей карты — хорошая улыбка. Цена та же."  "line_en" "Oh, a good card. A good card gets a good smile. Same price." }
+			}
+			"options"
+			{
+				"1" { "text" "Покажите товар."  "text_en" "Show me what you've got."  "open_barter" "1"  "exit" "1"  "close" "1" }
+				"2" { "text" "Хочу продать."  "text_en" "I want to sell."  "open_barter" "1"  "exit" "1"  "close" "1" }
+				"3" { "text" "Нельзя ли дешевле?"  "text_en" "Any chance of a better price?"  "require_noflag" "haggle_kiosk_blagodarnost_day"  "hide_if_unmet" "1"  "next" "4" }
+				"4" { "text" "Что слышно?"  "text_en" "Heard anything?"  "next" "5" }
+				"0" { "text" "Всего доброго."  "text_en" "Good day."  "exit" "1"  "close" "1" }
+			}
+		}
+		"2"
+		{
+			"line"    "Опять вы. Вода не подорожала. Пока."
+			"line_en" "You again. Water hasn't gone up. Yet."
+			"options"
+			{
+				"1" { "text" "Покажите товар."  "text_en" "Show me what you've got."  "open_barter" "1"  "exit" "1"  "close" "1" }
+				"2" { "text" "Хочу продать."  "text_en" "I want to sell."  "open_barter" "1"  "exit" "1"  "close" "1" }
+				"3" { "text" "Нельзя ли дешевле?"  "text_en" "Any chance of a better price?"  "require_noflag" "haggle_kiosk_blagodarnost_day"  "hide_if_unmet" "1"  "next" "4" }
+				"4" { "text" "Что слышно?"  "text_en" "Heard anything?"  "next" "5" }
+				"0" { "text" "Всего доброго."  "text_en" "Good day."  "exit" "1"  "close" "1" }
+			}
+		}
+		"4"
+		{
+			"line"    "Цены Альянса не обсуждаются. Их даже вслух не произносят."
+			"line_en" "Combine prices aren't up for discussion. Nobody even says them out loud."
+			"emotion" "постукивает ногтем по ценнику"
+			"options"
+			{
+				"1"
+				{
+					"text"            "(По делу) Беру пять банок сразу, без упаковки. Скинете?"
+					"text_en"         "(Strictly business) Five cans at once, no wrapping. A discount?"
+					"check"           "skill:barter:40"
+					"next"            "6"
+					"fail_next"       "7"
+					"on_success_xp"   "20"
+					"on_success_haggle" "+10"
+					"on_fail_haggle"  "-5"
+					"on_fail_disposition" "-3"
+				}
+				"2"
+				{
+					"text"            "(Не торопиться, положить ладонь на прилавок, улыбнуться)"
+					"text_en"         "(Take your time, rest a hand on the counter, smile)"
+					"check"           "attr:authority:7"
+					"next"            "6"
+					"fail_next"       "8"
+					"on_success_xp"   "35"
+					"on_success_haggle" "+10"
+					"on_fail_haggle"  "0"
+				}
+				"3" { "text" "Дорого? Да? Ой."  "text_en" "Expensive? Is it? Oh."  "require_attr" "ANA<=3"  "hide_if_unmet" "1"  "next" "9" }
+				"0" { "text" "Ладно, по вашей цене."  "text_en" "Fine, your price."  "next" "1" }
+			}
+		}
+		"5"
+		{
+			"line"    "В Бюро опять очередь до самых дверей. Нарядов мало, людей много. А мне что — мне вода не нужна в очереди, мне нужна в ларьке."
+			"line_en" "There's a queue at the Bureau again, right out the door. Few work orders, lots of people. Not my problem — I don't need water in a queue, I need it in the kiosk."
+			"options"
+			{
+				"0" { "text" "Понятно."  "text_en" "I see."  "next" "1" }
+			}
+		}
+		"6"
+		{
+			"line"    "Пять? ...Ладно. Только никому не говорите, что я умею считать."
+			"line_en" "Five? ...Fine. Just don't tell anyone I can count."
+			"emotion" "почти улыбается"
+			"options"
+			{
+				"1" { "text" "Тогда показывайте."  "text_en" "Then show me."  "open_barter" "1"  "exit" "1"  "close" "1" }
+				"0" { "text" "Зайду позже."  "text_en" "I'll come back later."  "exit" "1"  "close" "1" }
+			}
+		}
+		"7"
+		{
+			"line"    "Теперь — дороже. За то, что спросили."
+			"line_en" "Now it's more. For asking."
+			"options"
+			{
+				"0" { "text" "...Понятно."  "text_en" "...Right."  "next" "1" }
+			}
+		}
+		"8"
+		{
+			"line"    "На сегодня торг закрыт. Берите или проходите."
+			"line_en" "No more haggling today. Buy or move along."
+			"emotion" "отводит взгляд"
+			"options"
+			{
+				"0" { "text" "Ладно."  "text_en" "All right."  "next" "1" }
+			}
+		}
+		"9"
+		{
+			"line"    "Ой. Ладно, милый, тебе — как всем. Только не плачь."
+			"line_en" "Oh. All right, sweetie, you pay what everyone pays. Just don't cry."
+			"options"
+			{
+				"0" { "text" "Не буду."  "text_en" "I won't."  "next" "1" }
+			}
+		}
+		"30"
+		{
+			"line"    "Уйди. У меня сканер над головой."
+			"line_en" "Go away. I've got a scanner over my head."
+			"emotion" "тихо, не поднимая глаз"
+			"options"
+			{
+				"0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" }
+			}
+		}
+		"31"
+		{
+			"line"    "Карта не обслуживается. Распоряжение. Не я придумала."
+			"line_en" "Your card isn't served here. Orders. Not mine."
+			"options"
+			{
+				"0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" }
+			}
+		}
+	}
+}

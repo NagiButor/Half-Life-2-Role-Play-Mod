@@ -1,0 +1,47 @@
+// Барни Калхун в казарме «Опоры» (C17-08). GO-01, сцена 2, узел 3 «Койка» (Part V/04); дальше - GO-04 и «Тёмное».
+"Dialog"
+{
+	"entity"        "npc_barney"
+	"voice"         "barney"
+	"speaker"       "Юнит с банкой"   "speaker_en" "Unit with a Can"
+	"auto_face_npc" "1"
+
+	"greetings"
+	{
+		"1" { "require_flag" "dlg_spoken_npc_barney"  "node" "10" }
+		"2" { "node" "1" }
+	}
+
+	"nodes"
+	{
+		"1"
+		{
+			"line"    "Новенький? Держись меня... хотя нет, лучше не держись."
+			"line_en" "New guy? Stick with me... actually, no. Better not."
+			"emotion" "сидит на койке, крутит в руках пустую банку"
+			"options"
+			{
+				"1" { "text" "Это почему?"  "text_en" "Why not?"  "next" "2" }
+				"0" { "text" "Учту."  "text_en" "Noted."  "exit" "1"  "close" "1" }
+			}
+		}
+		"2"
+		{
+			"line"    "Потому что меня тут все знают. А тех, кого все знают, первыми и проверяют. Твоя койка — у окна. Окно не открывается. Как и всё остальное."
+			"line_en" "Because everybody here knows me. And whoever everybody knows gets checked first. Your bunk's by the window. The window doesn't open. Same as everything else."
+			"options"
+			{
+				"0" { "text" "Спасибо."  "text_en" "Thanks."  "exit" "1"  "close" "1" }
+			}
+		}
+		"10"
+		{
+			"line"    "Иди спи, рекрут. Утром построение, и Шульц считает по головам."
+			"line_en" "Go get some sleep, recruit. Roll call in the morning, and Schulz counts heads."
+			"options"
+			{
+				"0" { "text" "(Кивнуть)"  "text_en" "(Nod)"  "exit" "1"  "close" "1" }
+			}
+		}
+	}
+}

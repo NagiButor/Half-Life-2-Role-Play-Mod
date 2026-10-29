@@ -22,6 +22,7 @@
 #include "filesystem.h"
 #include "datacache/idatacache.h"
 #include "SoundEmitterSystem/isoundemittersystembase.h"
+#include "hl2rpm/rpg_screen.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -904,6 +905,10 @@ void CHudCloseCaption::TogglePaintDebug()
 //-----------------------------------------------------------------------------
 void CHudCloseCaption::Paint( void )
 {
+	// HL2RPM: a full-screen RPG screen (trade, bracelet, citizen card) covers the world - the captions of
+	// whatever plays behind it (Breencasts) would show through its semi-transparent window
+	if ( RPGScreen_AnyOpen() )
+		return;
 	int w, h;
 	GetSize( w, h );
 

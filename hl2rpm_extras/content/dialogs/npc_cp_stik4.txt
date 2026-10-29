@@ -1,0 +1,106 @@
+// Юнит ГО «Стик-4» у раздатчика во дворе Квартала 7 - первая выдача пайка (Part V/01 MQ-01 сцена 2).
+"Dialog"
+{
+	"entity"        "npc_cp_stik4"
+	"voice"         "cp"
+	"speaker"       "Юнит ГО «Стик-4», раздача"   "speaker_en" "CP Unit “Stick-4”, Rations"
+	"auto_face_npc" "1"
+	"greetings"
+	{
+		"1" { "require_flag" "mq01_ration_done"  "node" "20" }
+		"2" { "require_suspicion" ">=25"  "node" "2" }
+		"3" { "require_item" "item_ration_coupon"  "node" "1" }
+		"4" { "node" "3" }
+	}
+	"nodes"
+	{
+		"1"
+		{
+			"vo"      "MQ01_S2_N1_STIK4"
+			"line"    "Талон. Браслет. ...Временный. Паёк, вода. Следующий."
+			"line_en" "Coupon. Bracelet. ...Temporary. One ration, one water. Next."
+			"emotion" "монотонно, без пауз; вокодер"
+			"options"
+			{
+				"1" { "text" "(Взять паёк и воду)"  "text_en" "(Take the ration and the water)"  "next" "10"  "take_item" "item_ration_coupon"  "give_item" "item_ration, item_water_can" }
+				"2" { "text" "А завтра?"  "text_en" "And tomorrow?"  "next" "11"  "take_item" "item_ration_coupon"  "give_item" "item_ration, item_water_can" }
+				"3" { "text" "Спасибо за порядок."  "text_en" "Thank you for keeping order."  "require_perk" "PK-02"  "next" "12"  "take_item" "item_ration_coupon"  "give_item" "item_ration, item_water_can"  "civil" "+1" }
+				"4" { "text" "(Старика за спиной гонят без талона) Отдайте мою долю ему."  "text_en" "(An old man behind you is being turned away without a coupon) Give my share to him."  "require_humanity" ">=61"  "next" "13"  "take_item" "item_ration_coupon"  "give_item" "item_water_can"  "humanity" "+2" }
+				"5" { "text" "А можно две? Я большой."  "text_en" "Can I have two? I'm big."  "require_attr" "ANA<=3"  "hide_if_unmet" "1"  "next" "14"  "take_item" "item_ration_coupon"  "give_item" "item_ration, item_water_can"  "disposition_npc" "npc_rosario:+5" }
+				"6" { "text" "И это всё?"  "text_en" "Is that all?"  "next" "15"  "take_item" "item_ration_coupon"  "give_item" "item_ration, item_water_can"  "suspicion" "+5" }
+			}
+		}
+		"2"
+		{
+			"vo"      "MQ01_S2_N2_STIK4"
+			"line"    "Временный. В сторону. Досмотр. ...Чисто. Талон давай."
+			"line_en" "Temporary. Step aside. Search. ...Clean. Coupon, then."
+			"auto_next" "1"
+		}
+		"3"
+		{
+			"vo"      "MQ01_S2_N3_STIK4"
+			"line"    "Без талона нет выдачи. Следующий."
+			"line_en" "No coupon, no rations. Next."
+			"end"     "1"
+		}
+		"10"
+		{
+			"vo"      "MQ01_S2_N10_STIK4"
+			"line"    "Следующий."
+			"line_en" "Next."
+			"effects" { "set_flag" "mq01_ration_done" }
+			"end"     "1"
+		}
+		"11"
+		{
+			"vo"      "MQ01_S2_N11_STIK4"
+			"line"    "Карта - норма. Нет карты - нет нормы. Следующий."
+			"line_en" "Card - allowance. No card - no allowance. Next."
+			"effects" { "set_flag" "mq01_ration_done" }
+			"end"     "1"
+		}
+		"12"
+		{
+			"vo"      "MQ01_S2_N12_STIK4"
+			"line"    "...Порядок - не за что."
+			"line_en" "...Order needs no thanks."
+			"emotion" "заминка в вокодере"
+			"effects" { "set_flag" "mq01_ration_done" }
+			"end"     "1"
+		}
+		"13"
+		{
+			"vo"      "MQ01_S2_N13_STIK4"
+			"line"    "Перераспределение запрещено. ...Я смотрю на сканер."
+			"line_en" "Redistribution is prohibited. ...I'm looking at the scanner."
+			"emotion" "отворачивается - старик успевает взять паёк"
+			"effects" { "set_flag" "mq01_ration_done" }
+			"end"     "1"
+		}
+		"14"
+		{
+			"vo"      "MQ01_S2_N14_STIK4"
+			"line"    "Рост не учитывается."
+			"line_en" "Height is not a factor."
+			"emotion" "Росарио из очереди суёт герою сухарь: «Ешь, anak»"
+			"effects" { "set_flag" "mq01_ration_done" }
+			"end"     "1"
+		}
+		"15"
+		{
+			"vo"      "MQ01_S2_N15_STIK4"
+			"line"    "Претензии - письменно, в Администрацию."
+			"line_en" "Complaints - in writing, to the Administration."
+			"effects" { "set_flag" "mq01_ration_done" }
+			"end"     "1"
+		}
+		"20"
+		{
+			"vo"      "MQ01_S2_N20_STIK4"
+			"line"    "Норма выдана. Следующая выдача - по графику. Не задерживай очередь."
+			"line_en" "Allowance issued. Next issue - on schedule. Don't hold up the queue."
+			"end"     "1"
+		}
+	}
+}

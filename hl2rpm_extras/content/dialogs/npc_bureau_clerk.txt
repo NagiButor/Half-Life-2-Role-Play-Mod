@@ -1,0 +1,91 @@
+// Клерк Бюро трудовых ресурсов (генерик), пристройка Администрации у площади (Part V/01 MQ-01 сцена 3, V/11 GN-WK 1).
+"Dialog"
+{
+	"entity"        "npc_bureau_clerk"
+	"voice"         "clerk"
+	"speaker"       "Клерк Бюро трудовых ресурсов"   "speaker_en" "Labour Bureau Clerk"
+	"auto_face_npc" "1"
+	"greetings"
+	{
+		"1" { "require_flag" "mq01_shift_done"  "node" "20" }
+		"2" { "require_item" "item_work_order"  "node" "21" }
+		"3" { "require_flag" "mq00_registered"  "node" "1" }
+		"4" { "node" "30" }
+	}
+	"nodes"
+	{
+		"1"
+		{
+			"vo"      "MQ01_S3_N1_CLERK"
+			"line"    "Временный? Только разовые. Грузчик, вокзал, перрон три. Двадцать кредитов и отметка в статусе. Следующий."
+			"line_en" "Temporary? One-off jobs only. Loader, the station, platform three. Twenty credits and a note in your status. Next."
+			"emotion" "не поднимая глаз от бланков, скороговоркой"
+			"options"
+			{
+				"1" { "text" "Беру."  "text_en" "I'll take it."  "next" "2" }
+				"2" { "text" "А почище ничего нет?"  "text_en" "Nothing cleaner?"  "next" "3" }
+				"3" { "text" "Я грамотный. Может, писарем?"  "text_en" "I can read and write. Maybe as a clerk?"  "check" "skill:speech:25"  "in_quest" "1"  "next" "4"  "fail_next" "5" }
+				"4" { "text" "Я умею носить."  "text_en" "I can carry things."  "require_attr" "ANA<=3"  "hide_if_unmet" "1"  "next" "6"  "set_flag" "mq01_diligent" }
+				"0" { "text" "Потом."  "text_en" "Later."  "exit" "1"  "close" "1" }
+			}
+		}
+		"2"
+		{
+			"vo"      "MQ01_S3_N2_CLERK"
+			"line"    "Наряд. Перрон три, бригадир Сундберг. Не потеряйте - второго не дам."
+			"line_en" "Work order. Platform three, foreman Sundberg. Don't lose it - you won't get another."
+			"effects" { "give_item" "item_work_order" }
+			"end"     "1"
+		}
+		"3"
+		{
+			"vo"      "MQ01_S3_N3_CLERK"
+			"line"    "С учётной картой - что угодно. С временным - ящики. Карта - в Регистрационном отделе."
+			"line_en" "With a registration card - anything you like. With a temporary pass - crates. Cards are at the Registration Office."
+			"auto_next" "2"
+		}
+		"4"
+		{
+			"vo"      "MQ01_S3_N4_CLERK"
+			"line"    "...С картой приходите - запишу в резерв писарей. А пока - ящики."
+			"line_en" "...Come back with a card - I'll put you down in the clerk reserve. For now - crates."
+			"effects" { "set_flag" "mq01_clerk_reserve" }
+			"auto_next" "2"
+		}
+		"5"
+		{
+			"vo"      "MQ01_S3_N5_CLERK"
+			"line"    "Грамотных - очередь. Ящики."
+			"line_en" "There's a queue of literate ones. Crates."
+			"auto_next" "2"
+		}
+		"6"
+		{
+			"vo"      "MQ01_S3_N6_CLERK"
+			"line"    "Вот и славно. Носите. Пометка «старательный»."
+			"line_en" "Good. Carry, then. I'll mark you as “diligent”."
+			"auto_next" "2"
+		}
+		"20"
+		{
+			"vo"      "MQ01_S3_N20_CLERK"
+			"line"    "Смена отмечена. Следующие наряды - с учётной картой. Следующий."
+			"line_en" "Shift recorded. Further orders - with a registration card. Next."
+			"end"     "1"
+		}
+		"21"
+		{
+			"vo"      "MQ01_S3_N21_CLERK"
+			"line"    "Наряд у вас. Перрон три. Что ещё?"
+			"line_en" "You have your order. Platform three. What else?"
+			"end"     "1"
+		}
+		"30"
+		{
+			"vo"      "MQ01_S3_N30_CLERK"
+			"line"    "Без регистрации наряды не выдаются. Окно четыре на вокзале."
+			"line_en" "No work orders without registration. Window four at the station."
+			"end"     "1"
+		}
+	}
+}

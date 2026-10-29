@@ -1,0 +1,527 @@
+// Тамара Ильинична Гук - регистратор, окно 4 (C17-01). MQ-00 сцена 5: регистрация и тест профпригодности
+// (создание персонажа), затем справочный хаб до MQ-02. Part V/01, Part I/02 §2.
+// Ответы теста - подсказки раскладки: флаги cg_<характеристика> (+/-), cg_tags - специализации;
+// Карточка гражданина (open_chargen) берёт их как начальную раскладку, игрок правит всё сам.
+// Фельдшер Сунил Митра говорит в узлах 101-111 (speaker/actor npc_mitra).
+"Dialog"
+{
+	"entity"        "npc_tamara"
+	"voice"         "tamara"
+	"speaker"       "Тамара Ильинична, окно 4"   "speaker_en" "Tamara Ilyinichna, Window 4"
+	"auto_face_npc" "1"
+	"greetings"
+	{
+		"0" { "require_flag" "mq02_done"  "node" "260" }
+		"5" { "require_quest_stage" "mq02_papers:1"  "require_noflag" "mq02_path=shareholders"  "node" "250" }
+		"6" { "require_flag" "mq02_mitra_cert"  "require_noflag" "mq02_path"  "node" "240" }
+		"1" { "require_flag" "mq00_registered"  "require_flag" "mq01_done"  "node" "210" }
+		"2" { "require_flag" "mq00_registered"  "node" "200" }
+		"3" { "require_flag" "mq00_card_done"  "node" "9" }
+		"4" { "node" "1" }
+	}
+	"nodes"
+	{
+		// ---------------- узел 1: документы ----------------
+		"1"
+		{
+			"vo"      "MQ00_S5_N1_TAMARA"
+			"line"    "Следующий. Документы."
+			"line_en" "Next. Papers."
+			"emotion" "устало, не поднимая глаз; за спиной портрет Брина"
+			"options"
+			{
+				"1" { "text" "У меня нет документов."  "text_en" "I don't have any papers."  "next" "2" }
+				"2" { "text" "Я... не помню, как сюда попал."  "text_en" "I... don't remember how I got here."  "next" "2" }
+				"3" { "text" "На перроне сказали - к вам."  "text_en" "They told me on the platform to come to you."  "next" "2" }
+				"4" { "text" "А вы кто такая?"  "text_en" "And who are you supposed to be?"  "next" "15"  "disposition" "-5" }
+			}
+		}
+		"15"
+		{
+			"vo"      "MQ00_S5_N15_TAMARA"
+			"line"    "Я - та, без кого вы отсюда не выйдете, милок."
+			"line_en" "I'm the one without whom you don't walk out of here, dear."
+			"emotion" "поднимает глаза поверх очков"
+			"auto_next" "2"
+		}
+
+		// ---------------- узел 2: «вас нет» ----------------
+		"2"
+		{
+			"vo"      "MQ00_S5_N2_TAMARA"
+			"line"    "Так. Прибытие - поезд семнадцать-ноль-четыре... в списке вас нет. В базе... вас нет. Вообще. Вы как будто не существуете. Ну ничего, у нас таких много. Фамилия, имя? Не помните? Ну хоть что-нибудь вспомните, у меня очередь."
+			"line_en" "Right. Arrival - train seventeen-oh-four... you're not on the list. In the database... you're not there. At all. As if you don't exist. Well, never mind, we get plenty like you. Surname, first name? Don't remember? Well, remember something, I've got a queue."
+			"emotion" "стучит по клавишам, хмурится, вздыхает"
+			"variants"
+			{
+				"1" { "require_flag" "mq00_platform_tone=rude"
+				      "line"    "Так. Прибытие - поезд семнадцать-ноль-четыре... в списке вас нет. В базе - тоже. Вы как будто не существуете. И сержант с перрона пишет: «грубил». За это у нас пока не сажают. Пока. Фамилия, имя?"
+				      "line_en" "Right. Arrival - train seventeen-oh-four... not on the list. Not in the database either. As if you don't exist. And the sergeant from the platform writes: “insolent”. We don't lock people up for that. Yet. Surname, first name?" }
+				"2" { "require_flag" "mq00_platform_tone=silent"
+				      "line"    "Так. Прибытие - поезд семнадцать-ноль-четыре... в списке вас нет. В базе - тоже. И пометка: «контакт затруднён». Говорить-то умеете? Фамилия, имя?"
+				      "line_en" "Right. Arrival - train seventeen-oh-four... not on the list. Not in the database either. And a note: “contact impaired”. Can you talk, at least? Surname, first name?" }
+			}
+			"options"
+			{
+				"1" { "text" "(Назвать имя - оно всплыло само)"  "text_en" "(Give a name - it just surfaced)"  "next" "3" }
+			}
+		}
+
+		// ---------------- узел 3: имя ----------------
+		"3"
+		{
+			"vo"      "MQ00_S5_N3_TAMARA"
+			"line"    "Латиницей, как положено по-союзному... Тьфу, опять имя с фамилией местами. Ладно, так даже солиднее."
+			"line_en" "In Union letters, as required... Ugh, name and surname swapped again. Fine, it looks more respectable that way."
+			"emotion" "печатает, ворчит себе под нос"
+			"options"
+			{
+				"1" { "text" "Это моё имя. Я уверен."  "text_en" "That's my name. I'm sure of it."  "next" "31" }
+				"2" { "text" "Не знаю, откуда оно взялось."  "text_en" "I don't know where it came from."  "next" "32" }
+				"3" { "text" "(Промолчать)"  "text_en" "(Say nothing)"  "next" "4" }
+			}
+		}
+		"31"
+		{
+			"vo"      "MQ00_S5_N31_TAMARA"
+			"line"    "Все так говорят. А потом оказывается - правда своё."
+			"line_en" "Everyone says that. And then it turns out it really is theirs."
+			"auto_next" "4"
+		}
+		"32"
+		{
+			"vo"      "MQ00_S5_N32_TAMARA"
+			"line"    "Пришло - значит, ваше. Чужие имена в голову не приходят."
+			"line_en" "It came to you - so it's yours. Other people's names don't just come to you."
+			"auto_next" "4"
+		}
+
+		// ---------------- узел 4: тест ----------------
+		"4"
+		{
+			"vo"      "MQ00_S5_N4_TAMARA"
+			"line"    "Теперь тест профпригодности Бюро трудовых ресурсов. Медосмотр - направо, логика - налево, наблюдательность - у стенда. Не бойтесь, у нас ещё никто не умер. ...На тесте."
+			"line_en" "Now the Labour Resources Bureau aptitude test. Medical to the right, logic to the left, observation at the stand. Don't worry, nobody's died here yet. ...During the test."
+			"emotion" "дежурно; последняя фраза - после паузы, сухо"
+			"auto_next" "101"
+		}
+		// медосмотр - фельдшер Митра
+		"101"
+		{
+			"vo"      "MQ00_S5_N101_MITRA"
+			"voice"   "mitra"
+			"actor"   "npc_mitra"
+			"speaker" "Фельдшер Сунил Митра"   "speaker_en" "Medic Sunil Mitra"
+			"line"    "Динамометр. Сожмите. ...Теперь ступенька, три минуты. Станет плохо - скажите, я запишу «плохо»."
+			"line_en" "Dynamometer. Squeeze. ...Now the step test, three minutes. If you feel bad, say so, I'll write down “bad”."
+			"emotion" "в маске, смертельно скучно"
+			"options"
+			{
+				"1" { "text" "(Сжать изо всех сил)"  "text_en" "(Squeeze with all your strength)"  "next" "103"  "add_flag" "cg_might:+1" }
+				"2" { "text" "(Шагать до конца - и ещё минуту)"  "text_en" "(Keep stepping to the end - and one more minute)"  "next" "103"  "add_flag" "cg_spirit:+1" }
+				"3" { "text" "«Мне уже плохо»."  "text_en" "“I already feel bad.”"  "next" "102"  "add_flag" "cg_spirit:-1" }
+			}
+		}
+		"102"
+		{
+			"vo"      "MQ00_S5_N102_MITRA"
+			"voice"   "mitra"
+			"actor"   "npc_mitra"
+			"speaker" "Фельдшер Сунил Митра"   "speaker_en" "Medic Sunil Mitra"
+			"line"    "Записал: плохо."
+			"line_en" "Noted: bad."
+			"auto_next" "103"
+		}
+		"103"
+		{
+			"vo"      "MQ00_S5_N103_MITRA"
+			"voice"   "mitra"
+			"actor"   "npc_mitra"
+			"speaker" "Фельдшер Сунил Митра"   "speaker_en" "Medic Sunil Mitra"
+			"line"    "Ловите линейку. Не сейчас. ...Сейчас."
+			"line_en" "Catch the ruler. Not yet. ...Now."
+			"options"
+			{
+				"1" { "text" "(Поймать сразу)"  "text_en" "(Catch it at once)"  "next" "104"  "add_flag" "cg_agility:+1" }
+				"2" { "text" "(Поймать у самого пола)"  "text_en" "(Catch it just above the floor)"  "next" "104" }
+				"3" { "text" "«Упадёт - подниму»."  "text_en" "“If it falls, I'll pick it up.”"  "next" "104"  "add_flag" "cg_agility:-1" }
+			}
+		}
+		// наблюдательность - два плаката Брина
+		"104"
+		{
+			"vo"      "MQ00_S5_N104_TAMARA"
+			"line"    "Два плаката. Найдите пять отличий. Не торопитесь, но и не спите."
+			"line_en" "Two posters. Find five differences. Take your time, but don't fall asleep."
+			"emotion" "кивает на стенд с двумя одинаковыми Бринами"
+			"options"
+			{
+				"1" { "text" "(Найти все пять)"  "text_en" "(Find all five)"  "next" "106"  "add_flag" "cg_vigilance:+1" }
+				"2" { "text" "(Найти три и сдаться)"  "text_en" "(Find three and give up)"  "next" "106"  "add_flag" "cg_vigilance:-1" }
+				"3" { "text" "(Отметить шестое: в окне на плакате стоит человек в костюме)"  "text_en" "(Mark a sixth: a man in a suit stands in a window on the poster)"  "next" "105"  "add_flag" "cg_vigilance:+1"  "set_flag" "mq00_poster_suit" }
+			}
+		}
+		"105"
+		{
+			"vo"      "MQ00_S5_N105_TAMARA"
+			"line"    "Шесть? Отличий пять. ...Где? В окне? Нет там никого. Вам показалось."
+			"line_en" "Six? There are five differences. ...Where? In the window? There's nobody there. You imagined it."
+			"emotion" "смотрит, хмурится, отмахивается"
+			"auto_next" "106"
+		}
+		// логика - «Методичка гражданина»
+		"106"
+		{
+			"vo"      "MQ00_S5_N106_TAMARA"
+			"line"    "Логика. «Методичка гражданина», задача три. Паёк - тысяча четыреста калорий. Норма для работы - две тысячи пятьсот. Какова недостача?"
+			"line_en" "Logic. “Citizen's Handbook”, problem three. A ration is one thousand four hundred calories. The work norm is two thousand five hundred. What is the shortfall?"
+			"emotion" "читает с листа ровным казённым голосом"
+			"options"
+			{
+				"1" { "text" "Тысяча сто."  "text_en" "Eleven hundred."  "next" "107"  "add_flag" "cg_analytics:+1" }
+				"2" { "text" "Недостачи нет."  "text_en" "There is no shortfall."  "next" "108" }
+				"3" { "text" "Я не умею считать... кажется."  "text_en" "I can't count... I think."  "next" "109"  "add_flag" "cg_analytics:-2" }
+			}
+		}
+		"107"
+		{
+			"vo"      "MQ00_S5_N107_TAMARA"
+			"line"    "По ключу правильный ответ - «недостачи нет». ...Засчитаю. Никому не говорите."
+			"line_en" "According to the key, the correct answer is “there is no shortfall”. ...I'll count it. Don't tell anyone."
+			"emotion" "сверяется с ключом; пауза; шёпотом"
+			"effects" { "disposition" "+5" }
+			"auto_next" "110"
+		}
+		"108"
+		{
+			"vo"      "MQ00_S5_N108_TAMARA"
+			"line"    "Правильно. По ключу."
+			"line_en" "Correct. According to the key."
+			"auto_next" "110"
+		}
+		"109"
+		{
+			"vo"      "MQ00_S5_N109_TAMARA"
+			"line"    "Ничего. За вас посчитают."
+			"line_en" "Never mind. They'll do the counting for you."
+			"auto_next" "110"
+		}
+
+		// ---------------- узел 5: собеседование ----------------
+		"110"
+		{
+			"vo"      "MQ00_S5_N110_TAMARA"
+			"line"    "Цель прибытия?"
+			"line_en" "Purpose of arrival?"
+			"options"
+			{
+				"1" { "text" "Работать. Говорят, здесь нужны руки."  "text_en" "To work. They say hands are needed here."  "next" "120"  "add_flag" "cg_authority:+1" }
+				"2" { "text" "Не помню. Наверное, работа?"  "text_en" "I don't remember. Work, probably?"  "next" "120" }
+				"3" { "text" "Цель - выйти отсюда побыстрее."  "text_en" "Purpose - to get out of here as fast as I can."  "next" "111"  "add_flag" "cg_authority:+1"  "disposition" "-5" }
+				"4" { "text" "Это допрос?"  "text_en" "Is this an interrogation?"  "next" "112" }
+				"5" { "text" "Поезд привёз. Я ехал. Теперь пришёл."  "text_en" "Train brought me. I rode. Now I came."  "require_attr" "ANA<=3"  "hide_if_unmet" "1"  "next" "113"  "disposition" "+5" }
+			}
+		}
+		"111"
+		{
+			"vo"      "MQ00_S5_N111_TAMARA"
+			"line"    "Отсюда все выходят. Вопрос - куда."
+			"line_en" "Everyone gets out of here. The question is - where to."
+			"auto_next" "120"
+		}
+		"112"
+		{
+			"vo"      "MQ00_S5_N112_TAMARA"
+			"line"    "Это анкета. Допрос - через дверь, у сержанта."
+			"line_en" "This is a questionnaire. Interrogation is through that door, with the sergeant."
+			"auto_next" "120"
+		}
+		"113"
+		{
+			"vo"      "MQ00_S5_N113_TAMARA"
+			"line"    "...Ну, тоже цель."
+			"line_en" "...Well, that's a purpose too."
+			"emotion" "растерянно, мягче"
+			"auto_next" "120"
+		}
+
+		// ---------------- узел 6: специализации ----------------
+		"120"
+		{
+			"vo"      "MQ00_S5_N120_TAMARA"
+			"line"    "Кем вы видите себя в Трудовом корпусе?"
+			"line_en" "How do you see yourself in the Labour Corps?"
+			"options"
+			{
+				"1" { "text" "Рабочим. Руками работать проще."  "text_en" "A worker. Working with my hands is simpler."  "next" "130"  "set_flag" "mq00_work_wish=hands, cg_tags=repair+melee" }
+				"2" { "text" "Там, где думают."  "text_en" "Where people think."  "next" "130"  "set_flag" "mq00_work_wish=mind, cg_tags=science+hacking+medicine" }
+				"3" { "text" "Там, где разговаривают."  "text_en" "Where people talk."  "next" "130"  "set_flag" "mq00_work_wish=talk, cg_tags=speech+barter" }
+				"4" { "text" "Там, где не видно."  "text_en" "Where nobody sees."  "next" "121"  "set_flag" "mq00_work_wish=shadow, cg_tags=sneak+lockpick" }
+				"5" { "text" "Там, где стреляют."  "text_en" "Where people shoot."  "next" "122"  "set_flag" "mq00_work_wish=gun, cg_tags=firearms+pulse" }
+				"6" { "text" "Там, где выживают."  "text_en" "Where people survive."  "next" "123"  "set_flag" "mq00_work_wish=wild, cg_tags=survival+explosives" }
+				"7" { "text" "Где кормят."  "text_en" "Where they feed you."  "require_attr" "ANA<=3"  "hide_if_unmet" "1"  "next" "124"  "set_flag" "mq00_work_wish=food"  "disposition" "+5" }
+			}
+		}
+		"121"
+		{
+			"vo"      "MQ00_S5_N121_TAMARA"
+			"line"    "Туда все хотят, милок."
+			"line_en" "Everyone wants to go there, dear."
+			"auto_next" "130"
+		}
+		"122"
+		{
+			"vo"      "MQ00_S5_N122_TAMARA"
+			"line"    "Ну, это вам к ГО, милок. Но запишу."
+			"line_en" "Well, that's Civil Protection's business, dear. But I'll write it down."
+			"auto_next" "130"
+		}
+		"123"
+		{
+			"vo"      "MQ00_S5_N123_TAMARA"
+			"line"    "За стеной, что ли? Не говорите такое вслух."
+			"line_en" "Beyond the wall, you mean? Don't say that out loud."
+			"emotion" "оглядывается, понижает голос"
+			"auto_next" "130"
+		}
+		"124"
+		{
+			"vo"      "MQ00_S5_N124_TAMARA"
+			"line"    "...Где кормят. Честно. Так и запишу."
+			"line_en" "...Where they feed you. Honest. I'll write that down."
+			"emotion" "смеётся - впервые за смену"
+			"auto_next" "130"
+		}
+
+		// ---------------- узлы 7-8: «особенности» и Карточка гражданина ----------------
+		"130"
+		{
+			"vo"      "MQ00_S5_N130_TAMARA"
+			"line"    "И последнее - «особенности». Не стесняйтесь, все пишут. А потом карточка гражданина. Проверьте всё. Потом не переделаешь - бланки у нас по счёту."
+			"line_en" "And the last thing - “peculiarities”. Don't be shy, everybody fills it in. Then the citizen card. Check everything. You can't redo it afterwards - we count the forms."
+			"emotion" "протягивает бланк и ручку"
+			"options"
+			{
+				"1" { "text" "(Заполнить карточку гражданина)"  "text_en" "(Fill in the citizen card)"  "open_chargen" "1"  "next" "9" }
+			}
+		}
+
+		// ---------------- узел 9: подпись ----------------
+		"9"
+		{
+			"vo"      "MQ00_S5_N9_TAMARA"
+			"line"    "Распишитесь. Вот тут, где галочка."
+			"line_en" "Sign here. Right where the tick is."
+			"effects" { "set_flag" "mq00_card_done" }
+			"options"
+			{
+				"1" { "text" "(Расписаться)"  "text_en" "(Sign)"  "next" "10" }
+				"2" { "text" "(Расписаться и присмотреться к подписи)"  "text_en" "(Sign and look closely at the signature)"  "check" "attr:vigilance:6"  "in_quest" "1"  "next" "91"  "fail_next" "10" }
+				"3" { "text" "(Взять ручку, испугаться - и вдруг вывести ровные буквы) Я... умею. Надо же."  "text_en" "(Take the pen, panic - then suddenly write neat letters) I... can. How about that."  "require_attr" "ANA<=3"  "hide_if_unmet" "1"  "next" "93"  "disposition" "+5" }
+			}
+		}
+		"91"
+		{
+			"vo"      "MQ00_S5_N91_NARRATOR"
+			"speaker" "(Мысли)"   "speaker_en" "(Thoughts)"
+			"line"    "(Почерк тот же, что в записке из кармана. «Помни: ты не отсюда» - это написал ты сам.)"
+			"line_en" "(The handwriting is the same as on the note in your pocket. “Remember: you are not from here” - you wrote it yourself.)"
+			"emotion" "ремарка, не озвучивается"
+			"options"
+			{
+				"1" { "text" "...Это мой почерк."  "text_en" "...That's my handwriting."  "next" "92"  "set_flag" "note_handwriting" }
+			}
+		}
+		"92"
+		{
+			"vo"      "MQ00_S5_N92_TAMARA"
+			"line"    "Чей же ещё. В следующий раз помедленнее, я буквы не разберу."
+			"line_en" "Whose else would it be. Slower next time, I can't make out the letters."
+			"auto_next" "10"
+		}
+		"93"
+		{
+			"vo"      "MQ00_S5_N93_TAMARA"
+			"line"    "Умеете. Красиво даже."
+			"line_en" "You can. Beautifully, even."
+			"emotion" "тепло, удивлённо"
+			"auto_next" "10"
+		}
+
+		// ---------------- узел 10: печать ----------------
+		"10"
+		{
+			"vo"      "MQ00_S5_N10_TAMARA"
+			"line"    "Временный пропуск. Семнадцать-Т-ноль-четыре-пять-один. Семь дней. Квартал семь, дом три, комната одиннадцать. За неделю оформите учётную карту, иначе... иначе не советую."
+			"line_en" "Temporary pass. Seventeen-T-zero-four-five-one. Seven days. Block seven, house three, room eleven. Get your registration card within the week, or else... or else I wouldn't recommend it."
+			"emotion" "ставит печать; последние слова - понизив голос"
+			"effects"
+			{
+				"give_item" "item_temp_pass"
+				"credits"   "+40"
+				"set_flag"  "mq00_registered, civil_temp_pass, item_temp_pass_given"
+				"discover"  "C17-01"
+			}
+			"variants"
+			{
+				"1" { "require_trait" "TR-12"
+				      "line"    "Временный пропуск. Семнадцать-Т-ноль-четыре-пять-один. Семь дней. Квартал семь, дом три, комната одиннадцать. С такой анкетой карту оформите дня за три. Если поручитель найдётся."
+				      "line_en" "Temporary pass. Seventeen-T-zero-four-five-one. Seven days. Block seven, house three, room eleven. With a questionnaire like that you'll have your card in three days. If you find a sponsor." }
+				"2" { "require_trait" "TR-10"
+				      "line"    "Временный пропуск. Семнадцать-Т-ноль-четыре-пять-один. Семь дней. Квартал семь, дом три, комната одиннадцать. За неделю оформите учётную карту. ...И берегите себя. Не знаю, зачем я это сказала."
+				      "line_en" "Temporary pass. Seventeen-T-zero-four-five-one. Seven days. Block seven, house three, room eleven. Get your registration card within the week. ...And take care of yourself. I don't know why I said that." }
+				"3" { "require_attr" "ANA<=3"
+				      "line"    "Временный пропуск. Семь дней. Квартал семь, дом три, комната одиннадцать. Если что непонятно - ко мне. К четвёртому окну. Не к шестому, не к первому. Четыре. Запомнили?"
+				      "line_en" "Temporary pass. Seven days. Block seven, house three, room eleven. If anything's unclear - come to me. Window four. Not six, not one. Four. Got it?" }
+			}
+			"options"
+			{
+				"1" { "text" "Спасибо вам."  "text_en" "Thank you."  "next" "11" }
+				"2" { "text" "Вы устали. Отдохните, если получится."  "text_en" "You're tired. Get some rest, if you can."  "require_humanity" ">=61"  "next" "13"  "disposition" "+10" }
+				"3" { "text" "А что будет через семь дней?"  "text_en" "And what happens in seven days?"  "next" "12" }
+				"4" { "text" "Иначе - что? Договаривайте."  "text_en" "Or else - what? Finish the sentence."  "next" "12" }
+				"0" { "text" "Ухожу."  "text_en" "I'm leaving."  "exit" "1"  "close" "1" }
+			}
+		}
+		"11"
+		{
+			"vo"      "MQ00_S5_N11_TAMARA"
+			"line"    "Идите, идите. Следующий!"
+			"line_en" "Go on, go on. Next!"
+			"end"     "1"
+		}
+		"12"
+		{
+			"vo"      "MQ00_S5_N12_TAMARA"
+			"line"    "Через семь дней пропуск - бумажка. Человек без записи - «неопознанное лицо». Таких забирают. Куда - не знаю. ...Следующий!"
+			"line_en" "In seven days the pass is just paper. A person with no record is an “unidentified individual”. They take those away. Where to - I don't know. ...Next!"
+			"emotion" "тихо и быстро; последнее слово - громко, для очереди"
+			"end"     "1"
+		}
+		"13"
+		{
+			"vo"      "MQ00_S5_N13_TAMARA"
+			"line"    "Здесь не получается, милок. Но спасибо, что заметили."
+			"line_en" "That doesn't happen here, dear. But thank you for noticing."
+			"emotion" "снимает очки, на секунду - просто усталая женщина"
+			"end"     "1"
+		}
+
+		// ---------------- после регистрации ----------------
+		"200"
+		{
+			"vo"      "MQ00_S5_N200_TAMARA"
+			"line"    "Опять вы, милок? Пропуск у вас есть, семь дней я помню. Что ещё?"
+			"line_en" "You again, dear? You've got your pass, seven days, I remember. What else?"
+			"options"
+			{
+				"1" { "text" "Как найти Квартал 7?"  "text_en" "How do I find Block 7?"  "next" "201" }
+				"2" { "text" "Что такое учётная карта?"  "text_en" "What's a registration card?"  "next" "202" }
+				"0" { "text" "Ничего. До свидания."  "text_en" "Nothing. Goodbye."  "exit" "1"  "close" "1" }
+			}
+		}
+		"201"
+		{
+			"vo"      "MQ00_S5_N201_TAMARA"
+			"line"    "Через КПП - на площадь, оттуда арка во дворы. У арки юнит стоит, молоденький, он покажет. Только не бегите - сканеры этого не любят."
+			"line_en" "Through the checkpoint to the square, then the arch into the courtyards. There's a unit by the arch, a young one, he'll show you. Just don't run - the scanners don't like that."
+			"auto_next" "200"
+		}
+		"202"
+		{
+			"vo"      "MQ00_S5_N202_TAMARA"
+			"line"    "Ваша жизнь, милок. Без неё - ни работы, ни пайка, ни трамвая. Оформляют в Регистрационном отделе. Только для этого нужна запись о переселении, а у вас... ну, вы знаете."
+			"line_en" "Your life, dear. Without it - no work, no rations, no tram. The Registration Office issues them. Only you need a resettlement record for that, and you... well, you know."
+			"auto_next" "200"
+		}
+		"210"
+		{
+			"vo"      "MQ02_S1_N210_TAMARA"
+			"line"    "А, временный. Пропуск-то тикает, милок. Без записи о переселении карту вам не дадут. Нужен поручитель - или запись. Сами понимаете, я вам этого не говорила."
+			"line_en" "Ah, the temporary one. Your pass is ticking, dear. They won't give you a card without a resettlement record. You need a sponsor - or a record. You understand, I didn't tell you that."
+			"emotion" "шёпотом, оглядываясь на сержанта"
+			"options"
+			{
+				"1" { "text" "Где найти поручителя?"  "text_en" "Where do I find a sponsor?"  "next" "211"  "grant_quest" "mq02_papers" }
+				"2" { "text" "А если... запись сделать самому?"  "text_en" "And if... I made the record myself?"  "next" "212"  "grant_quest" "mq02_papers" }
+				"3" { "text" "Я... не понимаю. Помогите."  "text_en" "I... don't understand. Help me."  "require_attr" "ANA<=3"  "hide_if_unmet" "1"  "next" "213"  "grant_quest" "mq02_papers" }
+				"0" { "text" "Я подумаю."  "text_en" "I'll think about it."  "exit" "1"  "close" "1" }
+			}
+		}
+		"211"
+		{
+			"vo"      "MQ02_S1_N211_TAMARA"
+			"line"    "Администрация любит активных. Сходите в Бюро, на собрание двора, примелькайтесь. Лорх подписывает тем, кого знает. Других путей я не знаю. И знать не хочу."
+			"line_en" "The Administration likes active citizens. Go to the Bureau, to the courtyard meeting, get noticed. Lorch signs for people he knows. I don't know any other ways. And I don't want to."
+			"emotion" "последнее - громче, для очереди"
+			"end"     "1"
+		}
+		"212"
+		{
+			"vo"      "MQ02_S1_N212_TAMARA"
+			"line"    "Терминал у меня за спиной, милок. И сканер над залом, ночью тоже. Я вам ничего не говорила. Следующий!"
+			"line_en" "The terminal is behind me, dear. And there's a scanner above the hall, at night too. I didn't tell you anything. Next!"
+			"effects" { "set_flag" "mq02_hint_terminal" }
+			"end"     "1"
+		}
+		"213"
+		{
+			"vo"      "MQ02_S1_N213_TAMARA"
+			"line"    "Ох, милок... Есть графа «ограниченно трудоспособный». Нужна справка от фельдшера - Митра у нас добрый, если не будить. Принесёте - оформлю сама."
+			"line_en" "Oh, dear... There's a category, “limited work capacity”. You need a certificate from the medic - Mitra is kind, as long as you don't wake him. Bring it - I'll do the paperwork myself."
+			"emotion" "мягко, как ребёнку"
+			"effects" { "set_flag" "mq02_path_simple_hint" }
+			"end"     "1"
+		}
+			// ---------------- MQ-02: путь простака, выдача карты, потом ----------------
+		"240"
+		{
+			"vo"      "MQ02_S5_N240_TAMARA"
+			"line"    "Справка от Митры? Ну-ка... «ограниченно трудоспособен, категория В». Ох, милок. Ладно. Оформлю как обещала. Посидите, пока печать сохнет."
+			"line_en" "A certificate from Mitra? Let's see... “limited work capacity, category B”. Oh, dear. All right. I'll process it as I promised. Sit while the stamp dries."
+			"emotion" "растроганно, деловито"
+			"effects" { "set_flag" "mq02_path=simple" }
+			"auto_next" "250"
+		}
+		"250"
+		{
+			"vo"      "MQ02_S5_N250_TAMARA"
+			"line"    "Так... Запись есть. Не спрашиваю откуда. Учётная карта, доступ первый: работа, трамвай, полный паёк. Берегите её, милок - теперь это ваша жизнь."
+			"line_en" "So... There's a record now. I won't ask where it came from. Registration card, access level one: work, the tram, full rations. Take care of it, dear - it's your life now."
+			"emotion" "кладёт карту на стойку, задерживает ладонь на секунду"
+			"variants"
+			{
+				"1" { "require_flag" "mq02_path=lambda"
+				      "line"    "Так... Запись есть. Внёс... кто-то из своих, вижу по шифру. Не спрашиваю. Учётная карта, доступ первый. Берегите её, милок - и тех, кто вам помог."
+				      "line_en" "So... There's a record now. Entered by... one of ours, I can tell by the code. I won't ask. Registration card, access level one. Take care of it, dear - and of those who helped you." }
+				"2" { "require_flag" "mq02_path=hack"
+				      "line"    "Так... Запись есть. Ночью появилась, представляете? Совпадение с архивом. Бывает же. Учётная карта, доступ первый. И, милок... не делайте так больше."
+				      "line_en" "So... There's a record now. It appeared overnight, can you imagine? A match in the archive. These things happen. Registration card, access level one. And, dear... don't do that again." }
+				"3" { "require_flag" "mq02_path=simple"
+				      "line"    "Вот. Учётная карта, категория В, доступ первый. Работа попроще, но паёк полный. Если что непонятно - к четвёртому окну. Ко мне."
+				      "line_en" "Here. Registration card, category B, access level one. Simpler work, but full rations. If anything's unclear - window four. To me." }
+			}
+			"effects" { "give_item" "item_account_card" }
+			"options"
+			{
+				"1" { "text" "Спасибо вам, Тамара Ильинична."  "text_en" "Thank you, Tamara Ilyinichna."  "next" "251"  "disposition" "+5" }
+				"0" { "text" "(Взять карту)"  "text_en" "(Take the card)"  "exit" "1"  "close" "1" }
+			}
+		}
+		"251"
+		{
+			"vo"      "MQ02_S5_N251_TAMARA"
+			"line"    "Идите уже. Следующий!"
+			"line_en" "Off you go. Next!"
+			"emotion" "отмахивается, но улыбается"
+			"end"     "1"
+		}
+		"260"
+		{
+			"vo"      "MQ02_S5_N260_TAMARA"
+			"line"    "Карта при вас? Вот и хорошо. Не теряйте - второй раз так не повезёт."
+			"line_en" "Got your card on you? Good. Don't lose it - you won't be this lucky twice."
+			"end"     "1"
+		}
+	}
+}

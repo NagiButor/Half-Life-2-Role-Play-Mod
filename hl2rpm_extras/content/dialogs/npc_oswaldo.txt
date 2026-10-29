@@ -1,0 +1,63 @@
+// Освальдо Рейес, 78, кв. 4 дома 7/3 (Part V/01 MQ-01, Part V/08 SQ-19). Бывший радиоинженер из Вальпараисо, прячет радио.
+"Dialog"
+{
+	"entity"        "npc_oswaldo"
+	"voice"         "oswaldo"
+	"speaker"       "Освальдо Рейес, кв. 4"   "speaker_en" "Oswaldo Reyes, Apt. 4"
+	"auto_face_npc" "1"
+	"greetings"
+	{
+		"1" { "require_flag" "dlg_spoken_npc_oswaldo"  "node" "10" }
+		"2" { "node" "1" }
+	}
+	"nodes"
+	{
+		"1"
+		{
+			"vo"      "MQ01_S1_N1_OSWALDO"
+			"line"    "Buenos días... то есть доброе утро. Простите, у меня радио... ...радикулит."
+			"line_en" "Buenos días... I mean, good morning. Forgive me, my radio... ...my rheumatism."
+			"emotion" "медленно, осекается на полуслове, испуганно поправляется"
+			"options"
+			{
+				"1" { "text" "Радио?"  "text_en" "Radio?"  "next" "2" }
+				"2" { "text" "У меня тоже радикулит. Наверное."  "text_en" "I have rheumatism too. Probably."  "require_attr" "ANA<=3"  "hide_if_unmet" "1"  "next" "3"  "disposition" "+5" }
+				"3" { "text" "Доброе утро. Я из одиннадцатой."  "text_en" "Good morning. I'm from number eleven."  "next" "4" }
+				"0" { "text" "(Кивнуть и пройти)"  "text_en" "(Nod and walk on)"  "exit" "1"  "close" "1" }
+			}
+		}
+		"2"
+		{
+			"vo"      "MQ01_S1_N2_OSWALDO"
+			"line"    "Радикулит, сеньор. Только радикулит."
+			"line_en" "Rheumatism, señor. Only rheumatism."
+			"emotion" "слишком быстро; смотрит на свою дверь"
+			"effects" { "set_flag" "sq19_hint" }
+			"end"     "1"
+		}
+		"3"
+		{
+			"vo"      "MQ01_S1_N3_OSWALDO"
+			"line"    "Тогда мы друзья, hijo. Заходите, когда спина отпустит. Только тихо."
+			"line_en" "Then we are friends, hijo. Come by when your back lets go. Only quietly."
+			"emotion" "тепло, с облегчением"
+			"effects" { "set_flag" "sq19_hint" }
+			"end"     "1"
+		}
+		"4"
+		{
+			"vo"      "MQ01_S1_N4_OSWALDO"
+			"line"    "Одиннадцатая... Escucha, там был хороший человек до вас. Слушал по вечерам... тишину. Вы тоже слушайте. Тишина многое рассказывает."
+			"line_en" "Number eleven... Escucha, there was a good man there before you. In the evenings he listened to... the silence. You listen too. Silence tells you a lot."
+			"emotion" "значительно, с морской неторопливостью"
+			"end"     "1"
+		}
+		"10"
+		{
+			"vo"      "MQ01_S1_N10_OSWALDO"
+			"line"    "А, сосед. Gracias, что заглянули. Спина - как море в шторм."
+			"line_en" "Ah, neighbour. Gracias for stopping by. My back is like the sea in a storm."
+			"end"     "1"
+		}
+	}
+}

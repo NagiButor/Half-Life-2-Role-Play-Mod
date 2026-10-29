@@ -1,0 +1,30 @@
+// HL2RPM: торговцы (RPG_SPEC §2). NPC получает ключ rpg_trader <id>; окно - open_barter.
+//   credits - касса, buy_mult/sell_mult - поверх формулы Торговли, contraband - берёт контрабанду
+"Traders"
+{
+	"kiosk_obespechenie"            // ларёк «Обеспечение» на площади
+	{
+		"faction" "admin" "credits" "300" "buy_mult" "1.0" "sell_mult" "0.8"
+		"items" { "item_water_can" "12" "item_ration" "4" "item_chocolate" "1" }
+	}
+	"kiosk_blagodarnost"            // ларёк «Благодарность» на привокзальной площади (Илона Сандерс, Part V/04 AD-03)
+	{
+		"faction" "citizen" "credits" "250" "buy_mult" "1.0" "sell_mult" "0.85"
+		"items" { "item_water_can" "10" "item_ration" "3" "item_chocolate" "1" "item_healthvial" "1" }
+	}
+	"water_seller"                  // торговка водой у фонтана
+	{
+		"faction" "citizen" "credits" "60" "buy_mult" "1.1" "sell_mult" "0.9"
+		"items" { "item_water_can" "6" }
+	}
+	"kadar"                         // Имре Кадар, баня: чёрный рынок Пайщиков
+	{
+		"faction" "shareholders" "credits" "1500" "buy_mult" "1.3" "sell_mult" "0.7" "contraband" "1"
+		"items" { "item_chocolate" "6" "item_lockpick" "5" "item_healthvial" "4" "item_healthkit" "1" }
+	}
+	"lukich"                        // часовщик Лукич: явка Лямбды, кое-что «из-под прилавка»
+	{
+		"faction" "lambda" "credits" "200" "buy_mult" "1.0" "sell_mult" "0.85" "contraband" "1"
+		"items" { "item_healthvial" "2" "item_battery" "2" }
+	}
+}
