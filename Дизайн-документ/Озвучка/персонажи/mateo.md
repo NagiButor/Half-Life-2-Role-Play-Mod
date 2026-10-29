@@ -31,6 +31,13 @@
 | 2 | Санитарный день. Приходите в другой. | Sanitary day. Come back another day. |
 | 3 | Старик сказал: тебя нет. А кого нет — того не пускают. | The old man said you don't exist. And those who don't exist don't get in. |
 
-## Реплики (0; записано RU 0, EN 0)
+## Реплики (6; записано RU 0, EN 0)
 
-_Реплик пока нет._
+| ID | Контекст (квест · NPC · узел) | RU | EN | Эмоция / ремарка |
+|---|---|---|---|---|
+| `D_NPC_MATEO_N1` | mq02_papers · npc_mateo · узел 1 | Санитарный день. Приходите в другой. | Sanitary day. Come back another time. | табличка «Бани. Санитарный день»; срезает с яблока кожуру одной лентой |
+| `D_NPC_MATEO_N2` | mq01_temp_pass · npc_mateo · узел 2 | Синий ящик звякнул? Значит, ты в списке. Заходи. | The blue crate rattled? Then you're on the list. Come in. |  |
+| `D_NPC_MATEO_N3` | mq02_papers · npc_mateo · узел 3 | Громко. Заходи тихо. | Loud. Come in quietly. |  |
+| `D_NPC_MATEO_N4` | sm01_bathhouse · npc_mateo · узел 4 | Уважаю. Но Старик уважает тихих. | Respect. But the Old Man respects the quiet ones. |  |
+| `D_NPC_MATEO_N5` | sm01_bathhouse · npc_mateo · узел 5 | ...Заходи, пока Ирма не передумала. | ...Come in, before Irma changes her mind. | лента кожуры обрывается |
+| `D_NPC_MATEO_N10` | sm01_bathhouse · npc_mateo · узел 10 | Старик сказал — заходи без стука. Стук он не любит, у него счёты от стука сбиваются. | The Old Man said — come in without knocking. He doesn't like knocking, it throws off his abacus. |  |

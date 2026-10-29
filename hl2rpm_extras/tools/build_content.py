@@ -99,7 +99,7 @@ VANILLA_ITEM_PREFIXES = ("weapon_", "item_ammo_", "item_box_")
 SPEC_QUESTS = ["mq00_arrival", "mq01_temp_pass", "mq02_papers", "sq01_can", "go01_volunteers",
                "lm01_lambda_sign", "sm01_bathhouse", "sq02_neighbors", "sq05_cat", "sq10_zenit",
                "sq17_separated"]
-SPEC_MAPS = {"rp_c17_01_trainstation", "rp_c17_02_plaza", "rp_c17_03_block7", "rp_c17_08_opora"}
+SPEC_MAPS = {"rp_c17_01_trainstation", "rp_c17_02_plaza", "rp_c17_03_block7", "rp_c17_04_oldtown", "rp_c17_08_opora"}
 SPEC_LOCATIONS = {"C17-00", "C17-01", "C17-02", "C17-03", "C17-04", "C17-07", "C17-08"}
 NO_VOICE = {"", "-", "—", "none", "text", "silent"}
 

@@ -1,0 +1,119 @@
+// Патруль ГО «Виктор-5» на мосту у набережной (C17-04). LM-01 «Знак лямбды», сцена 3 «Шлюз-3», узел 1 «Облава»
+// (Part V/05): с пачкой самиздата на мост - разговор начинает trigger_rpg rpg_lm01_raid. Итог - флаг lm01_route.
+"Dialog"
+{
+	"entity"        "npc_cp_victor5"
+	"voice"         "cp"
+	"speaker"       "ГО «Виктор-5»"   "speaker_en" "CP Unit Victor-5"
+	"auto_face_npc" "1"
+
+	"greetings"
+	{
+		"1" { "require_quest_stage" "lm01_lambda_sign:1"  "require_noflag" "lm01_route"  "node" "1" }
+		"2" { "node" "20" }
+	}
+
+	"nodes"
+	{
+		"1"
+		{
+			"line"    "Гражданин. Что несёшь?"
+			"line_en" "Citizen. What are you carrying?"
+			"emotion" "мост перекрыт; двое обыскивают тележки, третий разворачивает всех с толстыми сумками"
+			"options"
+			{
+				"1"
+				{
+					"text"          "Макулатуру, по наряду. В пункт вторсырья."
+					"text_en"       "Waste paper, on a work order. To the recycling point."
+					"check"         "lie:35"
+					"check_once"    "1"
+					"next"          "2"
+					"fail_next"     "3"
+					"on_success_xp" "9"
+					"on_success_set_flag" "lm01_route=deliver"
+					"on_fail_set_flag" "lm01_route=deliver, lm01_lie_failed"
+					"on_fail_suspicion" "+15"
+				}
+				"2"
+				{
+					"text"          "(По пожарной лестнице на крыши, над облавой)"
+					"text_en"       "(Up the fire escape onto the roofs, above the raid)"
+					"check"         "skill:sneak:35"
+					"check_once"    "1"
+					"next"          "4"
+					"fail_next"     "5"
+					"on_success_xp" "9"
+					"on_success_set_flag" "lm01_route=roofs"
+					"on_fail_set_flag" "lm01_route=deliver"
+					"on_fail_suspicion" "+10"
+				}
+				"3"
+				{
+					"text"          "Бумажки. Красивые. Мне дядя дал, чтобы держал."
+					"text_en"       "Papers. Pretty ones. My uncle gave them to me to hold."
+					"require_attr"  "ANA<=3"
+					"hide_if_unmet" "1"
+					"suspicion"     "-5"
+					"set_flag"      "lm01_route=simple"
+					"next"          "6"
+				}
+				"4"
+				{
+					"text"       "(Отдать пачку) Нашёл в подъезде. Возьмите."
+					"text_en"    "(Hand over the bundle) Found it in a stairwell. Take it."
+					"civil"      "+5"
+					"rep"        "lambda:-5"
+					"take_item"  "item_samizdat_package"
+					"set_flag"   "lm01_route=snitch"
+					"fail_quest" "lm01_lambda_sign"
+					"next"       "7"
+				}
+			}
+		}
+		"2"
+		{
+			"line"    "Проходи."
+			"line_en" "Move along."
+			"options" { "0" { "text" "(Пройти по мосту)"  "text_en" "(Cross the bridge)"  "exit" "1"  "close" "1" } }
+		}
+		"3"
+		{
+			"line"    "Развяжи. ...Это — изымается. Остальное — неси свою макулатуру."
+			"line_en" "Untie it. ...This is confiscated. The rest — carry your waste paper on."
+			"emotion" "выдёргивает часть пачки"
+			"options" { "0" { "text" "(Пройти по мосту)"  "text_en" "(Cross the bridge)"  "exit" "1"  "close" "1" } }
+		}
+		"4"
+		{
+			"line"    "(Жесть крыши не скрипнула ни разу. Внизу юнит разворачивает очередную тележку.)"
+			"line_en" "(The roof tin never creaks once. Below, a unit turns back another cart.)"
+			"options" { "0" { "text" "(Спуститься на том берегу)"  "text_en" "(Climb down on the far bank)"  "exit" "1"  "close" "1" } }
+		}
+		"5"
+		{
+			"line"    "(Жесть под ногой. ГО поднимает голову. Прыжок в канал — пачка мокрая, но цела.)"
+			"line_en" "(Tin under your foot. The unit looks up. A jump into the canal — the bundle is wet, but whole.)"
+			"options" { "0" { "text" "(Выбраться на том берегу)"  "text_en" "(Climb out on the far bank)"  "exit" "1"  "close" "1" } }
+		}
+		"6"
+		{
+			"line"    "Держи крепче, убогий. Проходи."
+			"line_en" "Hold on tight, simpleton. Move along."
+			"emotion" "смеётся"
+			"options" { "0" { "text" "(Пройти по мосту)"  "text_en" "(Cross the bridge)"  "exit" "1"  "close" "1" } }
+		}
+		"7"
+		{
+			"line"    "Гражданская сознательность отмечена."
+			"line_en" "Civic consciousness noted."
+			"options" { "0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" } }
+		}
+		"20"
+		{
+			"line"    "Проходи. Не задерживайся у моста."
+			"line_en" "Move along. Don't linger by the bridge."
+			"options" { "0" { "text" "(Кивнуть)"  "text_en" "(Nod)"  "exit" "1"  "close" "1" } }
+		}
+	}
+}

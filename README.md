@@ -25,10 +25,12 @@ tools, content sources, design document, FGD files and localization.
 | `rp_c17_02_plaza` | the station plaza with the Breen screen, the ration dispenser yard, the Labor Bureau annex, posts and patrols, a kiosk trader |
 | `rp_c17_03_block7` | Block 7, house 7/3: neighbours, TVs with Breencasts, your room 11 with a bed (sleep, save point) |
 | `rp_c17_08_opora` | the "Opora" Civil Protection precinct (former school No. 3): gym and range, barracks, cells, the duty desk |
+| `rp_c17_04_oldtown` | the Old Town: Klyuchevaya street, Lukich's watch workshop with the Lambda safehouse in its cellar, Kadar's bathhouse, the flea market, the canal embankment with a Civil Protection raid on the bridge, "Lock 3" |
 | `background_c17` | main menu background: the plaza at dusk, the street lamps come on |
 
 Quests of the slice: MQ-00 *Arrival*, MQ-01 *Temporary Pass*, MQ-02 *A Question of Papers*, SQ-01 *Pick Up That Can*,
-GO-01 *Volunteers* (join Civil Protection: tests and a loyalty check at "Opora").
+GO-01 *Volunteers* (join Civil Protection: tests and a loyalty check at "Opora"),
+LM-01 *Sign of the Lambda* (a samizdat run through a raid to "Lock 3"), SM-01 *The Bathhouse* (a parcel for Kadar's black market).
 Start from **New Game → Prologue: Arrival** or `map rp_c17_01_trainstation`.
 
 ## Features

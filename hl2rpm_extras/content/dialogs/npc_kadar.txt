@@ -1,0 +1,130 @@
+// Имре Кадар в парилке бани (C17-04), у двери - Ирма «Тишина». SM-01 «Баня», сцена 2 «Парилка» (Part V/06):
+// посылка Ружене Дворжаковой (приёмная Лорха, пристройка Бюро на площади). Торговец kadar (чёрный рынок).
+"Dialog"
+{
+	"entity"        "npc_kadar"
+	"voice"         "kadar"
+	"speaker"       "Имре Кадар"   "speaker_en" "Imre Kadar"
+	"auto_face_npc" "0"
+
+	"greetings"
+	{
+		"1" { "require_quest_state" "sm01_bathhouse:completed"  "node" "40" }
+		"2" { "require_quest_stage" "sm01_bathhouse:1"  "node" "30" }
+		"3" { "require_quest_state" "sm01_bathhouse:active"  "node" "1" }
+		"4" { "node" "50" }
+	}
+
+	"nodes"
+	{
+		"1"
+		{
+			"line"    "Садись. Пар — лучший адвокат: все голые, все честные. Ты человек без записи, мне сказали. Знаешь, сколько это стоит?"
+			"line_en" "Sit down. Steam is the best lawyer: everyone's naked, everyone's honest. You're a man without a record, they tell me. Do you know what that's worth?"
+			"emotion" "старик в простыне щёлкает счётами; венгерский выговор"
+			"options"
+			{
+				"1"
+				{
+					"text"          "Зависит от того, кто покупает."
+					"text_en"       "Depends on who's buying."
+					"check"         "barter:35"
+					"check_once"    "1"
+					"next"          "2"
+					"fail_next"     "3"
+					"on_success_xp" "9"
+				}
+				"2" { "text" "Я не знаю. А сколько стоит пар?"  "text_en" "I don't know. How much is the steam?"  "require_attr" "ANA<=3"  "hide_if_unmet" "1"  "next" "4" }
+				"3" { "text" "Сколько?"  "text_en" "How much?"  "next" "3" }
+			}
+		}
+		"2"
+		{
+			"line"    "Правильно!"
+			"line_en" "Correct!"
+			"emotion" "щёлкает счётами"
+			"options" { "0" { "text" "(Слушать)"  "text_en" "(Listen)"  "next" "3" } }
+		}
+		"4"
+		{
+			"line"    "Пар даром, дорогой. Дорого то, что в нём слышно."
+			"line_en" "The steam is free, my dear. What costs is what you hear in it."
+			"emotion" "смеётся до кашля"
+			"options" { "0" { "text" "(Слушать)"  "text_en" "(Listen)"  "next" "3" } }
+		}
+		"3"
+		{
+			"line"    "Человек без записи — либо очень плохо, либо очень дорого. А тех, кого прячут, обычно и ищут. Первое дело простое: посылка Ружене Дворжаковой, секретарше Лорха. Не открывать."
+			"line_en" "A man without a record is either very bad or very expensive. And the ones being hidden are usually the ones being looked for. The first job is simple: a parcel for Ruzhena Dvořáková, Lorch's secretary. Don't open it."
+			"options"
+			{
+				"1" { "text" "Что внутри?"  "text_en" "What's inside?"  "next" "5" }
+				"2"
+				{
+					"text"          "Вы проверяете не честность, а любопытство."
+					"text_en"       "You're not testing honesty, you're testing curiosity."
+					"check"         "skill:speech:50"
+					"check_once"    "1"
+					"next"          "6"
+					"fail_next"     "7"
+					"on_success_xp" "13"
+					"on_success_set_flag" "sm01_pay=2"
+				}
+				"3" { "text" "Берусь."  "text_en" "I'll take it."  "next" "8" }
+			}
+		}
+		"5"
+		{
+			"line"    "Будущее, дорогой. Немного будущего."
+			"line_en" "The future, my dear. A little bit of the future."
+			"options" { "0" { "text" "(Вернуться)"  "text_en" "(Back)"  "next" "3" } }
+		}
+		"6"
+		{
+			"line"    "Ирма, ты слышала? Умных я плачу вдвое."
+			"line_en" "Irma, did you hear that? Clever ones I pay double."
+			"options" { "0" { "text" "Берусь."  "text_en" "I'll take it."  "next" "8" } }
+		}
+		"7"
+		{
+			"line"    "Любопытство — дорогая привычка."
+			"line_en" "Curiosity is an expensive habit."
+			"options" { "0" { "text" "(Вернуться)"  "text_en" "(Back)"  "next" "3" } }
+		}
+		"8"
+		{
+			"line"    "Бюро трудовых ресурсов, приёмная господина Лорха. Ружена. Из рук в руки — и не через окно, дорогой: окно для очереди."
+			"line_en" "The Labor Bureau, Mr. Lorch's reception. Ruzhena. Hand to hand — and not through the window, my dear: the window is for the queue."
+			"emotion" "Ирма молча кладёт на скамью свёрток, запечатанный сургучом"
+			"effects" { "give_item" "item_kadar_package"  "set_flag" "sm01_task" }
+			"options" { "0" { "text" "(Взять посылку)"  "text_en" "(Take the parcel)"  "exit" "1"  "close" "1" } }
+		}
+		"30"
+		{
+			"line"    "Посылка ждёт Ружену, а не меня. Пар остывает, дорогой."
+			"line_en" "The parcel is waiting for Ruzhena, not for me. The steam is cooling, my dear."
+			"options" { "0" { "text" "Иду."  "text_en" "On my way."  "exit" "1"  "close" "1" } }
+		}
+		"40"
+		{
+			"line"    "Ружена сказала: мальчик тихий. Тихие у нас в цене."
+			"line_en" "Ruzhena said: the boy is quiet. Quiet ones are valued here."
+			"variants"
+			{
+				"1" { "require_flag" "sm01_done=kept"  "line" "Посылка — не вещь, а обещание. Ты его съел. Хильда зайдёт."  "line_en" "A parcel isn't a thing, it's a promise. You ate it. Hilda will drop by." }
+			}
+			"options"
+			{
+				"1" { "text" "Покажите товар."  "text_en" "Show me your goods."  "require_noflag" "sm01_done=kept"  "hide_if_unmet" "1"  "open_barter" "1"  "exit" "1"  "close" "1" }
+				"0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" }
+			}
+		}
+		"50"
+		{
+			"line"    "Ирма, у нас гости, которых я не звал."
+			"line_en" "Irma, we have guests I didn't invite."
+			"emotion" "не открывая глаз"
+			"options" { "0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" } }
+		}
+	}
+}

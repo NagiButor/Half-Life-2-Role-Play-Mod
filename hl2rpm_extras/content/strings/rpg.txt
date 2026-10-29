@@ -248,6 +248,7 @@
 	"RPG_Loc_C17-04"              { "ru" "Старый город"              "en" "Old Town" }
 	"RPG_Loc_C17-07"              { "ru" "Бюро трудовых ресурсов"    "en" "Labour Resources Bureau" }
 	"RPG_Loc_C17-08"              { "ru" "Участок «Опора»"           "en" "Precinct “Bulwark”" }
+	"RPG_Loc_C17-14"              { "ru" "«Шлюз-3»"                  "en" "Lock 3" }
 
 	// ---------------- торговцы ----------------
 	"RPG_Trader_kiosk_obespechenie" { "ru" "Ларёк «Обеспечение»"    "en" "“Provision” Kiosk" }

@@ -1,0 +1,41 @@
+// LM-01 «Знак лямбды» (Part III/10, Part V/05). T2, 300 XP, Акт I. Пароль у часовщика Лукича («часы с кукушкой»),
+// урок первый у Лейлы (подвал мастерской), пачка самиздата через облаву на мосту на «Шлюз-3», доверие.
+"Quest"
+{
+	"id"        "lm01_lambda_sign"
+	"category"  "faction"
+	"faction"   "lambda"
+	"title"     "Знак лямбды"   "title_en" "Sign of the Lambda"
+	"desc"      "Часовщик на Ключевой знает, к кому идти. В подвале его мастерской — явка Сопротивления."
+	"desc_en"   "The watchmaker on Klyuchevaya knows who to go to. Under his workshop is a Resistance safehouse."
+	"xp"        "300"
+	"act"       "1"
+	"auto_track" "1"
+	"complete_on_last_stage" "1"
+	"on_complete" { "rep" "lambda:+10"  "set_flag" "lm_rank=sympathizer" }
+	"stages"
+	{
+		"0"
+		{
+			"title" "Урок первый"   "title_en" "Lesson One"
+			"desc"  "Спуститься в подвал мастерской к Лейле Ланской."   "desc_en" "Go down to the workshop cellar to Leila Lanskaya."
+			"marker" "npc_leila"   "marker_map" "rp_c17_04_oldtown"
+			"objectives" { "1" { "type" "flag" "target" "lm01_task" } }
+		}
+		"1"
+		{
+			"title" "«Шлюз-3»"   "title_en" "Lock 3"
+			"desc"  "Донести пачку самиздата шлюзовщику на том берегу канала. На мосту — облава."
+			"desc_en" "Deliver the samizdat bundle to the lock keeper across the canal. There's a raid on the bridge."
+			"marker" "npc_ernesto"   "marker_map" "rp_c17_04_oldtown"
+			"objectives" { "1" { "type" "flag" "target" "lm01_delivered" } }
+		}
+		"2"
+		{
+			"title" "Доверие"   "title_en" "Trust"
+			"desc"  "Вернуться к Лейле."   "desc_en" "Return to Leila."
+			"marker" "npc_leila"   "marker_map" "rp_c17_04_oldtown"
+			"objectives" { "1" { "type" "flag" "target" "lm01_done" } }
+		}
+	}
+}

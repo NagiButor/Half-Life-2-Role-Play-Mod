@@ -32,7 +32,7 @@
 | 2 | Стоять. Руки — на стену. | Freeze. Hands on the wall. |
 | 3 | Без записи. Зал регистрации — прямо, окна с первого по шестое. Не задерживай поток. | No record. Registration hall straight ahead, windows one through six. Don't hold up the line. |
 
-## Реплики (47; записано RU 13, EN 13)
+## Реплики (53; записано RU 13, EN 13)
 
 | ID | Контекст (квест · NPC · узел) | RU | EN | Эмоция / ремарка |
 |---|---|---|---|---|
@@ -76,6 +76,12 @@
 | `SQ01_S2_N40_UNION12` | sq01_can · npc_cp_union12 · узел 40 | Я тебя помню. | I remember you. | постукивает дубинкой по ладони |
 | `SQ01_S2_N41_UNION12` | sq01_can · npc_cp_union12 · узел 41 | Проходи, гражданин. | Move along, citizen. | ваниль/готовый звук: npc/metropolice/vo/movealong3.wav |
 | `SQ01_S2_N42_UNION12` | sq01_can · npc_cp_union12 · узел 42 | Без пропуска здесь не стоят. Назад, в зал. | Nobody loiters here without a pass. Back to the hall. |  |
+| `D_NPC_CP_VICTOR5_N1` | lm01_lambda_sign · npc_cp_victor5 · узел 1 | Гражданин. Что несёшь? | Citizen. What are you carrying? | мост перекрыт; двое обыскивают тележки, третий разворачивает всех с толстыми сумками |
+| `D_NPC_CP_VICTOR5_N2` | lm01_lambda_sign · npc_cp_victor5 · узел 2 | Проходи. | Move along. |  |
+| `D_NPC_CP_VICTOR5_N3` | lm01_lambda_sign · npc_cp_victor5 · узел 3 | Развяжи. ...Это — изымается. Остальное — неси свою макулатуру. | Untie it. ...This is confiscated. The rest — carry your waste paper on. | выдёргивает часть пачки |
+| `D_NPC_CP_VICTOR5_N6` | lm01_lambda_sign · npc_cp_victor5 · узел 6 | Держи крепче, убогий. Проходи. | Hold on tight, simpleton. Move along. | смеётся |
+| `D_NPC_CP_VICTOR5_N7` | lm01_lambda_sign · npc_cp_victor5 · узел 7 | Гражданская сознательность отмечена. | Civic consciousness noted. |  |
+| `D_NPC_CP_VICTOR5_N20` | lm01_lambda_sign · npc_cp_victor5 · узел 20 | Проходи. Не задерживайся у моста. | Move along. Don't linger by the bridge. |  |
 | `MQ00_S3_N1_XRAY7` | mq00_arrival · npc_cp_xray7 · узел 1 | Диспетчер, Экс-рей-семь. Сбой фиксации, второй перрон. Опять. ...Гражданин. Документы. | Dispatch, X-Ray-seven. Capture failure, platform two. Again. ...Citizen. Papers. | сначала в рацию, раздражённо; потом герою, сухо (вокодер) |
 | `MQ00_S3_N2_XRAY7` | mq00_arrival · npc_cp_xray7 · узел 2 | Без записи. Зал регистрации - прямо, окна с первого по шестое. Не задерживай поток. | No record. Registration hall - straight ahead, windows one through six. Don't hold up the line. | ваниль/готовый звук: npc/metropolice/vo/movealong.wav |
 | `MQ00_S3_N3_XRAY7` | mq00_arrival · npc_cp_xray7 · узел 3 | Шутник. Зал регистрации. Бегом нельзя. Шагом - живо. | A comedian. Registration hall. No running. Walk - now. | тычок дубинкой под рёбра |

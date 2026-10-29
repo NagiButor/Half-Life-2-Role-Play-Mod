@@ -591,7 +591,15 @@ M.world((WX0, PASS_Y[0], 224), (WX1, PASS_Y[1], 640), {"right": TPL["002"][2], "
 M.world((WX0, PASS_Y[0], -48), (WX1, PASS_Y[1], -8), {"all": NODRAW, "top": ROAD})
 M.detail((WX0 + 1, PASS_Y[0], -8), (WX0 + 2, PASS_Y[1], 224), {"all": NODRAW, "right": "EFFECTS/FOG_D1_TRAINSTATION_02"},
          group="fogcard")
-M.world((SX1, -1344, -32), (2624, 1856, 576), {"left": TPL["021"][2], "top": ROOF, "all": NODRAW})
+# east end: the block with the arch to the Old Town (rp_c17_04_oldtown, lm_08_04), like the west arch
+EX0, EX1 = SX1, 2624
+M.world((EX0, -1344, -32), (EX1, PASS_Y[0], 576), {"left": TPL["021"][2], "front": "BRICK/BRICKWALL017A", "top": ROOF, "all": NODRAW})
+M.world((EX0, PASS_Y[1], -32), (EX1, 1856, 576), {"left": TPL["021"][2], "back": "BRICK/BRICKWALL017A", "top": ROOF, "all": NODRAW})
+M.world((EX0, PASS_Y[0], 224), (EX1, PASS_Y[1], 576), {"left": TPL["021"][2], "bottom": "CONCRETE/CONCRETEWALL004A",
+                                                       "top": ROOF, "all": NODRAW})
+M.world((EX0, PASS_Y[0], -48), (EX1, PASS_Y[1], -8), {"all": NODRAW, "top": ROAD})
+M.detail((EX1 - 2, PASS_Y[0], -8), (EX1 - 1, PASS_Y[1], 224), {"all": NODRAW, "left": "EFFECTS/FOG_D1_TRAINSTATION_02"},
+         group="fogcard")
 
 # ================================================================ hull (sky)
 HX0, HY0, HZ0, HX1, HY1, HZ1 = -2896, -1360, -64, 2640, 1872, 1536
@@ -1123,6 +1131,12 @@ for sp, lv in ((stairW, 2), (stairE, 3)):
 
 # ================================================================ transition to the plaza, spawn, zones
 M.ent("info_landmark", (-2720, -640, 24), targetname="lm_02_08")
+# the Old Town through the east arch (rp_c17_04_oldtown: landmark (-2240, 224, 24) in its west arch)
+M.ent("info_landmark", (2496, -640, 24), targetname="lm_08_04")
+M.brush_entity("trigger_changelevel", [M.box_solid((2560, PASS_Y[0], -8), (2624, PASS_Y[1], 216), TRIGGER)],
+               map="rp_c17_04_oldtown", landmark="lm_08_04", spawnflags="0", targetname="opora_to_oldtown")
+M.brush_entity("trigger_transition", [M.box_solid((2368, PASS_Y[0] - 64, -8), (2624, PASS_Y[1] + 64, 216), TRIGGER)],
+               targetname="lm_08_04")
 M.brush_entity("trigger_changelevel", [M.box_solid((-2816, PASS_Y[0], -8), (-2752, PASS_Y[1], 216), TRIGGER)],
                map="rp_c17_02_plaza", landmark="lm_02_08", spawnflags="0", targetname="opora_to_plaza")
 

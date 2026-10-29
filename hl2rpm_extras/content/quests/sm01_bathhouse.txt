@@ -1,0 +1,33 @@
+// SM-01 «Баня» (Part III/11, Part V/06). T2, 300 XP, Акт I. Матео пускает в баню на Ключевой, Кадар в парилке даёт
+// посылку для Ружены Дворжаковой (приёмная Лорха, площадь). Исходы - флаг sm01_done: delivered / kept.
+"Quest"
+{
+	"id"        "sm01_bathhouse"
+	"category"  "faction"
+	"faction"   "shareholders"
+	"title"     "Баня"   "title_en" "The Bathhouse"
+	"desc"      "В бане на Ключевой «санитарный день» каждый день. Там покупают и продают то, чего нет в пайке."
+	"desc_en"   "The bathhouse on Klyuchevaya has a “sanitary day” every day. They buy and sell what isn't in the ration."
+	"xp"        "300"
+	"act"       "1"
+	"auto_track" "1"
+	"complete_on_last_stage" "1"
+	"stages"
+	{
+		"0"
+		{
+			"title" "Парилка"   "title_en" "The Steam Room"
+			"desc"  "Поговорить со Стариком в парилке."   "desc_en" "Talk to the Old Man in the steam room."
+			"marker" "npc_kadar"   "marker_map" "rp_c17_04_oldtown"
+			"objectives" { "1" { "type" "flag" "target" "sm01_task" } }
+		}
+		"1"
+		{
+			"title" "Посылка"   "title_en" "The Parcel"
+			"desc"  "Отнести посылку Ружене Дворжаковой в приёмную Лорха (пристройка Бюро на площади). Не открывать."
+			"desc_en" "Take the parcel to Ruzhena Dvořáková at Lorch's reception (the Bureau annex on the plaza). Don't open it."
+			"marker" "npc_ruzhena"   "marker_map" "rp_c17_02_plaza"
+			"objectives" { "1" { "type" "flag" "target" "sm01_done" } }
+		}
+	}
+}

@@ -5,7 +5,8 @@
 	"C17-01" { "map" "rp_c17_01_trainstation" "xp" "20" }
 	"C17-02" { "map" "rp_c17_02_plaza"        "xp" "40" }
 	"C17-03" { "map" "rp_c17_03_block7"       "xp" "40" }
-	"C17-04" { "map" "rp_c17_03_block7"       "xp" "40" }
+	"C17-04" { "map" "rp_c17_04_oldtown"      "xp" "40" }
+	"C17-14" { "map" "rp_c17_04_oldtown"      "xp" "20" }
 	"C17-07" { "map" "rp_c17_02_plaza"        "xp" "20" }
 	"C17-08" { "map" "rp_c17_08_opora"        "xp" "40" }
 }

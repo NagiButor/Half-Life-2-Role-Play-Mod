@@ -31,6 +31,23 @@
 | 2 | Вчера грузили семь-один. Завтра будут грузить тех, кто задаёт вопросы. | Yesterday they loaded up seven-one. Tomorrow they'll load the ones who ask questions. |
 | 3 | Эрнесто сказал: дошло. Он редко так говорит. | Ernesto said it got through. He rarely says that. |
 
-## Реплики (0; записано RU 0, EN 0)
+## Реплики (16; записано RU 0, EN 0)
 
-_Реплик пока нет._
+| ID | Контекст (квест · NPC · узел) | RU | EN | Эмоция / ремарка |
+|---|---|---|---|---|
+| `D_NPC_LEILA_N1` | lm01_lambda_sign · npc_leila · узел 1 | Садитесь. Нет, не туда. Вы понравились Лукичу — это либо хорошо, либо подозрительно. | Sit down. No, not there. Lukich liked you — that's either good or suspicious. |  |
+| `D_NPC_LEILA_N1_V1` | lm01_lambda_sign · npc_leila · узел 1 · вариант 1 [require_civil reliable] | Благонадёжный. Я проверяла диктанты у таких: сдают листок, не дочитав. | Reliable. I used to mark dictations by people like you: they hand in the sheet without reading it through. |  |
+| `D_NPC_LEILA_N2` | lm01_lambda_sign · npc_leila · узел 2 | Пачка самиздата — на «Шлюз-3», из рук в руки шлюзовщику. На набережной сегодня облава. Если вы те, за кого себя выдаёте, донесёте. Если нет — донесёте тоже, но другим людям. | A bundle of samizdat — to Lock 3, hand to hand to the lock keeper. There's a raid on the embankment today. If you are who you say you are, you'll deliver it. If not — you'll deliver it too, just to other people. |  |
+| `D_NPC_LEILA_N3` | lm01_lambda_sign · npc_leila · узел 3 | Бумага. Статья один-пять. Самое опасное, что у нас есть. | Paper. Article one-five. The most dangerous thing we have. |  |
+| `D_NPC_LEILA_N4` | lm01_lambda_sign · npc_leila · узел 4 | Те, кому больше нечего. Вслух, по ночам, в подъездах. | Those who have nothing else. Out loud, at night, in stairwells. |  |
+| `D_NPC_LEILA_N5` | lm01_lambda_sign · npc_leila · узел 5 | Тогда мы узнаем, чего вы стоите. И вы тоже. | Then we'll find out what you're worth. And so will you. |  |
+| `D_NPC_LEILA_N6` | lm01_lambda_sign · npc_leila · узел 6 | Буквы. Красивее картинок, когда умеешь читать. | Letters. Prettier than pictures, once you can read. | впервые улыбается |
+| `D_NPC_LEILA_N7` | lm01_lambda_sign · npc_leila · узел 7 | Набережная — облава. Рынок — ГО на каждом углу. Крыши — для тех, кто умеет молчать ногами. Выбирайте сами: я не выбираю за людей, которые потом мне должны. | The embankment — a raid. The market — Civil Protection on every corner. The roofs — for those who can keep their feet quiet. Choose for yourself: I don't choose for people who'll owe me afterwards. | отдаёт пачку, перевязанную бечёвкой |
+| `D_NPC_LEILA_N15` | lm01_lambda_sign · npc_leila · узел 15 | Вы ещё здесь? «Шлюз-3» — за мостом, на том берегу. Шлюзовщика зовут Эрнесто. Из рук в руки. | Still here? Lock 3 is across the bridge, on the far bank. The lock keeper's name is Ernesto. Hand to hand. |  |
+| `D_NPC_LEILA_N20` | lm01_lambda_sign · npc_leila · узел 20 | Эрнесто сказал: дошло. Он редко так говорит. | Ernesto said: it got through. He rarely says that. |  |
+| `D_NPC_LEILA_N20_V1` | lm01_lambda_sign · npc_leila · узел 20 · вариант 1 [require_flag lm01_route=roofs] | Лукич слышал водосток над облавой. Говорит, вы скрипели красиво. | Lukich heard the drainpipe above the raid. He says you creaked beautifully. |  |
+| `D_NPC_LEILA_N20_V2` | lm01_lambda_sign · npc_leila · узел 20 · вариант 2 [require_flag lm01_route=simple] | ГО пропустила дурачка с макулатурой. Я двадцать лет учу этому взрослых. | Civil Protection let a simpleton with waste paper through. I've spent twenty years teaching adults to do that. |  |
+| `D_NPC_LEILA_N21` | lm01_lambda_sign · npc_leila · узел 21 | Поздравляю. Теперь вас можно повесить вместе с нами. У нас это называется доверием. Для чистой карты — вокзал, подсобка за камерой хранения. Спросите юнита, который любит пиво. Но сначала Фарид: ему нужны руки. | Congratulations. Now you can be hanged together with us. We call that trust. For a clean card — the station, the back room behind the luggage office. Ask for the unit who likes beer. But Farid first: he needs hands. |  |
+| `D_NPC_LEILA_N30` | lm01_lambda_sign · npc_leila · узел 30 | Эрнесто сказал: не дошло. Я не спрашиваю, где пачка. Я знаю, где она. Дверь — там. | Ernesto said: it didn't get through. I'm not asking where the bundle is. I know where it is. The door is over there. | не поднимая глаз |
+| `D_NPC_LEILA_N40` | lm01_lambda_sign · npc_leila · узел 40 | Фарид ждёт. А я — нет: у меня урок через десять минут, и ученики опаздывать не умеют. | Farid is waiting. I'm not: I have a lesson in ten minutes, and my students don't know how to be late. |  |
+| `D_NPC_LEILA_N50` | lm01_lambda_sign · npc_leila · узел 50 | Вы ошиблись подвалом. Здесь только старые часы и ещё более старая я. | Wrong cellar. There's nothing here but old clocks and an even older me. | смотрит поверх очков |

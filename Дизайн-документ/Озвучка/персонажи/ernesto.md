@@ -31,6 +31,12 @@
 | 2 | Что мы существуем. Остальное — подробности. | That we exist. The rest is details. |
 | 3 | Мне пятьдесят. Страх — единственное, что ещё растёт. | I'm fifty. Fear is the only thing still growing. |
 
-## Реплики (0; записано RU 0, EN 0)
+## Реплики (5; записано RU 0, EN 0)
 
-_Реплик пока нет._
+| ID | Контекст (квест · NPC · узел) | RU | EN | Эмоция / ремарка |
+|---|---|---|---|---|
+| `D_NPC_ERNESTO_N1` | lm01_lambda_sign · npc_ernesto · узел 1 | От часовщика? Давайте. Вода не ждёт. | From the watchmaker? Hand it over. The water doesn't wait. | каморка: тина, табак, лодки на цепях; пересчитывает пачку на ощупь |
+| `D_NPC_ERNESTO_N2` | lm01_lambda_sign · npc_ernesto · узел 2 | Что мы существуем. Остальное — подробности. | That we exist. The rest is details. |  |
+| `D_NPC_ERNESTO_N3` | lm01_lambda_sign · npc_ernesto · узел 3 | Скажи ей: дошло. | Tell her: it got through. |  |
+| `D_NPC_ERNESTO_N10` | lm01_lambda_sign · npc_ernesto · узел 10 | Часовщику привет. И скажи, чтобы не присылал мокрых — бумага у нас дороже лодок. | Say hello to the watchmaker. And tell him not to send wet ones — paper costs more than boats here. |  |
+| `D_NPC_ERNESTO_N20` | lm01_lambda_sign · npc_ernesto · узел 20 | Шлюз закрыт для гражданских. Лодки — для дела, а не для катания. | The lock is closed to civilians. The boats are for business, not for rides. | кепка, седой ус, считает по руке |

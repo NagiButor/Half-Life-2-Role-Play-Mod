@@ -38,6 +38,7 @@
 | `add_scheme_fonts.py` | регистрирует шрифты интерфейса RPG (`HL2RPM.*`, TTF в `resource/`) в `clientscheme.res` мода |
 | `prep_rp_c17_01_trainstation.py`, `prep_rp_c17_02_plaza.py`, `prep_rp_c17_03_block7.py` | карты среза из BSPSource-декомпиляции ретейловых `d1_trainstation_01..03`: вырезан сюжет Гордона и запечённые подделки, переходы, NPC; затем RPG-слой `phaseb_rp_c17_0X.py`; помощники — `slice_kit.py` |
 | `make_opora.py` (+ `opora_kit.py`, `phaseb_rp_c17_08.py`) | участок ГО «Опора» (C17-08) целиком из скрипта: архитектура, свет, NPC, RPG-слой GO-01 |
+| `make_oldtown.py` (+ `phaseb_rp_c17_04.py`) | Старый город (C17-04) из скрипта на `opora_kit`: улица, мастерская Лукича с подвалом, баня, канал с мостом, «Шлюз-3»; RPG-слой LM-01 и SM-01 |
 | `make_background_c17.py` | фон главного меню `background_c17` из площади (камера, сумерки, без игровых триггеров) |
 | `make_stream_test.py` | тестовая карта `stream_test` для подгрузки «жизни» (2600 энтити `rpg_stream 1`) |
 | `make_showcase.py`, `make_pbr_gallery.py` | витрины графики `gfx_showcase` и `pbr_gallery` |

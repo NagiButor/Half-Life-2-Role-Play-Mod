@@ -1,0 +1,222 @@
+// Илья Лукич Захаров, часовая мастерская на Ключевой (C17-04). Хаб Лукича и LM-01 «Знак лямбды», сцена 1
+// «Кукушка» (Part V/05). Пароль ведёт вниз, к Лейле (npc_leila). Торговец lukich.
+"Dialog"
+{
+	"entity"        "npc_lukich"
+	"voice"         "lukich"
+	"speaker"       "Илья Лукич"   "speaker_en" "Ilya Lukich"
+	"auto_face_npc" "1"
+
+	"greetings"
+	{
+		"1" { "require_suspicion" ">=50"  "node" "50" }
+		"2" { "require_flag" "lm01_route=snitch"  "node" "41" }
+		"3" { "require_quest_state" "lm01_lambda_sign:completed"  "node" "40" }
+		"4" { "require_quest_state" "lm01_lambda_sign:active"  "node" "42" }
+		"5" { "require_civil" "loyalist"  "node" "30" }
+		"6" { "node" "1" }
+	}
+
+	"nodes"
+	{
+		"1"
+		{
+			"line"            "Ремонт часов. Гарантия — до конца света. Что у вас?"
+			"line_en"         "Watch repairs. Guaranteed until the end of the world. What have you got?"
+			"line_low_ana"    "Тик-так. Слышишь? Это они разговаривают. Им одним тут можно."
+			"line_low_ana_en" "Tick-tock. Hear that? That's them talking. They're the only ones allowed to here."
+			"emotion"         "не отрываясь от лупы"
+			"variants"
+			{
+				"1" { "require_civil" "reliable"  "line" "С такой карточкой — и в мастерскую? Забавно. Говорите медленнее."  "line_en" "A card like that — and in a workshop like this? Funny. Speak slowly." }
+			}
+			"options"
+			{
+				"1" { "text" "У вас есть часы с кукушкой?"  "text_en" "Do you have a cuckoo clock?"  "next" "2" }
+				"2" { "text" "Каким был город?"  "text_en" "What was the city like?"  "next" "10" }
+				"3" { "text" "Вы не боитесь? ГО ходит прямо под окном."  "text_en" "Aren't you afraid? Civil Protection walks right under your window."  "next" "11" }
+				"4" { "text" "Что слышно в Старом городе?"  "text_en" "What's the word in the Old Town?"  "next" "12" }
+				"5" { "text" "Что продаёте?"  "text_en" "What do you sell?"  "open_barter" "1"  "exit" "1"  "close" "1" }
+				"0" { "text" "Мне пора."  "text_en" "I have to go."  "exit" "1"  "close" "1" }
+			}
+		}
+		"2"
+		{
+			"line"    "Кукушки улетели."
+			"line_en" "The cuckoos have flown."
+			"options"
+			{
+				"1" { "text" "Мне нужна помощь. Говорят, вы знаете, к кому идти."  "text_en" "I need help. They say you know who to go to."  "next" "4" }
+				"2" { "text" "Не юли, старик. Где тут собираются?"  "text_en" "Don't play games, old man. Where do they meet?"  "require_humanity" "<=39"  "hide_if_unmet" "1"  "disposition" "-5"  "next" "5" }
+				"3" { "text" "Мне сказали: кукушка. Что дальше — не знаю."  "text_en" "They told me: cuckoo. I don't know what comes next."  "require_attr" "ANA<=3"  "hide_if_unmet" "1"  "next" "6" }
+				"4" { "text" "(Ждать)"  "text_en" "(Wait)"  "next" "3" }
+				"0" { "text" "Зайду потом."  "text_en" "I'll come back later."  "exit" "1"  "close" "1" }
+			}
+		}
+		"3"
+		{
+			"line"    "Лейла Ланская, подвал. Что тикает — не трогай: оно тикает не зря."
+			"line_en" "Leila Lanskaya, the cellar. Whatever ticks — don't touch it: it ticks for a reason."
+			"emotion" "двумя оборотами запирает дверь"
+			"effects" { "set_flag" "lm01_started"  "grant_quest" "lm01_lambda_sign" }
+			"options"
+			{
+				"0" { "text" "(Спуститься)"  "text_en" "(Go down)"  "exit" "1"  "close" "1" }
+			}
+		}
+		"4"
+		{
+			"line"    "Я знаю, как заводить часы. Больше ничего."
+			"line_en" "I know how to wind clocks. Nothing more."
+			"options"
+			{
+				"0" { "text" "(Подумать)"  "text_en" "(Think)"  "next" "2" }
+			}
+		}
+		"5"
+		{
+			"line"    "Мне нечего терять, кроме утра. Утро вы не отнимете."
+			"line_en" "I have nothing to lose but the morning. You won't take the morning."
+			"options"
+			{
+				"0" { "text" "(Отступить)"  "text_en" "(Back off)"  "next" "2" }
+			}
+		}
+		"6"
+		{
+			"line"    "Дальше — вниз, милый. Это и есть ответ."
+			"line_en" "Next is down, dear. That's the answer."
+			"options"
+			{
+				"0" { "text" "Вниз?"  "text_en" "Down?"  "next" "3" }
+			}
+		}
+		"10"
+		{
+			"line"    "Трамвай звенел. На Ключевой продавали пончики — сахарная пудра на пальто до самой зимы. Потом семь часов войны и двадцать лет вот этого. Город тот же. Люди другие: Альянс свёз всех, со всего света. Я на рынке половину ругани не понимаю. Зато ругаются от души."
+			"line_en" "The tram used to ring. They sold doughnuts on Klyuchevaya — powdered sugar on your coat till winter. Then seven hours of war and twenty years of this. Same city. Different people: the Combine brought everyone here, from all over the world. Half the swearing at the market I don't understand. But they swear from the heart."
+			"emotion" "стучит пинцетом по стеклу"
+			"options"
+			{
+				"1" { "text" "Вас не переселяли?"  "text_en" "They never moved you?"  "next" "13" }
+				"0" { "text" "(Вернуться)"  "text_en" "(Back)"  "next" "1" }
+			}
+		}
+		"13"
+		{
+			"line"    "Забыли. Старики — плохой материал. Мы как эта мастерская: никому не нужны, поэтому целы."
+			"line_en" "They forgot. Old men are poor material. We're like this workshop: nobody needs us, so we're still whole."
+			"options"
+			{
+				"0" { "text" "(Вернуться)"  "text_en" "(Back)"  "next" "1" }
+			}
+		}
+		"11"
+		{
+			"line"    "Боюсь. Каждый день. Страх как часы: если его заводить, он идёт. Я не завожу."
+			"line_en" "I am afraid. Every day. Fear is like a clock: if you wind it, it runs. I don't wind it."
+			"options"
+			{
+				"1" { "text" "А если за вами придут?"  "text_en" "And if they come for you?"  "next" "14" }
+				"0" { "text" "(Вернуться)"  "text_en" "(Back)"  "next" "1" }
+			}
+		}
+		"14"
+		{
+			"line"    "Открою. Чаю не предложу — чайник, говорю, сломан."
+			"line_en" "I'll open the door. I won't offer tea — the kettle, I tell you, is broken."
+			"options"
+			{
+				"0" { "text" "(Вернуться)"  "text_en" "(Back)"  "next" "1" }
+			}
+		}
+		"12"
+		{
+			"line"    "В Семёрке опять сканер в бельё влетел. Птица, а не сканер."
+			"line_en" "Over in Block Seven a scanner flew into the washing again. A bird, not a scanner."
+			"options"
+			{
+				"0" { "text" "(Вернуться)"  "text_en" "(Back)"  "next" "1" }
+			}
+		}
+		"30"
+		{
+			"line"    "Часы почистить? Почищу. Больше у меня для вас ничего нет. Пароль — для знакомых. Кто за вас скажет?"
+			"line_en" "Clean your watch? I will. I have nothing else for you. The password is for friends. Who'll vouch for you?"
+			"options"
+			{
+				"1"
+				{
+					"text"          "Карточка Лоялиста и совесть ценнее совести без карточки."
+					"text_en"       "A Loyalist card plus a conscience is worth more than a conscience without one."
+					"check"         "skill:speech:60"
+					"check_once"    "1"
+					"next"          "31"
+					"fail_next"     "32"
+					"on_success_xp" "15"
+					"on_success_set_flag" "lm01_voucher=speech"
+					"on_fail_suspicion" "+5"
+				}
+				"0" { "text" "Я пойду."  "text_en" "I'll go."  "exit" "1"  "close" "1" }
+			}
+		}
+		"31"
+		{
+			"line"    "Складно."
+			"line_en" "Neatly put."
+			"options"
+			{
+				"0" { "text" "(Ждать)"  "text_en" "(Wait)"  "next" "3" }
+			}
+		}
+		"32"
+		{
+			"line"    "Складно — не пароль."
+			"line_en" "Neatly put isn't a password."
+			"options"
+			{
+				"0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" }
+			}
+		}
+		"40"
+		{
+			"line"    "Вниз. На третьей ступеньке не дыши — скрипит."
+			"line_en" "Downstairs. Don't breathe on the third step — it creaks."
+			"options"
+			{
+				"1" { "text" "Что продаёте?"  "text_en" "What do you sell?"  "open_barter" "1"  "exit" "1"  "close" "1" }
+				"2" { "text" "Каким был город?"  "text_en" "What was the city like?"  "next" "10" }
+				"0" { "text" "(Спуститься)"  "text_en" "(Go down)"  "exit" "1"  "close" "1" }
+			}
+		}
+		"41"
+		{
+			"line"    "Кукушки сдохли. Часы почистить — пожалуйста."
+			"line_en" "The cuckoos are dead. Watch cleaning — be my guest."
+			"options"
+			{
+				"0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" }
+			}
+		}
+		"42"
+		{
+			"line"    "Вниз, к Лейле. И тише: стены здесь тонкие, а уши у соседей толстые."
+			"line_en" "Down to Leila. And quietly: the walls here are thin, and the neighbours' ears are thick."
+			"options"
+			{
+				"1" { "text" "Что продаёте?"  "text_en" "What do you sell?"  "open_barter" "1"  "exit" "1"  "close" "1" }
+				"0" { "text" "(Кивнуть)"  "text_en" "(Nod)"  "exit" "1"  "close" "1" }
+			}
+		}
+		"50"
+		{
+			"line"    "Закрыто на учёт. За вами хвост — я его отсюда слышу."
+			"line_en" "Closed for stocktaking. You've got a tail — I can hear it from here."
+			"emotion" "не отрываясь от лупы"
+			"options"
+			{
+				"0" { "text" "(Уйти)"  "text_en" "(Leave)"  "exit" "1"  "close" "1" }
+			}
+		}
+	}
+}
