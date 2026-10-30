@@ -102,7 +102,7 @@ shadow): large lit surfaces must stay at 1; `r_csm_pcss 6` / `7` = sky visibilit
 neither are not in the G-buffer at all - their composite reads the light of what is behind).
 Turning the camera hides one-frame glitches and aliasing behind the engine's motion blur
 (`mat_motion_blur_enabled`, turning only) — test walking, not spinning.
-Real-time (no `host_framerate`) needs a PrintWindow capture loop (~28 captures/s).
+Real-time (no `host_framerate`) needs a PrintWindow capture loop: `scripts/capture_rt.ps1 -OutDir <dir>` (run the game as a `Start-Job`, then the capture; it saves ~20 jpg/s between `echo CAPSTART` and `echo CAPEND` in the steps). **Anything done in the background on wall-clock time (GI probes) must be checked this way** - a `startmovie` recording runs the game at ~6 fps and the background has all the time it wants.
 
 For things that move on purpose (shadows with `sv_timecycle_set_speed 30`, drifting
 clouds) use `<hl2rpm_extras>\tools\crawl_stats.py <dir> <prefix> <out.png>`: the second

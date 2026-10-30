@@ -49,6 +49,7 @@ deferred_giblur_ps30.fxc
 deferred_giup_ps30.fxc
 deferred_gi_upload_vs30.fxc
 deferred_gi_upload_ps30.fxc
+deferred_gi_blend_ps30.fxc
 hl2rpm_lum_ps30.fxc
 hl2rpm_bloom_ps30.fxc
 hl2rpm_postfx_ps30.fxc

@@ -14,7 +14,8 @@
 //   2: rgb color of that light (luminance 1), a weight (0 = in a wall / not
 //      traced yet, rising to 1 while a new probe fades in)
 //   3: free distance from the probe along +x -x, +y -y, +z -z (5 bits each,
-//      packed in pairs), 31 = a whole probe spacing
+//      packed in pairs), 31 = a whole probe spacing; w the cell's stamp
+//      (deferred_gi_blend_ps30)
 //   4: the sky light the surroundings send back (as 1), in units of the sky light
 //   5: rgb color of it
 //
@@ -29,7 +30,7 @@
 // kind - beyond the grid the old flat sky light used to show, half of a shaded
 // wall dark and half of it light:
 //   - the near grid of probes around the camera,
-//   - the far grid (4 x the spacing) around that,
+//   - the far grid (twice the spacing) around that,
 //   - an estimate without probes: an open hemisphere above the surface, closed
 //     by the sky visibility of the rain map (roofs), the ground lit by the sun.
 //
@@ -51,7 +52,7 @@ sampler sSkyVis			: register( s4 );	// SSAO (r) and sky visibility of the rain m
 const float3 g_vecViewOrigin	: register( c0 );
 const float4 g_vecGrid			: register( c1 );	// near grid: xyz world cell index of the first probe, w 1 / spacing
 const float4 g_vecDims			: register( c2 );	// near grid: xyz probes per axis, w spacing
-const float4 g_vecAtlas			: register( c3 );	// x 1 / atlas width, y 1 / atlas height, z normal offset (x spacing), w debug
+const float4 g_vecAtlas			: register( c3 );	// xy unused, z normal offset (x spacing), w debug
 const float4 g_vecAmbHigh		: register( c4 );	// rgb sky light, w sky light left without sky in sight
 const float4 g_vecAmbLow		: register( c5 );	// rgb sky light bounced off the ground (ambient low: the estimate beyond the probes), w scale of the bounced sky light
 const float4 g_vecSun			: register( c6 );	// rgb sun light x bounce scale, w 1 / cells over which the near grid fades into the far one
@@ -85,10 +86,11 @@ float Shape( float3 n )
 // (0 = outside the grid or no probe sees the point)
 // (flFade: the part of a cell the grid's weight falls by toward its sides - the near grid
 // fades into the far one over a wide band, the far one into the estimate over two cells)
-float4 GatherGrid( sampler sAtlas, float4 vecGrid, float4 vecDims, float3 P, float3 N, float flFade, out float4 vecDebug, out float3 vecDebugSky )
+float4 GatherGrid( sampler sAtlas, float4 vecGrid, float4 vecDims, float3 P, float3 N, float flFade, out float4 vecDebug, out float3 vecDebugSky, out float flDebugW )
 {
 	vecDebug = 0.0;
 	vecDebugSky = 0.0;
+	flDebugW = 0.0;
 
 	// (off the surface along its normal: a floor looks up between the probes over it, a
 	// wall looks into the room in front of it)
@@ -108,7 +110,9 @@ float4 GatherGrid( sampler sAtlas, float4 vecGrid, float4 vecDims, float3 P, flo
 	if ( edge <= 0.0 )
 		return 0.0;
 
-	const float planeStep = vecDims.y * g_vecAtlas.y;
+	// (each grid's atlas: x = probe x + probe z * x probes, y = probe y + plane * y probes)
+	const float2 atlasInv = 1.0 / float2( vecDims.x * vecDims.z, vecDims.y * 6.0 );
+	const float planeStep = vecDims.y * atlasInv.y;
 	const float tolerance = g_vecGI2.x * vecDims.w;
 	const float invSoft = 8.0 / vecDims.w;
 
@@ -127,7 +131,7 @@ float4 GatherGrid( sampler sAtlas, float4 vecGrid, float4 vecDims, float3 P, flo
 		const float3 idx = base + corner;
 		// (the grid is toroidal: a probe lives at its world cell modulo the grid size)
 		const float3 slot = idx - vecDims.xyz * floor( idx / vecDims.xyz );
-		const float2 uv = float2( ( slot.x + slot.z * vecDims.x + 0.5 ) * g_vecAtlas.x, ( slot.y + 0.5 ) * g_vecAtlas.y );
+		const float2 uv = float2( ( slot.x + slot.z * vecDims.x + 0.5 ) * atlasInv.x, ( slot.y + 0.5 ) * atlasInv.y );
 
 		const float4 dVis = tex2Dlod( sAtlas, float4( uv, 0, 0 ) );
 		const float4 dBnc = tex2Dlod( sAtlas, float4( uv.x, uv.y + planeStep, 0, 0 ) );
@@ -168,6 +172,7 @@ float4 GatherGrid( sampler sAtlas, float4 vecGrid, float4 vecDims, float3 P, flo
 		wsum += w;
 	}
 
+	flDebugW = wsum;
 	if ( wsum < 1e-5 )
 		return 0.0;
 
@@ -216,7 +221,8 @@ float4 main( const PS_INPUT In ) : COLOR
 
 	float4 dbgNear, dbgFar = 0.0, dbgEst = 0.0;
 	float3 dbgSkyNear, dbgSkyFar = 0.0;
-	const float4 lightNear = GatherGrid( sProbes, g_vecGrid, g_vecDims, P, N, g_vecSun.w, dbgNear, dbgSkyNear );
+	float wNear, wFar = 0.0;
+	const float4 lightNear = GatherGrid( sProbes, g_vecGrid, g_vecDims, P, N, g_vecSun.w, dbgNear, dbgSkyNear, wNear );
 
 	float3 light = lightNear.rgb;
 	float4 dbg = dbgNear;
@@ -229,7 +235,7 @@ float4 main( const PS_INPUT In ) : COLOR
 		float4 lightFar = 0.0;
 		[branch]
 		if ( g_vecDimsFar.x > 0.5 )
-			lightFar = GatherGrid( sProbesFar, g_vecGridFar, g_vecDimsFar, P, N, 0.5, dbgFar, dbgSkyFar );
+			lightFar = GatherGrid( sProbesFar, g_vecGridFar, g_vecDimsFar, P, N, 0.5, dbgFar, dbgSkyFar, wFar );
 
 		const float3 lightEst = Estimate( In.vTexCoord, N, dbgEst );
 
@@ -240,7 +246,9 @@ float4 main( const PS_INPUT In ) : COLOR
 		source = float3( lightNear.a, ( 1.0 - lightNear.a ) * lightFar.a, ( 1.0 - lightNear.a ) * ( 1.0 - lightFar.a ) );
 	}
 
-	// r_deferred_gi_debug 3..6: the sky visibility / the indirect sun / the source / the bounced sky alone
+	// r_deferred_gi_debug 3..10: the sky visibility / the indirect sun / the source / the bounced sky
+	// alone; the position (the same point must look the same from anywhere) / the normal / the
+	// distance from a point (xy in c3) / the near grid's share, weight and sky visibility
 	if ( g_vecAtlas.w > 2.5 )
 	{
 		if ( g_vecAtlas.w < 3.5 )
@@ -249,8 +257,16 @@ float4 main( const PS_INPUT In ) : COLOR
 			light = dbg.yzw;
 		else if ( g_vecAtlas.w < 5.5 )
 			light = source;
-		else
+		else if ( g_vecAtlas.w < 6.5 )
 			light = dbgSky;
+		else if ( g_vecAtlas.w < 7.5 )
+			light = frac( P / 64.0 ) * Shape( N );
+		else if ( g_vecAtlas.w < 8.5 )
+			light = ( N * 0.5 + 0.5 ) * Shape( N );
+		else if ( g_vecAtlas.w < 9.5 )
+			light = saturate( length( P.xy - g_vecAtlas.xy ) / 32.0 ) * Shape( N );
+		else
+			light = float3( lightNear.a, saturate( wNear ), dbgNear.x * 10.0 ) * Shape( N );
 	}
 
 	return float4( light / Shape( N ), 1.0 );

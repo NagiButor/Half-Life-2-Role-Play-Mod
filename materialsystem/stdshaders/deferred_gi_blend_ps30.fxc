@@ -1,0 +1,69 @@
+//========= HL2RPM ============================================================//
+//
+// GI probes (deferred_gi.cpp in the client): what the lighting reads moves toward
+// what the probes were last computed to be, a little every frame.
+//
+// The client writes a probe's new light into the target atlas the moment it is
+// known - a probe traced for the first time, its light gathered again with one
+// more bounce, the sun moved on. Read directly, that showed as the field "loading":
+// blocks of probes switching to new values one after another as the work went
+// round them. The atlas the lighting reads (the display atlas, ping-ponged) eases
+// toward the target instead, every probe alike; a probe new in its slot of the
+// toroidal grid (its stamp in plane 3 differs) starts from its first values with
+// no weight and fades in, one that becomes invalid fades out.
+//
+// Planes (see deferred_gi_ps30): 0 sky visibility, 1 indirect sun, 2 its color
+// and the probe's weight, 3 free distances and the cell stamp, 4 bounced sky,
+// 5 its color.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+sampler sTarget			: register( s0 );	// what the probes are now (point sampled)
+sampler sPrev			: register( s1 );	// what the lighting read last frame
+
+const float4 g_vecBlend	: register( c0 );	// x part of the way to the target this frame, y weight step (fade in), z probes per row block of the atlas, w 1 = take the target as it is
+const float4 g_vecSize	: register( c1 );	// xy atlas size (texels), zw 1 / size
+
+struct PS_INPUT
+{
+	float2 vTexCoord			: TEXCOORD0;
+};
+
+float4 main( const PS_INPUT In ) : COLOR
+{
+	const float2 texel = floor( In.vTexCoord * g_vecSize.xy );
+	const float plane = floor( ( texel.y + 0.5 ) / g_vecBlend.z );
+	const float row = texel.y - plane * g_vecBlend.z;
+
+	const float2 uv = ( texel + 0.5 ) * g_vecSize.zw;
+	const float2 uvAux = float2( uv.x, ( row + 2.0 * g_vecBlend.z + 0.5 ) * g_vecSize.w );
+	const float2 uvFree = float2( uv.x, ( row + 3.0 * g_vecBlend.z + 0.5 ) * g_vecSize.w );
+
+	const float4 tgt = tex2Dlod( sTarget, float4( uv, 0, 0 ) );
+	const float4 prev = tex2Dlod( sPrev, float4( uv, 0, 0 ) );
+	const float stampT = tex2Dlod( sTarget, float4( uvFree, 0, 0 ) ).w;
+	const float stampP = tex2Dlod( sPrev, float4( uvFree, 0, 0 ) ).w;
+	const float wTgt = tex2Dlod( sTarget, float4( uvAux, 0, 0 ) ).w;
+	const float wPrev = tex2Dlod( sPrev, float4( uvAux, 0, 0 ) ).w;
+
+	// (another cell in the slot now: nothing of the old one stays)
+	const float reset = max( step( 0.5, g_vecBlend.w ), step( 0.5, abs( stampT - stampP ) ) );
+	const float w = wPrev * ( 1.0 - reset );
+	// a probe without weight takes its values at once - its weight fades in
+	const float k = ( w < 0.02 ) ? 1.0 : g_vecBlend.x;
+	float4 o = lerp( prev, tgt, k );
+
+	if ( plane > 2.5 && plane < 3.5 )
+	{
+		// free distances and the stamp: as they are
+		o = tgt;
+	}
+	else if ( plane > 1.5 && plane < 2.5 )
+	{
+		o.w = ( wTgt > w ) ? min( wTgt, w + g_vecBlend.y ) : max( wTgt, w - 2.0 * g_vecBlend.y );
+		o.w = ( g_vecBlend.w > 0.5 ) ? wTgt : o.w;
+	}
+	return o;
+}

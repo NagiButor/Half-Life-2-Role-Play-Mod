@@ -10,7 +10,9 @@
 //          for every full resolution pixel, from the half resolution pixels of
 //          its own surface (GI -> the blur target, full size).
 //          DEFERRED_GI_UPLOAD (deferred_gi_upload_vs30/ps30): writes probe data
-//          into the probe atlas (tiny quads in clip space).
+//          into the probe atlas (points in clip space, one texel each).
+//          DEFERRED_GI_BLEND (deferred_gi_blend_ps30): the atlas the lighting
+//          reads, eased toward the one the probes are written to.
 //
 //=============================================================================//
 
@@ -22,6 +24,7 @@
 #include "deferred_giup_ps30.inc"
 #include "deferred_gi_upload_vs30.inc"
 #include "deferred_gi_upload_ps30.inc"
+#include "deferred_gi_blend_ps30.inc"
 
 BEGIN_VS_SHADER( DEFERRED_GI, "" )
 	BEGIN_SHADER_PARAMS
@@ -321,6 +324,82 @@ BEGIN_VS_SHADER( DEFERRED_GI_UPLOAD, "" )
 
 			DECLARE_DYNAMIC_PIXEL_SHADER( deferred_gi_upload_ps30 );
 			SET_DYNAMIC_PIXEL_SHADER( deferred_gi_upload_ps30 );
+		}
+
+		Draw();
+	}
+END_SHADER
+
+BEGIN_VS_SHADER( DEFERRED_GI_BLEND, "" )
+	BEGIN_SHADER_PARAMS
+		SHADER_PARAM( TARGETATLAS, SHADER_PARAM_TYPE_TEXTURE, "", "probe atlas as the probes are now" )
+		SHADER_PARAM( PREVATLAS, SHADER_PARAM_TYPE_TEXTURE, "", "probe atlas the lighting read last frame" )
+		SHADER_PARAM( BLENDPARAMS, SHADER_PARAM_TYPE_VEC4, "[1 1 1 1]", "part of the way to the target, weight step, probes per row block, 1 = take the target" )
+		SHADER_PARAM( ATLASSIZE, SHADER_PARAM_TYPE_VEC4, "[1 1 1 1]", "atlas size, 1 / size" )
+	END_SHADER_PARAMS
+
+	SHADER_INIT_PARAMS()
+	{
+	}
+
+	SHADER_INIT
+	{
+		if ( params[TARGETATLAS]->IsDefined() )
+			LoadTexture( TARGETATLAS );
+		if ( params[PREVATLAS]->IsDefined() )
+			LoadTexture( PREVATLAS );
+	}
+
+	SHADER_FALLBACK
+	{
+		return 0;
+	}
+
+	SHADER_DRAW
+	{
+		SHADOW_STATE
+		{
+			pShaderShadow->SetDefaultState();
+			pShaderShadow->EnableDepthTest( false );
+			pShaderShadow->EnableDepthWrites( false );
+			pShaderShadow->EnableAlphaWrites( true );
+
+			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
+
+			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION, 1, NULL, 0 );
+
+			DECLARE_STATIC_VERTEX_SHADER( defconstruct_vs30 );
+			SET_STATIC_VERTEX_SHADER_COMBO( USEWORLDTRANSFORM, 0 );
+			SET_STATIC_VERTEX_SHADER_COMBO( SENDWORLDPOS, 0 );
+			SET_STATIC_VERTEX_SHADER( defconstruct_vs30 );
+
+			DECLARE_STATIC_PIXEL_SHADER( deferred_gi_blend_ps30 );
+			SET_STATIC_PIXEL_SHADER( deferred_gi_blend_ps30 );
+		}
+		DYNAMIC_STATE
+		{
+			pShaderAPI->SetDefaultState();
+
+			DECLARE_DYNAMIC_VERTEX_SHADER( defconstruct_vs30 );
+			SET_DYNAMIC_VERTEX_SHADER( defconstruct_vs30 );
+
+			DECLARE_DYNAMIC_PIXEL_SHADER( deferred_gi_blend_ps30 );
+			SET_DYNAMIC_PIXEL_SHADER( deferred_gi_blend_ps30 );
+
+			if ( params[TARGETATLAS]->IsTexture() )
+				BindTexture( SHADER_SAMPLER0, TARGETATLAS );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER0, TEXTURE_BLACK );
+			if ( params[PREVATLAS]->IsTexture() )
+				BindTexture( SHADER_SAMPLER1, PREVATLAS );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER1, TEXTURE_BLACK );
+
+			CommitBaseDeferredConstants_Frustum( pShaderAPI, VERTEX_SHADER_SHADER_SPECIFIC_CONST_0 );
+
+			pShaderAPI->SetPixelShaderConstant( 0, params[BLENDPARAMS]->GetVecValue(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 1, params[ATLASSIZE]->GetVecValue(), 1, true );
 		}
 
 		Draw();

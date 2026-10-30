@@ -9,52 +9,57 @@
 // distance from them, and the sun on the floor by a window lights the walls and
 // the ceiling (bounce light) - which light each other in turn.
 //
-// Two grids of probes around the camera (GI_NX x GI_NY x GI_NZ each; the near one
-// r_deferred_gi_spacing apart, the far one 4 x that; toroidal - a step of the camera
-// only traces the new slice) shoot rays through the world (the BSP and the brush
-// entities at rest, enginetrace):
+// Two grids of probes around the camera (toroidal - a step of the camera only adds
+// the new slice): the near one, 64 x 64 x 16 probes r_deferred_gi_spacing apart
+// (2048 units to either side), and around it the far one at twice the spacing.
+// Each probe shoots rays through the world (the BSP and the brush entities at rest,
+// enginetrace):
 //  - a ray that escapes to the sky adds to the probe's sky visibility,
-//  - a ray that hits a surface keeps the point, its normal and its albedo (the
-//    texture's reflectivity); a ray from there toward the sun tells whether the sun
-//    lights it.
-//
-// A probe is traced in passes of GI_RAYS rays, each pass in directions of its own (a
-// rotation of the same even set, different for every probe): the first pass makes the
-// probe usable at once, the following ones (up to r_deferred_gi_rays in all) are traced
-// when nothing new is waiting, nearest to the camera first. 32 rays alone see an
-// opening - a door from across the room, the patch of sun on the floor - with one ray
-// or with none: probe next to probe got light or none, and the light of a room came in
-// blobs the size of the grid ("the shade loads in chunks, not a soft spread of light").
+//  - a ray that hits a surface keeps the point (8 bytes: which ray, how far, the
+//    normal, the albedo of its material); a ray from there toward the sun tells
+//    whether the sun lights it.
 //
 // From the hits of a probe its indirect light is gathered (GatherProbe): what a hit
 // sends back is its albedo x the light it gets - the sun (if it is lit), the sky it
 // sees and the indirect light at it, all three taken from the probes around the hit as
-// they are now. Repeated (a few probes every frame, all of them over and over while
-// anything changes) that is light bouncing as many times as it takes: the sun patch by
-// the door lights the wall, the wall the ceiling, the room fills softly. The sky
-// visibility is smoothed with the neighbour probes in sight of each other first.
+// they are now. Repeated, that is light bouncing as many times as it takes: the sun
+// patch by the door lights the wall, the wall the ceiling, the room fills softly.
 //
 // Everything is kept as L1 spherical harmonics (4 numbers: the light a surface of any
 // orientation at the probe gets) - sky visibility, indirect sun, bounced sky - the two
 // indirect ones as luminance with a color. Plus the free distance along the 6 axes: a
 // probe beyond a wall must not light the room (leaks).
 //
-// The probes go to the GPU through render targets (one texel per probe and plane,
-// written as tiny quads - a texture lock from the main thread would stall the render
-// thread); DEFERRED_GI blends the 8 probes around every pixel at half resolution
-// (dropping the ones behind the surface or out of its sight): the near grid, fading
-// over its outer half into the far grid, and beyond both an estimate from the sky
-// visibility map - the indirect light the global light pass uses instead of its flat
-// sky light.
+// The way it is computed is laid out so that nothing is seen "loading" (the first
+// version traced a far grid 4 x coarser than the near one, probes in passes of 32 rays
+// that were refined later, and gathered the bounces in sweeps through the slots - the
+// darkness of a hall came in by blocks while the player walked, and its far end turned
+// darker as the near grid reached it):
+//  - one spacing for everything up to 1600 - 2048 units, where the near grid fades into
+//    the far one (twice as coarse, to 3072 units; beyond, an estimate from the sky
+//    visibility of the rain map);
+//  - the work is done by worker threads of the GI's own (below normal priority) in the
+//    background, not in the frame: a probe gets all its rays at once (fewer, refined
+//    later, if it is farther than r_deferred_gi_hq_radius from the camera), the main
+//    thread takes in what is done, schedules more and uploads;
+//  - what the lighting reads eases toward what the probes are (deferred_gi_blend_ps30,
+//    r_deferred_gi_smooth): a probe's new light never snaps, a new probe fades in;
+//  - the background gathers go through the probes in a scattered order.
+// The first frame of a map traces everything around the camera at once (the level is
+// still loading).
 //
-// CPU: the rays are traced on the thread pool (the BSP trace keeps its state per
-// thread, and brush entities are clipped through the same code; static props and the
-// material system are not thread safe - props don't occlude, the albedo is looked up
-// on the main thread afterwards). The whole near grid gets its first pass in the first
-// frame of a map (the level is still loading), a new slice within a frame or two; a
-// wall time budget per frame (r_deferred_gi_budget_ms; more while a lot is missing
-// after a teleport), and a probe fades in instead of popping. The sun's part is redone
-// from the kept hits when the sun has moved (r_deferred_gi_sun_refresh degrees).
+// The probes go to the GPU through render targets (one texel per probe and plane,
+// written as points - a texture lock from the main thread would stall the render
+// thread); DEFERRED_GI blends the 8 probes around every pixel at half resolution
+// (dropping the ones behind the surface or out of its sight).
+//
+// Threads: the rays are traced on the workers (the BSP trace keeps its state per thread,
+// and brush entities are clipped through the same code; static props and the material
+// system are not thread safe - props don't occlude, the albedo is looked up on the main
+// thread when the results are taken in). A probe has at most one job at a time; a job
+// writes into its own results, except the sun job, which marks the lit hits of its probe
+// in place (nothing else touches them meanwhile). The brush entities a job clips to are
+// a snapshot that is not changed while a job holds it.
 //
 //=============================================================================//
 
@@ -64,12 +69,13 @@
 
 #include "materialsystem/itexture.h"
 #include "materialsystem/imaterial.h"
+#include "materialsystem/imaterialvar.h"
 #include "materialsystem/imesh.h"
 #include "view.h"
 #include "view_shared.h"
 #include "tier1/KeyValues.h"
 #include "tier1/callqueue.h"
-#include "vstdlib/jobthread.h"
+#include "tier0/threadtools.h"
 #include "debugoverlay_shared.h"
 #include "engine/ICollideable.h"
 #include "engine/ivmodelinfo.h"
@@ -82,14 +88,14 @@
 static ConVar r_deferred_gi( "r_deferred_gi", "1", FCVAR_ARCHIVE,
 	"World-space indirect light: sky light through windows and doors, sun light bounced off lit surfaces (probes traced around the camera)" );
 static ConVar r_deferred_gi_budget_ms( "r_deferred_gi_budget_ms", "1.0", FCVAR_ARCHIVE,
-	"GI probes: time per frame for tracing (ms; the worker threads trace during it)", true, 0.1f, true, 50.0f );
-static ConVar r_deferred_gi_catchup_ms( "r_deferred_gi_catchup_ms", "4", 0,
-	"GI probes: time per frame for tracing while many probes are missing (after a teleport)", true, 0.1f, true, 50.0f );
-static ConVar r_deferred_gi_load_ms( "r_deferred_gi_load_ms", "2500", 0,
-	"GI probes: the first frame after a map loads traces the probes around the camera - at most this long (ms)", true, 0.0f, true, 8000.0f );
-static ConVar r_deferred_gi_threads( "r_deferred_gi_threads", "1", 0,
-	"GI probes: worker threads - 0 none (the main thread traces), 1 the engine's pool (3 threads), 2 a pool of its own with a thread per spare core, more = that many" );
-static ConVar r_deferred_gi_fade( "r_deferred_gi_fade", "0.35", 0,
+	"GI probes: main thread time per frame at most for taking in what the worker threads have done", true, 0.1f, true, 50.0f );
+static ConVar r_deferred_gi_load_ms( "r_deferred_gi_load_ms", "6000", 0,
+	"GI probes: the first frame after a map loads traces the probes around the camera - at most this long (ms; the rest follows in the background)", true, 0.0f, true, 20000.0f );
+static ConVar r_deferred_gi_threads( "r_deferred_gi_threads", "-1", 0,
+	"GI probes: worker threads (-1 = by the CPU: logical processors / 2 - 1, 1..3; applied on the next map)", true, -1.0f, true, 8.0f );
+static ConVar r_deferred_gi_smooth( "r_deferred_gi_smooth", "0.4", 0,
+	"GI probes: seconds the light the lighting reads takes to follow a probe's new light (0 = at once)", true, 0.0f, true, 5.0f );
+static ConVar r_deferred_gi_fade( "r_deferred_gi_fade", "0.5", 0,
 	"GI probes: seconds a newly traced probe takes to fade in", true, 0.0f, true, 5.0f );
 static ConVar r_deferred_gi_bounce( "r_deferred_gi_bounce", "1.0", FCVAR_ARCHIVE,
 	"GI: strength of the sun light bounced off lit surfaces", true, 0.0f, true, 4.0f );
@@ -128,34 +134,58 @@ static ConVar r_deferred_gi_sun_refresh( "r_deferred_gi_sun_refresh", "1.5", 0,
 static ConVar r_deferred_gi_spacing( "r_deferred_gi_spacing", "64", 0,
 	"GI: distance between the probes of the near grid (units; applied by r_deferred_gi_reset / a new map)", true, 16.0f, true, 256.0f );
 static ConVar r_deferred_gi_far( "r_deferred_gi_far", "1", 0,
-	"GI: the far grid of probes (4 x the spacing) around the near one" );
+	"GI: the far grid of probes (twice the spacing) around the near one" );
 static ConVar r_deferred_gi_rays( "r_deferred_gi_rays", "192", FCVAR_ARCHIVE,
-	"GI: rays per probe of the near grid (traced 32 at a time; more = smoother light through small openings, longer until it settles)", true, 32.0f, true, 256.0f );
+	"GI: rays per probe of the near grid within r_deferred_gi_hq_radius of the camera (more = smoother light through small openings)", true, 32.0f, true, 256.0f );
+static ConVar r_deferred_gi_rays_mid( "r_deferred_gi_rays_mid", "96", 0,
+	"GI: rays per probe of the near grid farther from the camera (refined to r_deferred_gi_rays when it comes closer)", true, 32.0f, true, 256.0f );
 static ConVar r_deferred_gi_rays_far( "r_deferred_gi_rays_far", "64", 0,
 	"GI: rays per probe of the far grid", true, 32.0f, true, 256.0f );
+static ConVar r_deferred_gi_hq_radius( "r_deferred_gi_hq_radius", "1024", 0,
+	"GI: probes of the near grid within this of the camera get r_deferred_gi_rays", true, 0.0f, true, 4096.0f );
+static ConVar r_deferred_gi_gather_hits( "r_deferred_gi_gather_hits", "96", 0,
+	"GI: hits of a probe its bounced light is gathered from at most (spread over all of them)", true, 16.0f, true, 256.0f );
+static ConVar r_deferred_gi_sweep_interval( "r_deferred_gi_sweep_interval", "3", 0,
+	"GI: seconds between two rounds of gathering all probes again while anything changes (the light spreading farther)", true, 0.0f, true, 60.0f );
+static ConVar r_deferred_gi_upload_max( "r_deferred_gi_upload_max", "2048", 0,
+	"GI: probes of the near grid written to the GPU per frame at most (the rest the next frames; half of it for the far grid, 4 x after a new map or a teleport)", true, 256.0f, true, 65536.0f );
+static ConVar r_deferred_gi_upload_points( "r_deferred_gi_upload_points", "1", 0,
+	"GI: write the probe texels as points (1) or as tiny quads (0, four times the vertices)" );
 static ConVar r_deferred_gi_brush_entities( "r_deferred_gi_brush_entities", "1", 0,
 	"GI: brush entities at rest (func_brush, closed doors...) block the light like the world does (0 = the world only)" );
-static ConVar r_deferred_gi_fade_cells( "r_deferred_gi_fade_cells", "5", 0,
-	"GI: the near grid fades into the far one over this many of its outer cells (a wide band: nothing is seen to 'load in' on the way there)", true, 1.0f, true, 15.0f );
+static ConVar r_deferred_gi_fade_cells( "r_deferred_gi_fade_cells", "6", 0,
+	"GI: the near grid fades into the far one over this many of its outer cells", true, 1.0f, true, 15.0f );
+static ConVar r_deferred_gi_debug_point( "r_deferred_gi_debug_point", "0 0", FCVAR_CHEAT, "GI: x y of the point r_deferred_gi_debug 9 measures the distance from" );
 static ConVar r_deferred_gi_debug( "r_deferred_gi_debug", "0", FCVAR_CHEAT,
-	"GI: 1 = ambient light only, 2 = + draw the probes near the camera, 3 = sky visibility, 4 = indirect sun, 5 = which source lights a pixel (red near grid, green far grid, blue estimate), 6 = bounced sky light" );
+	"GI: 1 = ambient light only, 2 = + draw the probes near the camera, 3 = sky visibility, 4 = indirect sun, 5 = which source lights a pixel (red near grid, green far grid, blue estimate), 6 = bounced sky light, 7 = the pixel's world position (frac / 64), 8 = its normal, 9 = its distance from r_deferred_gi_debug_point, 10 = near grid: its share (r), the weight of its probes (g), sky visibility x 10 (b)" );
 
 enum
 {
-	// (32 x 32: the near grid reaches 990 units from the camera - with 24 the far wall of a large
-	// room, the houses across a square were lit by the far grid, 256 units between its probes)
-	GI_NX = 32,
-	GI_NY = 32,
-	GI_NZ = 10,
-	GI_NUM_PROBES = GI_NX * GI_NY * GI_NZ,
-	GI_RAYS = 32,			// rays of one pass
+	GI_CASCADES = 2,
+	GI_RAYS = 32,			// rays of one pass (a probe has up to GI_MAX_PASSES)
 	GI_MAX_PASSES = 8,
 	GI_PLANES = 6,
-	GI_ATLAS_W = GI_NX * GI_NZ,
-	GI_ATLAS_H = GI_NY * GI_PLANES,
-	GI_PROBES_PER_BATCH = 512,
-	GI_CASCADES = 2,
 	GI_MAX_CANDIDATES = 48,
+	GI_MAX_WORKERS = 8,
+	GI_MAX_ALBEDO = 4096,
+	GI_SURFACE_CACHE = 4096,
+	GI_SWEEP_STRIDE = 7919,		// (prime: the background visits the slots in a scattered order)
+};
+
+struct GIGridDesc_t
+{
+	int n[3];				// probes per axis
+	float flScale;			// spacing x this
+	float flCameraLevel;	// probes below the camera
+	const char *pszAtlas;
+};
+
+// (the near grid: one spacing for everything the player looks at up close and across a hall, a
+// square, a street - 2048 units to either side, fading into the far grid from ~1660 on)
+static const GIGridDesc_t s_GridDesc[ GI_CASCADES ] =
+{
+	{ { 64, 64, 16 }, 1.0f, 5.5f, "_rt_hl2rpm_gi_probes" },
+	{ { 48, 48, 12 }, 2.0f, 4.5f, "_rt_hl2rpm_gi_probes_far" },
 };
 
 // probes sit off the grid lines (cell + 0.45): map geometry is aligned to powers of two, probes at
@@ -163,43 +193,36 @@ enum
 #define GI_OFFSET			0.45f
 
 // (a ray that reaches nothing within this is open sky: long rays through open space cost the
-// most - on a map like demo_map a ray of 3072 units takes ~10 us, and the rays toward the sun,
-// once 16384 long, took most of a probe's time. Per grid: x its spacing / 64.)
+// most. Per grid: x its spacing / 64.)
 #define GI_RAY_LENGTH		1536.0f
 #define GI_RAY_LENGTH_MAX	3072.0f
 #define GI_SUN_RAY_LENGTH	2560.0f
 
-// the far grid's probes are this many times farther apart
-#define GI_FAR_SCALE		4.0f
-
-// the camera sits this many probes above the bottom of a grid: most of what matters (rooms,
-// roofs, the street) is around and above the eye, and below the ground probes are wasted
-static const float s_flCameraLevel[ GI_CASCADES ] = { 3.5f, 3.5f };
-
-// a surface a ray of a probe reached (20 bytes: a probe keeps up to 256 of them)
+// a surface a ray of a probe reached
 struct GIHit_t
 {
-	Vector vecPos;				// off the surface along its normal
-	signed char n[3];			// its normal x 127
-	unsigned char bLit;			// the sun reaches it (for the probe's vecSunDir)
-	unsigned char albedo[3];	// x 255
-	unsigned char pad;
+	unsigned short dist;	// along the ray to the surface, 1/8 unit
+	unsigned char ray;		// which ray of the probe: pass * GI_RAYS + ray of the pass
+	unsigned char bLit;		// the sun reaches it (for the probe's vecSunDir)
+	signed char n[2];		// its normal, octahedral x 127
+	unsigned short albedo;	// in s_Albedo
 };
 
 struct GIProbe_t
 {
 	int cell[3];			// world cell this slot holds
+	unsigned int gen;		// another cell in the slot (or traced anew): the result of a job for the old one is dropped
 	bool bAssigned;
-	bool bTraced;			// the first pass is done: the probe lights
+	bool bTraced;			// it has its rays: it lights
 	bool bSunValid;			// the hits' sun rays are done for vecSunDir
-	bool bDirty;			// changed since the last upload
-	bool bFading;			// in the list of probes fading in
-	bool bQueued;			// in the batch being worked on
+	bool bBusy;				// a job of it is with the workers
 	bool bRetrace;			// what is around it has changed (a door): start over, lighting with the old data meanwhile
-	bool bAlbedoPending;
+	bool bGather;			// its light wants gathering (new hits, the sun moved, a neighbour is new)
+	bool bDirty;			// in the upload list
+	bool bDirtyNow;			// in the list uploaded first (a new cell in the slot)
+	bool bInPending;		// in the list of probes waiting for a trace
 	unsigned char nPasses;	// passes of GI_RAYS rays traced
 
-	float flFade;			// 0..1 after it was traced
 	float flValid;			// 0: in a wall / closed space
 	int nBack;				// rays that hit the back of a face / started in the solid, over all passes
 	int nStartSolid;
@@ -214,35 +237,53 @@ struct GIProbe_t
 	Vector vecSunDir;
 	Vector vecTracePos;		// where the rays start (moved out of a wall)
 
+	float uploaded[12];		// visF, sun, sky as last written to the GPU (a gather that changes nothing visible is not)
+
 	int nHits;
-	int nHitsAlloc;
 	GIHit_t *pHits;
 };
 
 struct GICascade_t
 {
+	int n[3];
+	int nProbes;
 	float flSpacing;
+	float flCameraLevel;
 	int iGridMin[3];
 	bool bGridValid;
-	bool bClearAtlas;
-	bool bReuploadAll;
 	GIProbe_t *pProbes;
 	// probe offsets in the grid, nearest to the camera's place in it first
 	CUtlVector< int > order;
-	// work left: probes without their first pass; the light direction every probe's sun rays were last done for
-	int nPending;
-	Vector vecSunDone;
-	bool bSunDone;
-	bool bRefined;			// no probe is waiting for more passes
-	// the gather goes round the grid: where it is, how many more rounds
-	int iSweepCursor;
+	CUtlVector< int > pending;	// slots waiting for a trace without one out (nearest first once sorted)
+	int nPendingUnsorted;	// added since the list was last sorted
+	int nPending;			// probes without their first trace (or starting over)
+	// the background: where it is in the scattered order, rounds of gathering everything left
+	int iSweep;
 	int nSweepsLeft;
-	CTextureReference texProbes;
+	float flNextSweep;
+	bool bChanged;			// something was traced since the last round
+	// upload
+	CUtlVector< int > dirty;
+	CUtlVector< int > dirtyNow;
+	bool bClearAtlas;
+	bool bReuploadAll;
+	bool bInitialUpload;	// the first fill is being uploaded: what the lighting reads is the target as it is
+	// render targets: written (target), eased toward it (display, ping-pong)
+	CTextureReference texTarget;
+	CTextureReference texDisplay[2];
+	int iDisplay;
+	IMaterial *pMatBlend[2];	// display[ i ] -> display[ 1 - i ]
+	float flLastUpload;
+	bool bBlendReset;
 };
+
+// brush entities blocking the light: what a job clips its rays to (not changed while a job holds it)
+class CGIBrushCollide;
+struct GIBrushSnapshot_t;
 
 enum
 {
-	GIJOB_TRACE = 0,	// a pass of rays (and the sun rays of the hits)
+	GIJOB_TRACE = 0,	// passes of rays (and the sun rays of the hits)
 	GIJOB_SUN,			// the sun rays of the hits alone
 	GIJOB_GATHER,		// the indirect light from the hits
 };
@@ -250,18 +291,47 @@ enum
 // what one worker does for one probe
 struct GIJob_t
 {
+	// in
 	GIProbe_t *pProbe;
+	unsigned int gen;
 	int iCascade;
 	int iType;
+	int cell[3];
+	float flSpacing;
 	Vector vecLight;
 	bool bLight;
-	// results
+	GIBrushSnapshot_t *pBrushes;
+	// (trace: passes it has and is to have; sun / gather: its hits)
+	int nPassesHave;
+	int nPassesTarget;
+	Vector vecTracePos;
+	GIHit_t *pHits;
+	int nHits;
+	float visSumIn[4];
+	int nBackIn, nStartSolidIn;
+	float freeDistIn[6];
+	bool bSunValidIn;
+	Vector vecSunDirIn;
+
+	// out
+	bool bSkipped;
 	int nTraces;
 	int nInvalid;		// 1 = in the solid, 2 = in a closed space
-	bool bSkipped;		// the frame's time was up before a worker got to it
-	bool bSunAll;		// the sun rays of all the hits were traced (not only of the new ones)
+	// trace
+	Vector vecTracePosOut;
+	float freeDist[6];
+	float visSum[4];
+	int nBack, nStartSolid;
+	int nPasses;
+	float flValid;
+	GIHit_t *pNewHits;	// all the hits (the old ones copied)
+	int nNewHits;
 	int iFirstNewHit;
-	const char *pszSurface[ GI_RAYS ];	// of the new hits (the albedo is looked up on the main thread)
+	const char **ppSurfaces;	// of the hits from iFirstNewHit on (the albedo is looked up on the main thread)
+	bool bSunAll;
+	// gather
+	float visF[4], sun[4], sky[4];
+	Vector vecSunChroma, vecSkyChroma;
 };
 
 static GICascade_t s_Cascades[ GI_CASCADES ];
@@ -269,26 +339,65 @@ static bool s_bProbesAllocated = false;
 static Vector s_vecRayDir[ GI_RAYS ];
 static bool s_bRayDirsInit = false;
 
-static double s_flResetTime = 0.0;
 static bool s_bFirstFill = true;				// a map has just been loaded: trace before the first frame shows
-static CUtlVector< GIProbe_t * > s_Fading;
-static float s_flProbesPerMs = 8.0f;			// measured throughput of the workers
-static float s_flGathersPerMs = 100.0f;			// ... gathering
 static float s_flCameraSky = 1.0f;				// sky in sight at the camera (0 closed room .. 1 open), smoothed
+static Vector s_vecCamera( 0, 0, 0 );
 
-static CUtlMap< uintp, Vector > s_AlbedoCache( DefLessFunc( uintp ) );
+// albedo of the surfaces the rays hit (index 0: unknown). Only appended to, by the main thread,
+// before a job that could read an entry is given out; never reallocated.
+static Vector s_Albedo[ GI_MAX_ALBEDO ];
+static int s_nAlbedo = 1;
+static CUtlMap< uintp, unsigned short > s_AlbedoMap( DefLessFunc( uintp ) );
+static uintp s_SurfaceCacheKey[ GI_SURFACE_CACHE ];
+static unsigned short s_SurfaceCacheVal[ GI_SURFACE_CACHE ];
 
 // statistics
 static int s_nInvalidSolid = 0;
 static int s_nInvalidClosed = 0;
-static int s_nTracesLastFrame = 0;
 static lightData_Global_t s_LastLight;
-static int s_nProbesLastFrame = 0;
-static int s_nRefineLastFrame = 0;
-static int s_nSunLastFrame = 0;
-static int s_nGatherLastFrame = 0;
+static int s_nDoneTrace = 0, s_nDoneRefine = 0, s_nDoneSun = 0, s_nDoneGather = 0, s_nDoneTraces = 0;
+static double s_flStatsStart = 0.0;
+static float s_flFirstFillMs = 0.0f;
+static int s_nFirstFillDone = 0, s_nFirstFillLeft = 0;
 static float s_flMsLastFrame = 0.0f;
 static float s_flMsWorst = 0.0f;
+static int s_nUploadLastFrame = 0;
+// the main thread's time by phase: grids, taking in, scheduling, writing, easing (sum / max over a window)
+enum { GIPHASE_GRID, GIPHASE_COLLECT, GIPHASE_SCHEDULE, GIPHASE_UPLOAD, GIPHASE_BLEND, GIPHASE_COUNT };
+static const char *s_pszPhase[ GIPHASE_COUNT ] = { "grid", "take in", "schedule", "write", "ease" };
+static double s_flPhaseSum[ GIPHASE_COUNT ], s_flPhaseMax[ GIPHASE_COUNT ];
+static double s_flPhaseLastSum[ GIPHASE_COUNT ], s_flPhaseLastMax[ GIPHASE_COUNT ];
+static int s_nPhaseFrames = 0, s_nPhaseLastFrames = 0;
+static int s_nCollected = 0, s_nLastCollected = 0;
+static double s_flPhaseWindowStart = 0.0;
+
+static inline void PhaseTime( int iPhase, double &flMark )
+{
+	const double flNow = Plat_FloatTime();
+	const double flMs = ( flNow - flMark ) * 1000.0;
+	s_flPhaseSum[ iPhase ] += flMs;
+	s_flPhaseMax[ iPhase ] = Max( s_flPhaseMax[ iPhase ], flMs );
+	flMark = flNow;
+}
+
+static void PhaseFrameDone()
+{
+	s_nPhaseFrames++;
+	const double flNow = Plat_FloatTime();
+	if ( flNow - s_flPhaseWindowStart < 2.0 )
+		return;
+	for ( int i = 0; i < GIPHASE_COUNT; i++ )
+	{
+		s_flPhaseLastSum[i] = s_flPhaseSum[i];
+		s_flPhaseLastMax[i] = s_flPhaseMax[i];
+		s_flPhaseSum[i] = s_flPhaseMax[i] = 0.0;
+	}
+	s_nPhaseLastFrames = s_nPhaseFrames;
+	s_nLastCollected = s_nCollected;
+	s_nPhaseFrames = 0;
+	s_nCollected = 0;
+	s_flPhaseWindowStart = flNow;
+}
 
 static CTextureReference g_tex_GI;
 static CTextureReference g_tex_GIBlur;
@@ -298,24 +407,36 @@ static IMaterial *g_pMatGIBlurV = NULL;
 static IMaterial *g_pMatGIUp = NULL;
 static IMaterial *g_pMatGIUpload = NULL;
 
+static inline void ProbePos( const GICascade_t &cas, const int cell[3], Vector &vecPos )
+{
+	vecPos.Init( ( cell[0] + GI_OFFSET ) * cas.flSpacing, ( cell[1] + GI_OFFSET ) * cas.flSpacing, ( cell[2] + GI_OFFSET ) * cas.flSpacing );
+}
+
 //-----------------------------------------------------------------------------
 // Render targets and materials
 //-----------------------------------------------------------------------------
+static const char *s_pszDisplaySuffix[2] = { "_a", "_b" };
+
 void InitGIRTs()
 {
 	const unsigned int flags = TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_RENDERTARGET;
 
-	// probe atlases: x = probe x + probe z * GI_NX, y = probe y + plane * GI_NY
-	static const char *s_pszAtlas[ GI_CASCADES ] = { "_rt_hl2rpm_gi_probes", "_rt_hl2rpm_gi_probes_far" };
+	// probe atlases: x = probe x + probe z * x probes, y = probe y + plane * y probes
 	for ( int c = 0; c < GI_CASCADES; c++ )
 	{
-		s_Cascades[c].texProbes.Init( materials->CreateNamedRenderTargetTextureEx2(
-			s_pszAtlas[c],
-			GI_ATLAS_W, GI_ATLAS_H,
-			RT_SIZE_NO_CHANGE,
-			IMAGE_FORMAT_RGBA16161616F,
-			MATERIAL_RT_DEPTH_NONE,
+		const GIGridDesc_t &d = s_GridDesc[c];
+		const int w = d.n[0] * d.n[2], h = d.n[1] * GI_PLANES;
+		s_Cascades[c].texTarget.Init( materials->CreateNamedRenderTargetTextureEx2(
+			d.pszAtlas, w, h, RT_SIZE_NO_CHANGE, IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE,
 			flags | TEXTUREFLAGS_POINTSAMPLE, 0 ) );
+		for ( int i = 0; i < 2; i++ )
+		{
+			char szName[64];
+			Q_snprintf( szName, sizeof( szName ), "%s%s", d.pszAtlas, s_pszDisplaySuffix[i] );
+			s_Cascades[c].texDisplay[i].Init( materials->CreateNamedRenderTargetTextureEx2(
+				szName, w, h, RT_SIZE_NO_CHANGE, IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE,
+				flags | TEXTUREFLAGS_POINTSAMPLE, 0 ) );
+		}
 
 		// render targets lose their content with the device: write every probe again
 		s_Cascades[c].bClearAtlas = true;
@@ -365,8 +486,28 @@ static bool EnsureGIMaterials()
 		g_pMatGIBlurV = CreateGIMaterial( "__hl2rpm_gi_blur_v", "DEFERRED_GIBLUR", 1 );
 		g_pMatGIUp = CreateGIMaterial( "__hl2rpm_gi_up", "DEFERRED_GIUP", -1 );
 		g_pMatGIUpload = CreateGIMaterial( "__hl2rpm_gi_upload", "DEFERRED_GI_UPLOAD", -1 );
+
+		for ( int c = 0; c < GI_CASCADES; c++ )
+		{
+			for ( int i = 0; i < 2; i++ )
+			{
+				char szName[64], szPrev[64];
+				Q_snprintf( szName, sizeof( szName ), "__hl2rpm_gi_blend_%d%d", c, i );
+				Q_snprintf( szPrev, sizeof( szPrev ), "%s%s", s_GridDesc[c].pszAtlas, s_pszDisplaySuffix[i] );
+				KeyValues *pKV = new KeyValues( "DEFERRED_GI_BLEND" );
+				pKV->SetString( "$targetatlas", s_GridDesc[c].pszAtlas );
+				pKV->SetString( "$prevatlas", szPrev );
+				IMaterial *pMat = materials->CreateMaterial( szName, pKV );
+				if ( pMat )
+					pMat->IncrementReferenceCount();
+				s_Cascades[c].pMatBlend[i] = pMat;
+			}
+		}
 	}
-	return IsMaterialOk( g_pMatGI ) && IsMaterialOk( g_pMatGIBlurH ) && IsMaterialOk( g_pMatGIBlurV ) && IsMaterialOk( g_pMatGIUp ) && IsMaterialOk( g_pMatGIUpload );
+	bool bOk = IsMaterialOk( g_pMatGI ) && IsMaterialOk( g_pMatGIBlurH ) && IsMaterialOk( g_pMatGIBlurV ) && IsMaterialOk( g_pMatGIUp ) && IsMaterialOk( g_pMatGIUpload );
+	for ( int c = 0; c < GI_CASCADES; c++ )
+		bOk = bOk && IsMaterialOk( s_Cascades[c].pMatBlend[0] ) && IsMaterialOk( s_Cascades[c].pMatBlend[1] );
+	return bOk;
 }
 
 //-----------------------------------------------------------------------------
@@ -421,6 +562,15 @@ struct GIBrushEnt_t
 	EHANDLE hEnt;
 };
 
+// what the jobs clip their rays to: built whole, then never changed; freed when neither the GI
+// (as its current one) nor a job holds it any more (both on the main thread)
+struct GIBrushSnapshot_t
+{
+	int nRefs;
+	int nEnts;
+	GIBrushEnt_t *pEnts;
+};
+
 // what the scan remembers of an entity between scans
 struct GIBrushTrack_t
 {
@@ -431,10 +581,23 @@ struct GIBrushTrack_t
 	bool bSeen;
 };
 
-static CUtlVector< GIBrushEnt_t * > s_BrushEnts;		// the ones blocking now (read by the workers)
+static GIBrushSnapshot_t *s_pBrushSnap = NULL;
 static CUtlVector< GIBrushTrack_t > s_BrushTracks;
 static float s_flNextBrushScan = 0.0f;
 static int s_nBrushInvalidations = 0;
+
+static void ReleaseBrushSnapshot( GIBrushSnapshot_t *pSnap )
+{
+	if ( !pSnap )
+		return;
+	if ( --pSnap->nRefs <= 0 )
+	{
+		delete[] pSnap->pEnts;
+		delete pSnap;
+	}
+}
+
+static void AddPending( GICascade_t &cas, int iSlot );
 
 static void InvalidateProbesAround( const Vector &vecMins, const Vector &vecMaxs )
 {
@@ -447,16 +610,18 @@ static void InvalidateProbesAround( const Vector &vecMins, const Vector &vecMaxs
 		const float flReach = ( c == 0 ) ? 384.0f : cas.flSpacing * 1.5f;
 		const Vector vecLo = vecMins - Vector( flReach, flReach, flReach );
 		const Vector vecHi = vecMaxs + Vector( flReach, flReach, flReach );
-		for ( int i = 0; i < GI_NUM_PROBES; i++ )
+		for ( int i = 0; i < cas.nProbes; i++ )
 		{
 			GIProbe_t &p = cas.pProbes[i];
 			if ( !p.bAssigned || !p.bTraced || p.bRetrace )
 				continue;
-			const Vector vecPos( ( p.cell[0] + GI_OFFSET ) * cas.flSpacing, ( p.cell[1] + GI_OFFSET ) * cas.flSpacing, ( p.cell[2] + GI_OFFSET ) * cas.flSpacing );
+			Vector vecPos;
+			ProbePos( cas, p.cell, vecPos );
 			if ( vecPos.x < vecLo.x || vecPos.y < vecLo.y || vecPos.z < vecLo.z || vecPos.x > vecHi.x || vecPos.y > vecHi.y || vecPos.z > vecHi.z )
 				continue;
 			p.bRetrace = true;
 			cas.nPending++;
+			AddPending( cas, i );
 		}
 	}
 	s_nBrushInvalidations++;
@@ -464,9 +629,16 @@ static void InvalidateProbesAround( const Vector &vecMins, const Vector &vecMaxs
 
 static void ClearBrushEntities()
 {
-	s_BrushEnts.PurgeAndDeleteElements();
+	ReleaseBrushSnapshot( s_pBrushSnap );
+	s_pBrushSnap = NULL;
 	s_BrushTracks.Purge();
 	s_flNextBrushScan = 0.0f;
+}
+
+static bool SameBrush( const GIBrushEnt_t &a, const GIBrushEnt_t &b )
+{
+	return a.hEnt == b.hEnt && a.collide.m_iModelIndex == b.collide.m_iModelIndex
+		&& ( a.collide.m_vecOrigin - b.collide.m_vecOrigin ).LengthSqr() < 0.01f && a.collide.m_angAngles == b.collide.m_angAngles;
 }
 
 // main thread, a few times a second: which brush entities block the light now
@@ -478,10 +650,10 @@ static void UpdateBrushEntities( bool bFirst )
 
 	if ( !r_deferred_gi_brush_entities.GetBool() )
 	{
-		if ( s_BrushEnts.Count() )
+		if ( s_pBrushSnap && s_pBrushSnap->nEnts )
 		{
-			for ( int i = 0; i < s_BrushEnts.Count(); i++ )
-				InvalidateProbesAround( s_BrushEnts[i]->collide.m_vecWorldMins, s_BrushEnts[i]->collide.m_vecWorldMaxs );
+			for ( int i = 0; i < s_pBrushSnap->nEnts; i++ )
+				InvalidateProbesAround( s_pBrushSnap->pEnts[i].collide.m_vecWorldMins, s_pBrushSnap->pEnts[i].collide.m_vecWorldMaxs );
 			ClearBrushEntities();
 		}
 		return;
@@ -496,7 +668,7 @@ static void UpdateBrushEntities( bool bFirst )
 	// freed memory.
 	C_BaseEntity *pWorld = ClientEntityList().GetBaseEntity( 0 );
 
-	CUtlVector< GIBrushEnt_t * > now;
+	CUtlVector< GIBrushEnt_t > now;
 	for ( C_BaseEntity *pEnt = ClientEntityList().FirstBaseEntity(); pEnt; pEnt = ClientEntityList().NextBaseEntity( pEnt ) )
 	{
 		// (a dormant entity - out of the player's PVS - stands where it stood: skipping those
@@ -544,9 +716,9 @@ static void UpdateBrushEntities( bool bFirst )
 		if ( gpGlobals->realtime - t.flStableSince < 0.4f )
 			continue;	// moving
 
-		GIBrushEnt_t *pNew = new GIBrushEnt_t;
-		pNew->hEnt = pEnt;
-		CGIBrushCollide &col = pNew->collide;
+		GIBrushEnt_t &e = now[ now.AddToTail() ];
+		e.hEnt = pEnt;
+		CGIBrushCollide &col = e.collide;
 		col.m_pHandle = pWorld;
 		col.m_pUnknown = pWorld;
 		col.m_pModel = pModel;
@@ -556,7 +728,6 @@ static void UpdateBrushEntities( bool bFirst )
 		col.m_angAngles = angAngles;
 		AngleMatrix( angAngles, vecOrigin, col.m_matToWorld );
 		TransformAABB( col.m_matToWorld, col.m_vecMins, col.m_vecMaxs, col.m_vecWorldMins, col.m_vecWorldMaxs );
-		now.AddToTail( pNew );
 	}
 
 	for ( int i = s_BrushTracks.Count() - 1; i >= 0; i-- )
@@ -566,67 +737,278 @@ static void UpdateBrushEntities( bool bFirst )
 	}
 
 	// what has changed since the last scan: the probes around it start over
-	if ( !bFirst )
+	bool bChanged = !s_pBrushSnap || s_pBrushSnap->nEnts != now.Count();
+	const int nOld = s_pBrushSnap ? s_pBrushSnap->nEnts : 0;
+	for ( int i = 0; i < nOld; i++ )
 	{
-		for ( int i = 0; i < s_BrushEnts.Count(); i++ )
+		const GIBrushEnt_t &a = s_pBrushSnap->pEnts[i];
+		bool bSame = false;
+		for ( int k = 0; k < now.Count() && !bSame; k++ )
+			bSame = SameBrush( a, now[k] );
+		if ( !bSame )
 		{
-			const CGIBrushCollide &a = s_BrushEnts[i]->collide;
-			bool bSame = false;
-			for ( int k = 0; k < now.Count() && !bSame; k++ )
-			{
-				const CGIBrushCollide &b = now[k]->collide;
-				bSame = s_BrushEnts[i]->hEnt == now[k]->hEnt && a.m_iModelIndex == b.m_iModelIndex
-					&& ( a.m_vecOrigin - b.m_vecOrigin ).LengthSqr() < 0.01f && a.m_angAngles == b.m_angAngles;
-			}
-			if ( !bSame )
-				InvalidateProbesAround( a.m_vecWorldMins, a.m_vecWorldMaxs );
-		}
-		for ( int k = 0; k < now.Count(); k++ )
-		{
-			const CGIBrushCollide &b = now[k]->collide;
-			bool bSame = false;
-			for ( int i = 0; i < s_BrushEnts.Count() && !bSame; i++ )
-			{
-				const CGIBrushCollide &a = s_BrushEnts[i]->collide;
-				bSame = s_BrushEnts[i]->hEnt == now[k]->hEnt && a.m_iModelIndex == b.m_iModelIndex
-					&& ( a.m_vecOrigin - b.m_vecOrigin ).LengthSqr() < 0.01f && a.m_angAngles == b.m_angAngles;
-			}
-			if ( !bSame )
-				InvalidateProbesAround( b.m_vecWorldMins, b.m_vecWorldMaxs );
+			bChanged = true;
+			if ( !bFirst )
+				InvalidateProbesAround( a.collide.m_vecWorldMins, a.collide.m_vecWorldMaxs );
 		}
 	}
+	for ( int k = 0; k < now.Count(); k++ )
+	{
+		bool bSame = false;
+		for ( int i = 0; i < nOld && !bSame; i++ )
+			bSame = SameBrush( s_pBrushSnap->pEnts[i], now[k] );
+		if ( !bSame )
+		{
+			bChanged = true;
+			if ( !bFirst )
+				InvalidateProbesAround( now[k].collide.m_vecWorldMins, now[k].collide.m_vecWorldMaxs );
+		}
+	}
+	if ( !bChanged )
+		return;
 
-	s_BrushEnts.PurgeAndDeleteElements();
-	s_BrushEnts.AddVectorToTail( now );
+	GIBrushSnapshot_t *pSnap = new GIBrushSnapshot_t;
+	pSnap->nRefs = 1;
+	pSnap->nEnts = now.Count();
+	pSnap->pEnts = pSnap->nEnts ? new GIBrushEnt_t[ pSnap->nEnts ] : NULL;
+	for ( int i = 0; i < pSnap->nEnts; i++ )
+		pSnap->pEnts[i] = now[i];
+	ReleaseBrushSnapshot( s_pBrushSnap );
+	s_pBrushSnap = pSnap;
 }
 
-static void ShutdownGIPool();
+//-----------------------------------------------------------------------------
+// Worker threads
+//-----------------------------------------------------------------------------
+static CThreadFastMutex s_JobMutex;
+static CUtlVector< GIJob_t * > s_JobQueue;		// given out from s_iJobHead on
+static int s_iJobHead = 0;
+static CUtlVector< GIJob_t * > s_JobDone;
+static CThreadManualEvent s_evWork;
+static volatile bool s_bWorkersQuit = false;
+static volatile bool s_bCancelJobs = false;
+static ThreadHandle_t s_hWorkers[ GI_MAX_WORKERS ];
+static int s_nWorkers = 0;
+static int s_nOutstanding = 0;					// given out and not taken in yet (main thread)
+
+static void ProcessJob( GIJob_t &job );
+
+// (a few at a time: a gather takes some 30 us, and every visit of the queue is a lock the main
+// thread may be waiting for)
+static int PopJobs( GIJob_t **ppJobs, int nMax )
+{
+	AUTO_LOCK( s_JobMutex );
+	int n = 0;
+	while ( n < nMax && s_iJobHead < s_JobQueue.Count() )
+		ppJobs[ n++ ] = s_JobQueue[ s_iJobHead++ ];
+	if ( s_iJobHead >= s_JobQueue.Count() )
+	{
+		s_JobQueue.RemoveAll();
+		s_iJobHead = 0;
+		s_evWork.Reset();
+	}
+	return n;
+}
+
+static void PushDone( GIJob_t **ppJobs, int n )
+{
+	AUTO_LOCK( s_JobMutex );
+	s_JobDone.AddMultipleToTail( n, ppJobs );
+}
+
+static void RunJobs( GIJob_t **ppJobs, int n )
+{
+	for ( int i = 0; i < n; i++ )
+	{
+		if ( s_bCancelJobs )
+			ppJobs[i]->bSkipped = true;
+		else
+			ProcessJob( *ppJobs[i] );
+	}
+	PushDone( ppJobs, n );
+}
+
+static unsigned GIWorkerMain( void *pParam )
+{
+	GIJob_t *pJobs[4];
+	while ( !s_bWorkersQuit )
+	{
+		const int n = PopJobs( pJobs, 4 );
+		if ( !n )
+		{
+			s_evWork.Wait( 20 );
+			continue;
+		}
+		RunJobs( pJobs, n );
+	}
+	return 0;
+}
+
+static int WantedWorkers()
+{
+	const int iSet = r_deferred_gi_threads.GetInt();
+	if ( iSet >= 0 )
+		return clamp( iSet, 0, (int)GI_MAX_WORKERS );
+	return clamp( (int)GetCPUInformation()->m_nLogicalProcessors / 2 - 1, 1, 3 );
+}
+
+static void StartWorkers()
+{
+	if ( s_nWorkers > 0 )
+		return;
+	s_bWorkersQuit = false;
+	const int nWanted = WantedWorkers();
+	for ( int i = 0; i < nWanted; i++ )
+	{
+		ThreadHandle_t h = CreateSimpleThread( GIWorkerMain, NULL );
+		if ( !h )
+			break;
+		// (below the game's own threads: the GI waits, the frame doesn't)
+		ThreadSetPriority( h, -1 );
+		s_hWorkers[ s_nWorkers++ ] = h;
+	}
+}
+
+static void StopWorkers()
+{
+	if ( s_nWorkers <= 0 )
+		return;
+	s_bWorkersQuit = true;
+	s_evWork.Set();
+	for ( int i = 0; i < s_nWorkers; i++ )
+	{
+		ThreadJoin( s_hWorkers[i] );
+		ReleaseThreadHandle( s_hWorkers[i] );
+		s_hWorkers[i] = NULL;
+	}
+	s_nWorkers = 0;
+	s_bWorkersQuit = false;
+}
+
+// jobs given out are collected and handed to the workers at once (FlushJobs)
+static CUtlVector< GIJob_t * > s_JobsToSubmit;
+
+static void SubmitJob( GIJob_t *pJob )
+{
+	pJob->pProbe->bBusy = true;
+	s_nOutstanding++;
+	s_JobsToSubmit.AddToTail( pJob );
+}
+
+static void FlushJobs()
+{
+	if ( !s_JobsToSubmit.Count() )
+		return;
+	{
+		AUTO_LOCK( s_JobMutex );
+		s_JobQueue.AddVectorToTail( s_JobsToSubmit );
+		s_evWork.Set();
+	}
+	s_JobsToSubmit.RemoveAll();
+}
+
+// the main thread works too (the first fill, or no workers at all)
+static void HelpWithJobs( double flDeadline )
+{
+	FlushJobs();
+	GIJob_t *pJobs[4];
+	while ( Plat_FloatTime() < flDeadline )
+	{
+		const int n = PopJobs( pJobs, 4 );
+		if ( !n )
+			break;
+		RunJobs( pJobs, n );
+	}
+}
+
+static int QueuedJobs()
+{
+	AUTO_LOCK( s_JobMutex );
+	return s_JobQueue.Count() - s_iJobHead;
+}
+
+static void IntegrateJob( GIJob_t *pJob );
+
+// (done jobs are kept for the next ones: tens of thousands go through a map's first frame)
+static CUtlVector< GIJob_t * > s_FreeJobs;
+static void FreeJob( GIJob_t *pJob )
+{
+	if ( s_FreeJobs.Count() < 4096 )
+		s_FreeJobs.AddToTail( pJob );
+	else
+		delete pJob;
+}
+
+// takes in what the workers have done (at most until flDeadline, 0 = all)
+static int CollectJobs( double flDeadline )
+{
+	CUtlVector< GIJob_t * > done;
+	{
+		AUTO_LOCK( s_JobMutex );
+		done.AddVectorToTail( s_JobDone );
+		s_JobDone.RemoveAll();
+	}
+	int i = 0;
+	for ( ; i < done.Count(); i++ )
+	{
+		// (what is left goes back for the next frame - a probe stays busy until then)
+		if ( flDeadline > 0.0 && ( i & 15 ) == 15 && Plat_FloatTime() > flDeadline )
+			break;
+		IntegrateJob( done[i] );
+	}
+	if ( i < done.Count() )
+	{
+		AUTO_LOCK( s_JobMutex );
+		const int nLeft = done.Count() - i;
+		s_JobDone.InsertMultipleBefore( 0, nLeft );
+		for ( int k = 0; k < nLeft; k++ )
+			s_JobDone[k] = done[ i + k ];
+	}
+	return i;
+}
+
+// every job given out comes back (dropped): before the probes, the brush entities or the map go away
+static void DrainJobs()
+{
+	if ( s_nOutstanding <= 0 )
+		return;
+	s_bCancelJobs = true;
+	FlushJobs();
+	while ( s_nOutstanding > 0 )
+	{
+		HelpWithJobs( Plat_FloatTime() + 1.0 );
+		CollectJobs( 0.0 );
+		if ( s_nOutstanding > 0 )
+			ThreadSleep( 1 );
+	}
+	s_bCancelJobs = false;
+}
+
+static void ShutdownGIProbes();
 
 void ShutdownGI()
 {
+	DrainJobs();
+	StopWorkers();
 	if ( g_pMatGI ) { g_pMatGI->DecrementReferenceCount(); g_pMatGI = NULL; }
 	if ( g_pMatGIBlurH ) { g_pMatGIBlurH->DecrementReferenceCount(); g_pMatGIBlurH = NULL; }
 	if ( g_pMatGIBlurV ) { g_pMatGIBlurV->DecrementReferenceCount(); g_pMatGIBlurV = NULL; }
 	if ( g_pMatGIUp ) { g_pMatGIUp->DecrementReferenceCount(); g_pMatGIUp = NULL; }
 	if ( g_pMatGIUpload ) { g_pMatGIUpload->DecrementReferenceCount(); g_pMatGIUpload = NULL; }
-	s_Fading.Purge();
-	ClearBrushEntities();
-	ShutdownGIPool();
 	for ( int c = 0; c < GI_CASCADES; c++ )
 	{
-		if ( s_Cascades[c].pProbes )
+		for ( int i = 0; i < 2; i++ )
 		{
-			for ( int i = 0; i < GI_NUM_PROBES; i++ )
+			if ( s_Cascades[c].pMatBlend[i] )
 			{
-				if ( s_Cascades[c].pProbes[i].pHits )
-					free( s_Cascades[c].pProbes[i].pHits );
+				s_Cascades[c].pMatBlend[i]->DecrementReferenceCount();
+				s_Cascades[c].pMatBlend[i] = NULL;
 			}
 		}
-		delete[] s_Cascades[c].pProbes;
-		s_Cascades[c].pProbes = NULL;
-		s_Cascades[c].order.Purge();
 	}
-	s_bProbesAllocated = false;
+	ClearBrushEntities();
+	ShutdownGIProbes();
+	s_FreeJobs.PurgeAndDeleteElements();
 }
 
 //-----------------------------------------------------------------------------
@@ -652,9 +1034,9 @@ static void InitRayDirs()
 // the directions of a probe's pass: the even set, turned - another way for every pass and
 // every probe (the same set everywhere made the rays of neighbouring probes miss the same
 // opening together; passes add up to an ever denser set)
-static void PassRotation( const GIProbe_t &p, int iPass, matrix3x4_t &mat )
+static void PassRotation( const int cell[3], int iPass, matrix3x4_t &mat )
 {
-	unsigned int h = (unsigned int)p.cell[0] * 73856093u ^ (unsigned int)p.cell[1] * 19349663u ^ (unsigned int)p.cell[2] * 83492791u ^ (unsigned int)( iPass + 1 ) * 2654435761u;
+	unsigned int h = (unsigned int)cell[0] * 73856093u ^ (unsigned int)cell[1] * 19349663u ^ (unsigned int)cell[2] * 83492791u ^ (unsigned int)( iPass + 1 ) * 2654435761u;
 	h ^= h >> 15;
 	h *= 0x2c1b3c6du;
 	h ^= h >> 12;
@@ -679,21 +1061,58 @@ static inline int PosMod( int a, int n )
 	return ( m < 0 ) ? m + n : m;
 }
 
-static inline int SlotIndex( int cx, int cy, int cz )
+static inline int SlotIndex( const GICascade_t &cas, int cx, int cy, int cz )
 {
-	return PosMod( cx, GI_NX ) + GI_NX * ( PosMod( cy, GI_NY ) + GI_NY * PosMod( cz, GI_NZ ) );
+	return PosMod( cx, cas.n[0] ) + cas.n[0] * ( PosMod( cy, cas.n[1] ) + cas.n[1] * PosMod( cz, cas.n[2] ) );
 }
 
-static float s_flSortLevel = 2.5f;
+static const GICascade_t *s_pSortCascade = NULL;
 static int __cdecl OrderSort( const int *a, const int *b )
 {
 	// offsets from the camera's place in the grid; height counts a bit more (other floors)
-	const int iLevel = (int)( s_flSortLevel * 2.0f );
-	const int ax = ( *a % GI_NX ) * 2 - ( GI_NX - 1 ), ay = ( ( *a / GI_NX ) % GI_NY ) * 2 - ( GI_NY - 1 ), az = ( *a / ( GI_NX * GI_NY ) ) * 2 - iLevel;
-	const int bx = ( *b % GI_NX ) * 2 - ( GI_NX - 1 ), by = ( ( *b / GI_NX ) % GI_NY ) * 2 - ( GI_NY - 1 ), bz = ( *b / ( GI_NX * GI_NY ) ) * 2 - iLevel;
+	const GICascade_t &cas = *s_pSortCascade;
+	const int nx = cas.n[0], ny = cas.n[1];
+	const int iLevel = (int)( cas.flCameraLevel * 2.0f );
+	const int ax = ( *a % nx ) * 2 - ( nx - 1 ), ay = ( ( *a / nx ) % ny ) * 2 - ( ny - 1 ), az = ( *a / ( nx * ny ) ) * 2 - iLevel;
+	const int bx = ( *b % nx ) * 2 - ( nx - 1 ), by = ( ( *b / nx ) % ny ) * 2 - ( ny - 1 ), bz = ( *b / ( nx * ny ) ) * 2 - iLevel;
 	const int da = ax * ax + ay * ay + az * az * 2;
 	const int db = bx * bx + by * by + bz * bz * 2;
 	return ( da < db ) ? -1 : ( ( da > db ) ? 1 : ( *a - *b ) );
+}
+
+static inline int OrderedSlot( const GICascade_t &cas, int i )
+{
+	const int o = cas.order[i];
+	const int nx = cas.n[0], ny = cas.n[1];
+	return SlotIndex( cas, cas.iGridMin[0] + o % nx, cas.iGridMin[1] + ( o / nx ) % ny, cas.iGridMin[2] + o / ( nx * ny ) );
+}
+
+static void AddDirty( GICascade_t &cas, int iSlot, bool bNow )
+{
+	GIProbe_t &p = cas.pProbes[ iSlot ];
+	if ( bNow )
+	{
+		if ( !p.bDirtyNow )
+		{
+			p.bDirtyNow = true;
+			cas.dirtyNow.AddToTail( iSlot );
+		}
+	}
+	else if ( !p.bDirty && !p.bDirtyNow )
+	{
+		p.bDirty = true;
+		cas.dirty.AddToTail( iSlot );
+	}
+}
+
+static void AddPending( GICascade_t &cas, int iSlot )
+{
+	GIProbe_t &p = cas.pProbes[ iSlot ];
+	if ( p.bInPending )
+		return;
+	p.bInPending = true;
+	cas.pending.AddToTail( iSlot );
+	cas.nPendingUnsorted++;
 }
 
 // The render targets lost their content (a device reset, mat_reloadallmaterials, a video
@@ -707,70 +1126,6 @@ void DeferredGI_OnRTContentLost()
 		s_Cascades[c].bClearAtlas = true;
 		s_Cascades[c].bReuploadAll = true;
 	}
-}
-
-void DeferredGI_Reset()
-{
-	s_AlbedoCache.RemoveAll();
-	s_Fading.RemoveAll();
-	ClearBrushEntities();
-	for ( int c = 0; c < GI_CASCADES; c++ )
-	{
-		GICascade_t &cas = s_Cascades[c];
-		cas.bGridValid = false;
-		cas.bClearAtlas = true;
-		cas.nPending = 0;
-		cas.bSunDone = false;
-		cas.bRefined = false;
-		cas.iSweepCursor = 0;
-		cas.nSweepsLeft = 0;
-		if ( cas.pProbes )
-		{
-			for ( int i = 0; i < GI_NUM_PROBES; i++ )
-			{
-				GIProbe_t &p = cas.pProbes[i];
-				p.bAssigned = false;
-				p.bTraced = false;
-				p.bSunValid = false;
-				p.bDirty = false;
-				p.bFading = false;
-				p.bQueued = false;
-				p.bRetrace = false;
-				p.bAlbedoPending = false;
-				p.nPasses = 0;
-				p.nHits = 0;
-			}
-		}
-	}
-	s_nInvalidSolid = 0;
-	s_nInvalidClosed = 0;
-	s_flMsWorst = 0.0f;
-	s_flCameraSky = 1.0f;
-	s_flResetTime = Plat_FloatTime();
-	s_bFirstFill = true;
-}
-
-static void EnsureProbes()
-{
-	if ( s_bProbesAllocated )
-		return;
-	s_bProbesAllocated = true;
-
-	for ( int c = 0; c < GI_CASCADES; c++ )
-	{
-		GICascade_t &cas = s_Cascades[c];
-		cas.pProbes = new GIProbe_t[ GI_NUM_PROBES ];
-		memset( cas.pProbes, 0, sizeof( GIProbe_t ) * GI_NUM_PROBES );
-
-		cas.order.SetCount( GI_NUM_PROBES );
-		for ( int i = 0; i < GI_NUM_PROBES; i++ )
-			cas.order[i] = i;
-		s_flSortLevel = s_flCameraLevel[c];
-		cas.order.Sort( OrderSort );
-	}
-
-	InitRayDirs();
-	DeferredGI_Reset();
 }
 
 static void ClearProbeLight( GIProbe_t &p )
@@ -789,29 +1144,138 @@ static void ClearProbeLight( GIProbe_t &p )
 	p.vecSkyChroma.Init( 1, 1, 1 );
 }
 
-static void ResetProbe( GICascade_t &cas, GIProbe_t &p, int cx, int cy, int cz )
+void DeferredGI_Reset()
 {
-	// (counted as pending: no first pass yet, or starting over)
+	DrainJobs();
+	s_AlbedoMap.RemoveAll();
+	s_nAlbedo = 1;
+	s_Albedo[0].Init( 0.3f, 0.3f, 0.3f );
+	memset( s_SurfaceCacheKey, 0, sizeof( s_SurfaceCacheKey ) );
+	ClearBrushEntities();
+	for ( int c = 0; c < GI_CASCADES; c++ )
+	{
+		GICascade_t &cas = s_Cascades[c];
+		cas.bGridValid = false;
+		cas.bClearAtlas = true;
+		cas.bInitialUpload = false;
+		cas.bBlendReset = true;
+		cas.nPending = 0;
+		cas.pending.RemoveAll();
+		cas.nPendingUnsorted = 0;
+		cas.iSweep = 0;
+		cas.nSweepsLeft = 0;
+		cas.flNextSweep = 0.0f;
+		cas.bChanged = false;
+		cas.dirty.RemoveAll();
+		cas.dirtyNow.RemoveAll();
+		if ( cas.pProbes )
+		{
+			for ( int i = 0; i < cas.nProbes; i++ )
+			{
+				GIProbe_t &p = cas.pProbes[i];
+				p.bAssigned = false;
+				p.bTraced = false;
+				p.bSunValid = false;
+				p.bBusy = false;
+				p.bRetrace = false;
+				p.bGather = false;
+				p.bDirty = false;
+				p.bDirtyNow = false;
+				p.bInPending = false;
+				p.nPasses = 0;
+				p.nHits = 0;
+			}
+		}
+	}
+	s_nInvalidSolid = 0;
+	s_nInvalidClosed = 0;
+	s_flMsWorst = 0.0f;
+	s_flCameraSky = 1.0f;
+	s_nDoneTrace = s_nDoneRefine = s_nDoneSun = s_nDoneGather = s_nDoneTraces = 0;
+	s_flStatsStart = Plat_FloatTime();
+	s_bFirstFill = true;
+}
+
+static void ShutdownGIProbes()
+{
+	for ( int c = 0; c < GI_CASCADES; c++ )
+	{
+		GICascade_t &cas = s_Cascades[c];
+		if ( cas.pProbes )
+		{
+			for ( int i = 0; i < cas.nProbes; i++ )
+			{
+				if ( cas.pProbes[i].pHits )
+					free( cas.pProbes[i].pHits );
+			}
+		}
+		delete[] cas.pProbes;
+		cas.pProbes = NULL;
+		cas.order.Purge();
+		cas.dirty.Purge();
+		cas.dirtyNow.Purge();
+		cas.pending.Purge();
+	}
+	s_bProbesAllocated = false;
+}
+
+static void EnsureProbes()
+{
+	if ( s_bProbesAllocated )
+		return;
+	s_bProbesAllocated = true;
+
+	for ( int c = 0; c < GI_CASCADES; c++ )
+	{
+		GICascade_t &cas = s_Cascades[c];
+		const GIGridDesc_t &d = s_GridDesc[c];
+		for ( int a = 0; a < 3; a++ )
+			cas.n[a] = d.n[a];
+		cas.nProbes = d.n[0] * d.n[1] * d.n[2];
+		cas.flCameraLevel = d.flCameraLevel;
+		cas.pProbes = new GIProbe_t[ cas.nProbes ];
+		memset( cas.pProbes, 0, sizeof( GIProbe_t ) * cas.nProbes );
+
+		cas.order.SetCount( cas.nProbes );
+		for ( int i = 0; i < cas.nProbes; i++ )
+			cas.order[i] = i;
+		s_pSortCascade = &cas;
+		cas.order.Sort( OrderSort );
+	}
+
+	InitRayDirs();
+	DeferredGI_Reset();
+}
+
+static void ResetProbe( GICascade_t &cas, int iSlot, int cx, int cy, int cz, bool bUrgent )
+{
+	GIProbe_t &p = cas.pProbes[ iSlot ];
+	// (counted as pending: no first trace yet, or starting over)
 	const bool bWasPending = p.bAssigned && ( !p.bTraced || p.bRetrace );
+	bUrgent = bUrgent && p.bAssigned;
 	if ( !bWasPending )
 		cas.nPending++;
 	p.cell[0] = cx;
 	p.cell[1] = cy;
 	p.cell[2] = cz;
+	// (a job of the old cell still out: its result is dropped; its hits stay allocated until then)
+	p.gen++;
 	p.bAssigned = true;
 	p.bTraced = false;
 	p.bSunValid = false;
-	p.bDirty = true;	// upload as invalid until traced
-	p.bQueued = false;
 	p.bRetrace = false;
-	p.bAlbedoPending = false;
+	p.bGather = false;
 	p.nPasses = 0;
-	p.flFade = 0.0f;
 	p.flValid = 0.0f;
 	p.nHits = 0;
 	ClearProbeLight( p );
 	for ( int i = 0; i < 6; i++ )
 		p.freeDist[i] = 0.0f;
+	// (written at once as "not traced" with the new cell's stamp: the slot held a probe at the
+	// other end of the grid, and the lighting must not take its light for this cell's - unless
+	// the atlases are cleared anyway)
+	AddDirty( cas, iSlot, bUrgent );
+	AddPending( cas, iSlot );
 }
 
 // keeps the camera within a cell of its place in the grid; returns whether the grid moved
@@ -820,13 +1284,12 @@ static bool UpdateGrid( int iCascade, const Vector &vecCamera )
 	GICascade_t &cas = s_Cascades[ iCascade ];
 	const float S = cas.flSpacing;
 	const float g[3] = { vecCamera.x / S - GI_OFFSET, vecCamera.y / S - GI_OFFSET, vecCamera.z / S - GI_OFFSET };
-	const int dims[3] = { GI_NX, GI_NY, GI_NZ };
 
 	int iMin[3];
 	bool bMove = !cas.bGridValid;
 	for ( int a = 0; a < 3; a++ )
 	{
-		const float flHalf = ( a == 2 ) ? s_flCameraLevel[ iCascade ] : ( dims[a] - 1 ) * 0.5f;
+		const float flHalf = ( a == 2 ) ? cas.flCameraLevel : ( cas.n[a] - 1 ) * 0.5f;
 		iMin[a] = cas.iGridMin[a];
 		if ( !cas.bGridValid || fabsf( g[a] - ( cas.iGridMin[a] + flHalf ) ) > 1.0f )
 		{
@@ -838,29 +1301,66 @@ static bool UpdateGrid( int iCascade, const Vector &vecCamera )
 	if ( !bMove )
 		return false;
 
+	// (a jump - a teleport, a level loaded - moves most of the grid: the atlases are cleared, the
+	// probes that stay written again; the slots with a new cell can't all be written in one frame)
+	int nMoved = 0;
 	for ( int a = 0; a < 3; a++ )
+		nMoved = Max( nMoved, abs( iMin[a] - cas.iGridMin[a] ) * cas.nProbes / cas.n[a] );
+	const bool bJump = cas.bGridValid && nMoved > cas.nProbes / 4;
+	if ( bJump )
+	{
+		cas.bClearAtlas = true;
+		cas.bReuploadAll = true;
+	}
+
+	// the cells that came into the grid: all of it, or the slabs it moved by along each axis (a
+	// walk to the next cell visited the whole grid - 65536 slots, a few milliseconds a step)
+	const bool bWhole = !cas.bGridValid || nMoved >= cas.nProbes;
+	int iOldMin[3];
+	for ( int a = 0; a < 3; a++ )
+	{
+		iOldMin[a] = cas.iGridMin[a];
 		cas.iGridMin[a] = iMin[a];
+	}
 	cas.bGridValid = true;
 
-	for ( int z = 0; z < GI_NZ; z++ )
-		for ( int y = 0; y < GI_NY; y++ )
-			for ( int x = 0; x < GI_NX; x++ )
-			{
-				const int cx = iMin[0] + x, cy = iMin[1] + y, cz = iMin[2] + z;
-				GIProbe_t &p = cas.pProbes[ SlotIndex( cx, cy, cz ) ];
-				if ( !p.bAssigned || p.cell[0] != cx || p.cell[1] != cy || p.cell[2] != cz )
-					ResetProbe( cas, p, cx, cy, cz );
-			}
-	// (new probes: the ones around them gather again)
-	cas.bRefined = false;
-	cas.nSweepsLeft = Max( cas.nSweepsLeft, 2 );
+	for ( int a = bWhole ? -1 : 0; a < 3; a++ )
+	{
+		int lo[3], hi[3];
+		for ( int k = 0; k < 3; k++ )
+		{
+			lo[k] = iMin[k];
+			hi[k] = iMin[k] + cas.n[k];
+		}
+		if ( a >= 0 )
+		{
+			const int d = iMin[a] - iOldMin[a];
+			if ( d == 0 )
+				continue;
+			if ( d > 0 )
+				lo[a] = Max( lo[a], iOldMin[a] + cas.n[a] );
+			else
+				hi[a] = Min( hi[a], iOldMin[a] );
+		}
+		for ( int cz = lo[2]; cz < hi[2]; cz++ )
+			for ( int cy = lo[1]; cy < hi[1]; cy++ )
+				for ( int cx = lo[0]; cx < hi[0]; cx++ )
+				{
+					const int iSlot = SlotIndex( cas, cx, cy, cz );
+					const GIProbe_t &p = cas.pProbes[ iSlot ];
+					if ( !p.bAssigned || p.cell[0] != cx || p.cell[1] != cy || p.cell[2] != cz )
+						ResetProbe( cas, iSlot, cx, cy, cz, !bJump );
+				}
+		if ( a < 0 )
+			break;
+	}
 	return true;
 }
 
 // the probe of a world cell, if the grid holds it and it can light
 static inline const GIProbe_t *LitProbeAt( const GICascade_t &cas, int cx, int cy, int cz )
 {
-	const GIProbe_t &p = cas.pProbes[ SlotIndex( cx, cy, cz ) ];
+	const GIProbe_t &p = cas.pProbes[ SlotIndex( cas, cx, cy, cz ) ];
 	if ( !p.bAssigned || p.cell[0] != cx || p.cell[1] != cy || p.cell[2] != cz || !p.bTraced || p.flValid <= 0.0f )
 		return NULL;
 	return &p;
@@ -879,16 +1379,17 @@ static inline float Lum( const Vector &c )
 struct GICandidates_t
 {
 	int n;
-	const GIBrushEnt_t *p[ GI_MAX_CANDIDATES ];
+	const CGIBrushCollide *p[ GI_MAX_CANDIDATES ];
 };
 
-static void FindCandidates( const Vector &vecCenter, float flRadius, GICandidates_t &cand )
+static void FindCandidates( const GIBrushSnapshot_t *pSnap, const Vector &vecCenter, float flRadius, GICandidates_t &cand )
 {
 	cand.n = 0;
-	const int nEnts = s_BrushEnts.Count();
-	for ( int i = 0; i < nEnts && cand.n < GI_MAX_CANDIDATES; i++ )
+	if ( !pSnap )
+		return;
+	for ( int i = 0; i < pSnap->nEnts && cand.n < GI_MAX_CANDIDATES; i++ )
 	{
-		const CGIBrushCollide &col = s_BrushEnts[i]->collide;
+		const CGIBrushCollide &col = pSnap->pEnts[i].collide;
 		// (distance from the sphere's center to the box)
 		float flDistSqr = 0.0f;
 		for ( int a = 0; a < 3; a++ )
@@ -898,7 +1399,7 @@ static void FindCandidates( const Vector &vecCenter, float flRadius, GICandidate
 			flDistSqr += d * d;
 		}
 		if ( flDistSqr <= flRadius * flRadius )
-			cand.p[ cand.n++ ] = s_BrushEnts[i];
+			cand.p[ cand.n++ ] = &col;
 	}
 }
 
@@ -915,7 +1416,7 @@ static inline void GITrace( const Vector &vecStart, const Vector &vecEnd, trace_
 	{
 		if ( tr.startsolid )
 			return;
-		const CGIBrushCollide &col = cand.p[i]->collide;
+		const CGIBrushCollide &col = *cand.p[i];
 		const Vector vecDelta = tr.endpos - vecStart;
 		if ( !IsBoxIntersectingRay( col.m_vecWorldMins, col.m_vecWorldMaxs, vecStart, vecDelta ) )
 			continue;
@@ -951,9 +1452,42 @@ static inline bool IsSolidPoint( const Vector &vecPos, const GICandidates_t &can
 	return tr.startsolid || tr.allsolid;
 }
 
-static inline void HitNormal( const GIHit_t &h, Vector &n )
+static inline void OctEncode( const Vector &n, signed char out[2] )
 {
-	n.Init( h.n[0] * ( 1.0f / 127.0f ), h.n[1] * ( 1.0f / 127.0f ), h.n[2] * ( 1.0f / 127.0f ) );
+	const float l1 = fabsf( n.x ) + fabsf( n.y ) + fabsf( n.z );
+	float x = n.x / Max( l1, 1e-6f ), y = n.y / Max( l1, 1e-6f );
+	if ( n.z < 0.0f )
+	{
+		const float ox = ( 1.0f - fabsf( y ) ) * ( ( x >= 0.0f ) ? 1.0f : -1.0f );
+		const float oy = ( 1.0f - fabsf( x ) ) * ( ( y >= 0.0f ) ? 1.0f : -1.0f );
+		x = ox;
+		y = oy;
+	}
+	out[0] = (signed char)clamp( (int)floorf( x * 127.0f + 0.5f ), -127, 127 );
+	out[1] = (signed char)clamp( (int)floorf( y * 127.0f + 0.5f ), -127, 127 );
+}
+
+static inline void OctDecode( const signed char in[2], Vector &n )
+{
+	float x = in[0] * ( 1.0f / 127.0f ), y = in[1] * ( 1.0f / 127.0f );
+	const float z = 1.0f - fabsf( x ) - fabsf( y );
+	if ( z < 0.0f )
+	{
+		const float ox = ( 1.0f - fabsf( y ) ) * ( ( x >= 0.0f ) ? 1.0f : -1.0f );
+		const float oy = ( 1.0f - fabsf( x ) ) * ( ( y >= 0.0f ) ? 1.0f : -1.0f );
+		x = ox;
+		y = oy;
+	}
+	n.Init( x, y, z );
+	VectorNormalize( n );
+}
+
+// a hit's place: off the surface along its normal
+static inline void HitPos( const Vector &vecTracePos, const matrix3x4_t *pRot, const GIHit_t &h, const Vector &n, Vector &vecPos )
+{
+	Vector dir;
+	VectorRotate( s_vecRayDir[ h.ray % GI_RAYS ], pRot[ h.ray / GI_RAYS ], dir );
+	vecPos = vecTracePos + dir * ( h.dist * 0.125f ) + n * 2.0f;
 }
 
 static inline float RayLength( float flSpacing )
@@ -961,34 +1495,57 @@ static inline float RayLength( float flSpacing )
 	return Min( GI_RAY_LENGTH * flSpacing / 64.0f, GI_RAY_LENGTH_MAX );
 }
 
-// one pass of rays; the first one also finds where the probe traces from
-static void JobTracePass( GIJob_t &job, const GICandidates_t &cand )
+// the sun rays of the hits from iFirst on (in place: the job's probe is its own while it runs)
+static void TraceSunRays( GIJob_t &job, const GICandidates_t &cand, GIHit_t *pHits, int nHits, int iFirst, const Vector &vecTracePos, bool bValid )
 {
-	GIProbe_t &p = *job.pProbe;
-	const float S = s_Cascades[ job.iCascade ].flSpacing;
-	const Vector vecCell( ( p.cell[0] + GI_OFFSET ) * S, ( p.cell[1] + GI_OFFSET ) * S, ( p.cell[2] + GI_OFFSET ) * S );
+	const bool bSun = job.bLight && bValid && job.vecLight.z > -0.1f;
+	matrix3x4_t rot[ GI_MAX_PASSES ];
+	const int nPasses = ( nHits > 0 ) ? pHits[ nHits - 1 ].ray / GI_RAYS + 1 : 0;
+	for ( int i = 0; bSun && i < nPasses; i++ )
+		PassRotation( job.cell, i, rot[i] );
+	trace_t tr;
+	for ( int i = iFirst; i < nHits; i++ )
+	{
+		GIHit_t &h = pHits[i];
+		h.bLit = 0;
+		if ( !bSun )
+			continue;
+		Vector n;
+		OctDecode( h.n, n );
+		if ( DotProduct( n, job.vecLight ) <= 0.01f )
+			continue;
+		Vector vecPos;
+		HitPos( vecTracePos, rot, h, n, vecPos );
+		GITrace( vecPos, vecPos + job.vecLight * GI_SUN_RAY_LENGTH, tr, cand );
+		job.nTraces++;
+		h.bLit = ( !tr.startsolid && IsSkyHit( tr ) ) ? 1 : 0;
+	}
+}
+
+// passes of rays up to nPassesTarget (the first one also finds where the probe traces from),
+// into a new array of hits (the old ones copied)
+static void JobTrace( GIJob_t &job, const GICandidates_t &cand )
+{
+	const float S = job.flSpacing;
+	const Vector vecCell( ( job.cell[0] + GI_OFFSET ) * S, ( job.cell[1] + GI_OFFSET ) * S, ( job.cell[2] + GI_OFFSET ) * S );
 	static const Vector s_Axes[6] = { Vector( 1, 0, 0 ), Vector( -1, 0, 0 ), Vector( 0, 1, 0 ), Vector( 0, -1, 0 ), Vector( 0, 0, 1 ), Vector( 0, 0, -1 ) };
 
-	const bool bFirst = p.nPasses == 0 || p.bRetrace || !p.bTraced;
+	const bool bFirst = job.nPassesHave == 0;
 	const float flRayLength = RayLength( S );
 	trace_t tr;
 
-	// (a probe starting over keeps what it has until the new first pass is complete: the
-	// sums go into locals and replace the probe's at the end)
-	float visSum[4] = { 0, 0, 0, 0 };
-	int nBack = 0, nStartSolid = 0;
-	int nHits = bFirst ? 0 : p.nHits;
-	int nPasses = bFirst ? 0 : p.nPasses;
-	Vector vecPos = p.vecTracePos;
-	float freeDist[6];
+	Vector vecPos = bFirst ? vecCell : job.vecTracePos;
+	for ( int i = 0; i < 4; i++ )
+		job.visSum[i] = bFirst ? 0.0f : job.visSumIn[i];
+	job.nBack = bFirst ? 0 : job.nBackIn;
+	job.nStartSolid = bFirst ? 0 : job.nStartSolidIn;
 	for ( int i = 0; i < 6; i++ )
-		freeDist[i] = p.freeDist[i];
-	job.iFirstNewHit = nHits;
+		job.freeDist[i] = bFirst ? 0.0f : job.freeDistIn[i];
+	const int nOld = bFirst ? 0 : job.nHits;
 
 	if ( bFirst )
 	{
 		// in a wall: the nearest free point within half a spacing (of the near grid) traces for it
-		vecPos = vecCell;
 		job.nTraces++;
 		if ( IsSolidPoint( vecPos, cand ) )
 		{
@@ -1010,14 +1567,13 @@ static void JobTracePass( GIJob_t &job, const GICandidates_t &cand )
 			}
 			if ( !bFound )
 			{
-				p.vecTracePos = vecCell;
-				p.nHits = 0;
-				p.nPasses = 1;
-				p.flValid = 0.0f;
-				ClearProbeLight( p );
-				for ( int i = 0; i < 6; i++ )
-					p.freeDist[i] = 0.0f;
+				job.vecTracePosOut = vecCell;
+				job.nPasses = job.nPassesTarget;
+				job.flValid = 0.0f;
 				job.nInvalid = 1;
+				job.pNewHits = NULL;
+				job.nNewHits = 0;
+				job.iFirstNewHit = 0;
 				return;
 			}
 		}
@@ -1027,125 +1583,91 @@ static void JobTracePass( GIJob_t &job, const GICandidates_t &cand )
 		{
 			GITrace( vecPos, vecPos + s_Axes[a] * S, tr, cand );
 			job.nTraces++;
-			freeDist[a] = ( tr.startsolid || tr.allsolid ) ? 0.0f : tr.fraction * S;
+			job.freeDist[a] = ( tr.startsolid || tr.allsolid ) ? 0.0f : tr.fraction * S;
 		}
 	}
-	else
-	{
-		for ( int i = 0; i < 4; i++ )
-			visSum[i] = p.visSum[i];
-		nBack = p.nBack;
-		nStartSolid = p.nStartSolid;
-	}
 
-	// room for this pass' hits
-	if ( nHits + GI_RAYS > p.nHitsAlloc )
+	const int nNewRays = ( job.nPassesTarget - job.nPassesHave ) * GI_RAYS;
+	GIHit_t *pHits = (GIHit_t *)malloc( ( nOld + nNewRays ) * sizeof( GIHit_t ) );
+	const char **ppSurfaces = (const char **)malloc( Max( nNewRays, 1 ) * sizeof( const char * ) );
+	if ( !pHits || !ppSurfaces )
 	{
-		const int nAlloc = nHits + GI_RAYS * 2;
-		GIHit_t *pNew = (GIHit_t *)realloc( p.pHits, nAlloc * sizeof( GIHit_t ) );
-		if ( !pNew )
+		free( pHits );
+		free( (void *)ppSurfaces );
+		job.bSkipped = true;
+		return;
+	}
+	if ( nOld )
+		memcpy( pHits, job.pHits, nOld * sizeof( GIHit_t ) );
+
+	int nHits = nOld;
+	for ( int iPass = job.nPassesHave; iPass < job.nPassesTarget; iPass++ )
+	{
+		matrix3x4_t matRot;
+		PassRotation( job.cell, iPass, matRot );
+		for ( int k = 0; k < GI_RAYS; k++ )
 		{
+			Vector dir;
+			VectorRotate( s_vecRayDir[k], matRot, dir );
+			GITrace( vecPos, vecPos + dir * flRayLength, tr, cand );
+			job.nTraces++;
+			// (starting on a surface: the directions into it are simply blocked)
+			if ( tr.startsolid || tr.allsolid )
+			{
+				job.nStartSolid++;
+				continue;
+			}
+			if ( IsSkyHit( tr ) )
+			{
+				job.visSum[0] += 1.0f;
+				job.visSum[1] += 2.0f * dir.x;
+				job.visSum[2] += 2.0f * dir.y;
+				job.visSum[3] += 2.0f * dir.z;
+				continue;
+			}
+			// the back of a face: the probe is inside something closed (a sealed cavity)
+			if ( DotProduct( tr.plane.normal, dir ) > 0.0f )
+			{
+				job.nBack++;
+				continue;
+			}
+			GIHit_t &h = pHits[ nHits ];
+			h.dist = (unsigned short)clamp( (int)( tr.fraction * flRayLength * 8.0f + 0.5f ), 0, 65535 );
+			h.ray = (unsigned char)( iPass * GI_RAYS + k );
+			h.bLit = 0;
+			OctEncode( tr.plane.normal, h.n );
+			h.albedo = 0;
+			ppSurfaces[ nHits - nOld ] = ( tr.surface.flags & SURF_NODRAW ) ? NULL : tr.surface.name;
+			nHits++;
+		}
+		if ( s_bCancelJobs )
+		{
+			free( pHits );
+			free( (void *)ppSurfaces );
 			job.bSkipped = true;
 			return;
 		}
-		p.pHits = pNew;
-		p.nHitsAlloc = nAlloc;
 	}
 
-	matrix3x4_t matRot;
-	PassRotation( p, nPasses, matRot );
-
-	int nNew = 0;
-	for ( int k = 0; k < GI_RAYS; k++ )
-	{
-		Vector dir;
-		VectorRotate( s_vecRayDir[k], matRot, dir );
-		GITrace( vecPos, vecPos + dir * flRayLength, tr, cand );
-		job.nTraces++;
-		// (starting on a surface: the directions into it are simply blocked)
-		if ( tr.startsolid || tr.allsolid )
-		{
-			nStartSolid++;
-			continue;
-		}
-		if ( IsSkyHit( tr ) )
-		{
-			visSum[0] += 1.0f;
-			visSum[1] += 2.0f * dir.x;
-			visSum[2] += 2.0f * dir.y;
-			visSum[3] += 2.0f * dir.z;
-			continue;
-		}
-		// the back of a face: the probe is inside something closed (a sealed cavity)
-		if ( DotProduct( tr.plane.normal, dir ) > 0.0f )
-		{
-			nBack++;
-			continue;
-		}
-		GIHit_t &h = p.pHits[ nHits ];
-		h.vecPos = tr.endpos + tr.plane.normal * 2.0f;
-		for ( int a = 0; a < 3; a++ )
-			h.n[a] = (signed char)clamp( (int)floorf( tr.plane.normal[a] * 127.0f + 0.5f ), -127, 127 );
-		h.albedo[0] = h.albedo[1] = h.albedo[2] = 77;	// 0.3 until looked up
-		h.bLit = 0;
-		h.pad = 0;
-		job.pszSurface[ nNew ] = ( tr.surface.flags & SURF_NODRAW ) ? NULL : tr.surface.name;
-		nHits++;
-		nNew++;
-	}
-
-	nPasses++;
-	const float flInv = 1.0f / ( nPasses * GI_RAYS );
-	const int nRays = nPasses * GI_RAYS;
-
-	p.vecTracePos = vecPos;
-	for ( int i = 0; i < 6; i++ )
-		p.freeDist[i] = freeDist[i];
-	for ( int i = 0; i < 4; i++ )
-	{
-		p.visSum[i] = visSum[i];
-		p.vis[i] = visSum[i] * flInv;
-	}
-	if ( bFirst )
-	{
-		// (until the gather smooths it)
-		for ( int i = 0; i < 4; i++ )
-			p.visF[i] = p.vis[i];
-	}
-	p.nBack = nBack;
-	p.nStartSolid = nStartSolid;
-	p.nHits = nHits;
-	p.nPasses = (unsigned char)nPasses;
-	p.flValid = ( nBack * 4 > nRays || nStartSolid * 4 > nRays * 3 ) ? 0.0f : 1.0f;
-	if ( p.flValid <= 0.0f )
+	const int nRays = job.nPassesTarget * GI_RAYS;
+	job.vecTracePosOut = vecPos;
+	job.nPasses = job.nPassesTarget;
+	job.pNewHits = pHits;
+	job.nNewHits = nHits;
+	job.iFirstNewHit = nOld;
+	job.ppSurfaces = ppSurfaces;
+	job.flValid = ( job.nBack * 4 > nRays || job.nStartSolid * 4 > nRays * 3 ) ? 0.0f : 1.0f;
+	if ( job.flValid <= 0.0f )
 		job.nInvalid = 2;
-}
 
-// the sun rays of the hits from iFirst on
-static void JobTraceSun( GIJob_t &job, const GICandidates_t &cand, int iFirst )
-{
-	GIProbe_t &p = *job.pProbe;
-	const bool bSun = job.bLight && p.flValid > 0.0f && job.vecLight.z > -0.1f;
-	trace_t tr;
-	for ( int i = iFirst; i < p.nHits; i++ )
-	{
-		GIHit_t &h = p.pHits[i];
-		h.bLit = 0;
-		if ( !bSun )
-			continue;
-		Vector n;
-		HitNormal( h, n );
-		if ( DotProduct( n, job.vecLight ) <= 0.01f )
-			continue;
-		GITrace( h.vecPos, h.vecPos + job.vecLight * GI_SUN_RAY_LENGTH, tr, cand );
-		job.nTraces++;
-		h.bLit = ( !tr.startsolid && IsSkyHit( tr ) ) ? 1 : 0;
-	}
+	// the sun rays: of the new hits, or of all of them if the sun has moved since the others'
+	job.bSunAll = bFirst || !job.bSunValidIn || DotProduct( job.vecSunDirIn, job.vecLight ) < cosf( DEG2RAD( r_deferred_gi_sun_refresh.GetFloat() ) );
+	TraceSunRays( job, cand, pHits, nHits, job.bSunAll ? 0 : nOld, vecPos, job.flValid > 0.0f );
 }
 
 //-----------------------------------------------------------------------------
 // The indirect light of a probe from its hits (any thread: reads the other probes
-// as they are - a value another worker is just writing is as good as the one before)
+// as they are - a value the main thread is just writing is as good as the one before)
 //-----------------------------------------------------------------------------
 
 // what the probes give a surface point: the sky it sees, the indirect light of the sun and
@@ -1165,7 +1687,6 @@ static bool FieldLookup( const Vector &vecPos, const Vector &vecNormal, float &f
 		int base[3];
 		float f[3];
 		bool bInside = true;
-		static const int s_iDims[3] = { GI_NX, GI_NY, GI_NZ };
 		// (the slots of the cell's corners: two along every axis - the grid is toroidal)
 		int slot[3][2];
 		for ( int a = 0; a < 3; a++ )
@@ -1174,9 +1695,9 @@ static bool FieldLookup( const Vector &vecPos, const Vector &vecNormal, float &f
 			if ( g[a] < base[a] )
 				base[a]--;
 			f[a] = g[a] - base[a];
-			bInside = bInside && base[a] >= cas.iGridMin[a] && base[a] + 1 <= cas.iGridMin[a] + s_iDims[a] - 1;
-			slot[a][0] = PosMod( base[a], s_iDims[a] );
-			slot[a][1] = ( slot[a][0] + 1 == s_iDims[a] ) ? 0 : slot[a][0] + 1;
+			bInside = bInside && base[a] >= cas.iGridMin[a] && base[a] + 1 <= cas.iGridMin[a] + cas.n[a] - 1;
+			slot[a][0] = PosMod( base[a], cas.n[a] );
+			slot[a][1] = ( slot[a][0] + 1 == cas.n[a] ) ? 0 : slot[a][0] + 1;
 		}
 		if ( !bInside )
 			continue;
@@ -1189,7 +1710,7 @@ static bool FieldLookup( const Vector &vecPos, const Vector &vecNormal, float &f
 			float w = ( kx ? f[0] : 1.0f - f[0] ) * ( ky ? f[1] : 1.0f - f[1] ) * ( kz ? f[2] : 1.0f - f[2] );
 			if ( w < 0.01f )
 				continue;
-			const GIProbe_t &q = cas.pProbes[ slot[0][kx] + GI_NX * ( slot[1][ky] + GI_NY * slot[2][kz] ) ];
+			const GIProbe_t &q = cas.pProbes[ slot[0][kx] + cas.n[0] * ( slot[1][ky] + cas.n[1] * slot[2][kz] ) ];
 			const int idx[3] = { base[0] + kx, base[1] + ky, base[2] + kz };
 			if ( !q.bAssigned || !q.bTraced || q.flValid <= 0.0f || q.cell[0] != idx[0] || q.cell[1] != idx[1] || q.cell[2] != idx[2] )
 				continue;
@@ -1224,23 +1745,26 @@ static bool FieldLookup( const Vector &vecPos, const Vector &vecNormal, float &f
 	return false;
 }
 
-static void GatherProbe( int iCascade, GIProbe_t &p, const Vector &vecLight, bool bLight )
+static void JobGather( GIJob_t &job )
 {
-	const GICascade_t &cas = s_Cascades[ iCascade ];
-	if ( !p.bTraced || p.flValid <= 0.0f || p.nPasses == 0 )
-		return;
+	const GICascade_t &cas = s_Cascades[ job.iCascade ];
 
 	// the sky visibility, smoothed: the probe's own (twice) and the 6 neighbours it sees
+	float vis[4], freeDist[6];
+	for ( int i = 0; i < 4; i++ )
+		vis[i] = job.visSumIn[i];
+	for ( int i = 0; i < 6; i++ )
+		freeDist[i] = job.freeDistIn[i];
 	if ( r_deferred_gi_filter.GetBool() )
 	{
 		static const int s_iStep[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
-		float sum[4] = { p.vis[0] * 2.0f, p.vis[1] * 2.0f, p.vis[2] * 2.0f, p.vis[3] * 2.0f };
+		float sum[4] = { vis[0] * 2.0f, vis[1] * 2.0f, vis[2] * 2.0f, vis[3] * 2.0f };
 		float flWeight = 2.0f;
 		for ( int a = 0; a < 6; a++ )
 		{
-			if ( p.freeDist[a] < cas.flSpacing * 0.97f )
+			if ( freeDist[a] < cas.flSpacing * 0.97f )
 				continue;
-			const GIProbe_t *q = LitProbeAt( cas, p.cell[0] + s_iStep[a][0], p.cell[1] + s_iStep[a][1], p.cell[2] + s_iStep[a][2] );
+			const GIProbe_t *q = LitProbeAt( cas, job.cell[0] + s_iStep[a][0], job.cell[1] + s_iStep[a][1], job.cell[2] + s_iStep[a][2] );
 			if ( !q )
 				continue;
 			for ( int i = 0; i < 4; i++ )
@@ -1248,31 +1772,45 @@ static void GatherProbe( int iCascade, GIProbe_t &p, const Vector &vecLight, boo
 			flWeight += 1.0f;
 		}
 		for ( int i = 0; i < 4; i++ )
-			p.visF[i] = sum[i] / flWeight;
+			job.visF[i] = sum[i] / flWeight;
 	}
 	else
 	{
 		for ( int i = 0; i < 4; i++ )
-			p.visF[i] = p.vis[i];
+			job.visF[i] = vis[i];
 	}
 
-	const bool bSun = bLight && vecLight.z > -0.1f;
+	const bool bSun = job.bLight && job.vecLight.z > -0.1f;
 	const bool bMulti = r_deferred_gi_multibounce.GetBool();
+
+	matrix3x4_t rot[ GI_MAX_PASSES ];
+	const int nPasses = clamp( job.nPassesHave, 1, (int)GI_MAX_PASSES );
+	for ( int i = 0; i < nPasses; i++ )
+		PassRotation( job.cell, i, rot[i] );
+
+	// (at most r_deferred_gi_gather_hits of them, spread over all: the bounced light is a smooth
+	// average, and gathering is what the background spends most of its time on)
+	const int nMax = r_deferred_gi_gather_hits.GetInt();
+	const int nStep = ( job.nHits > nMax ) ? ( job.nHits + nMax - 1 ) / nMax : 1;
+	int nUsed = 0;
 
 	float sunSH[4] = { 0, 0, 0, 0 }, skySH[4] = { 0, 0, 0, 0 };
 	Vector vecSunRGB( 0, 0, 0 ), vecSkyRGB( 0, 0, 0 );
-	for ( int i = 0; i < p.nHits; i++ )
+	for ( int i = 0; i < job.nHits; i += nStep )
 	{
-		const GIHit_t &h = p.pHits[i];
+		const GIHit_t &h = job.pHits[i];
+		nUsed++;
 		Vector n;
-		HitNormal( h, n );
-		const Vector vecAlbedo( h.albedo[0] * ( 1.0f / 255.0f ), h.albedo[1] * ( 1.0f / 255.0f ), h.albedo[2] * ( 1.0f / 255.0f ) );
+		OctDecode( h.n, n );
+		const Vector &vecAlbedo = s_Albedo[ ( h.albedo < GI_MAX_ALBEDO ) ? h.albedo : 0 ];
+		Vector vecPos;
+		HitPos( job.vecTracePos, rot, h, n, vecPos );
 
 		// what reaches the hit: the sun, the sky it sees, the indirect light at it
-		const float flLit = ( bSun && h.bLit ) ? Max( 0.0f, DotProduct( n, vecLight ) ) : 0.0f;
+		const float flLit = ( bSun && h.bLit ) ? Max( 0.0f, DotProduct( n, job.vecLight ) ) : 0.0f;
 		float flVisHit = 0.0f;
 		Vector vecIndSun( 0, 0, 0 ), vecIndSky( 0, 0, 0 );
-		if ( !FieldLookup( h.vecPos, n, flVisHit, vecIndSun, vecIndSky ) )
+		if ( !FieldLookup( vecPos, n, flVisHit, vecIndSun, vecIndSky ) )
 		{
 			// (beyond the grids: an open hemisphere above the surface)
 			flVisHit = 0.5f + 0.5f * n.z;
@@ -1286,7 +1824,7 @@ static void GatherProbe( int iCascade, GIProbe_t &p, const Vector &vecLight, boo
 		const Vector vecOutSun( vecAlbedo.x * ( flLit + vecIndSun.x ), vecAlbedo.y * ( flLit + vecIndSun.y ), vecAlbedo.z * ( flLit + vecIndSun.z ) );
 		const Vector vecOutSky( vecAlbedo.x * ( flVisHit + vecIndSky.x ), vecAlbedo.y * ( flVisHit + vecIndSky.y ), vecAlbedo.z * ( flVisHit + vecIndSky.z ) );
 
-		Vector dir = h.vecPos - p.vecTracePos;
+		Vector dir = vecPos - job.vecTracePos;
 		const float flLen = dir.Length();
 		if ( flLen < 0.01f )
 			continue;
@@ -1305,534 +1843,548 @@ static void GatherProbe( int iCascade, GIProbe_t &p, const Vector &vecLight, boo
 		vecSkyRGB += vecOutSky;
 	}
 
-	const float flInv = 1.0f / ( p.nPasses * GI_RAYS );
+	// (the hits used stand for all of them; every ray of the probe counts)
+	const float flInv = ( nUsed > 0 ) ? ( (float)job.nHits / nUsed ) / ( nPasses * GI_RAYS ) : 0.0f;
 	for ( int i = 0; i < 4; i++ )
 	{
-		p.sun[i] = sunSH[i] * flInv;
-		p.sky[i] = skySH[i] * flInv;
+		job.sun[i] = sunSH[i] * flInv;
+		job.sky[i] = skySH[i] * flInv;
 	}
 	const float flLumSun = Lum( vecSunRGB ), flLumSky = Lum( vecSkyRGB );
-	p.vecSunChroma = ( flLumSun > 1e-5f ) ? vecSunRGB / flLumSun : Vector( 1, 1, 1 );
-	p.vecSkyChroma = ( flLumSky > 1e-5f ) ? vecSkyRGB / flLumSky : Vector( 1, 1, 1 );
-	p.bDirty = true;
+	job.vecSunChroma = ( flLumSun > 1e-5f ) ? vecSunRGB / flLumSun : Vector( 1, 1, 1 );
+	job.vecSkyChroma = ( flLumSky > 1e-5f ) ? vecSkyRGB / flLumSky : Vector( 1, 1, 1 );
 }
 
-// The time the workers have this frame. A probe costs anything between a few point tests (in
-// the solid) and a millisecond (long rays through a detailed map): a batch sized by the average
-// of the last ones ran up to ten times over its time now and then - a frame of 14 ms in a walk
-// through demo_map. Each worker looks at the clock before it starts a probe instead; what is
-// left stays pending.
-static double s_flJobDeadline = 0.0;
-// (how far the sun may have moved since a probe's sun rays for them to stand)
-static float s_flJobSunCos = 1.0f;
-
-static void JobProcess( GIJob_t &job )
+static void ProcessJob( GIJob_t &job )
 {
 	if ( job.iType == GIJOB_GATHER )
 	{
-		GatherProbe( job.iCascade, *job.pProbe, job.vecLight, job.bLight );
+		JobGather( job );
 		return;
 	}
 
-	if ( Plat_FloatTime() > s_flJobDeadline )
-	{
-		job.bSkipped = true;
-		return;
-	}
-
-	GIProbe_t &p = *job.pProbe;
-	const float S = s_Cascades[ job.iCascade ].flSpacing;
 	GICandidates_t cand;
 	// (the probe's rays, and the rays from where they end toward the sun)
-	FindCandidates( Vector( ( p.cell[0] + GI_OFFSET ) * S, ( p.cell[1] + GI_OFFSET ) * S, ( p.cell[2] + GI_OFFSET ) * S ),
+	const float S = job.flSpacing;
+	FindCandidates( job.pBrushes, Vector( ( job.cell[0] + GI_OFFSET ) * S, ( job.cell[1] + GI_OFFSET ) * S, ( job.cell[2] + GI_OFFSET ) * S ),
 		RayLength( S ) + GI_SUN_RAY_LENGTH + S, cand );
 
 	if ( job.iType == GIJOB_TRACE )
-	{
-		// (a pass after the first: the sun rays of its new hits only, while the sun stands
-		// where it stood for the others)
-		const bool bRestart = p.nPasses == 0 || p.bRetrace || !p.bTraced;
-		JobTracePass( job, cand );
-		if ( !job.bSkipped && job.nInvalid != 1 )
-		{
-			job.bSunAll = bRestart || !p.bSunValid || DotProduct( p.vecSunDir, job.vecLight ) < s_flJobSunCos;
-			JobTraceSun( job, cand, job.bSunAll ? 0 : job.iFirstNewHit );
-		}
-	}
+		JobTrace( job, cand );
 	else
-	{
-		job.bSunAll = true;
-		JobTraceSun( job, cand, 0 );
-	}
+		TraceSunRays( job, cand, job.pHits, job.nHits, 0, job.vecTracePos, true );
 }
 
 //-----------------------------------------------------------------------------
-// Tracing: the main thread part
+// Jobs: the main thread part
 //-----------------------------------------------------------------------------
-// average color of a surface (vtex stores it in every VTF)
-static Vector SurfaceAlbedo( const char *pszSurface )
+// average color of a surface (vtex stores it in every VTF) -> its index in s_Albedo
+static unsigned short SurfaceAlbedo( const char *pszSurface )
 {
-	Vector vecAlbedo( 0.3f, 0.3f, 0.3f );
 	if ( !pszSurface || !*pszSurface || pszSurface[0] == '*' )
-		return vecAlbedo;
+		return 0;
 
 	const uintp key = (uintp)pszSurface;
-	const unsigned short idx = s_AlbedoCache.Find( key );
-	if ( idx != s_AlbedoCache.InvalidIndex() )
-		return s_AlbedoCache[ idx ];
+	const int iCache = (int)( ( key >> 3 ) ^ ( key >> 13 ) ) & ( GI_SURFACE_CACHE - 1 );
+	if ( s_SurfaceCacheKey[ iCache ] == key )
+		return s_SurfaceCacheVal[ iCache ];
 
-	// (only a material the map has loaded anyway: looking up one that isn't - the cubemap
-	// patched water materials of a map compiled without them - reads the disk and fails, a few
-	// milliseconds each, in the middle of a frame)
-	if ( materials->IsMaterialLoaded( pszSurface ) )
+	unsigned short iAlbedo = 0;
+	const unsigned short idx = s_AlbedoMap.Find( key );
+	if ( idx != s_AlbedoMap.InvalidIndex() )
+		iAlbedo = s_AlbedoMap[ idx ];
+	else
 	{
-		IMaterial *pMat = materials->FindMaterial( pszSurface, TEXTURE_GROUP_WORLD, false );
-		if ( pMat && !pMat->IsErrorMaterial() )
+		// (only a material the map has loaded anyway: looking up one that isn't - the cubemap
+		// patched water materials of a map compiled without them - reads the disk and fails, a few
+		// milliseconds each, in the middle of a frame)
+		if ( s_nAlbedo < GI_MAX_ALBEDO && materials->IsMaterialLoaded( pszSurface ) )
 		{
-			pMat->GetReflectivity( vecAlbedo );
-			// (no surface throws back more than ~80 %: whiter than that and the bounces never end)
-			for ( int i = 0; i < 3; i++ )
-				vecAlbedo[i] = clamp( vecAlbedo[i], 0.02f, 0.8f );
+			IMaterial *pMat = materials->FindMaterial( pszSurface, TEXTURE_GROUP_WORLD, false );
+			if ( pMat && !pMat->IsErrorMaterial() )
+			{
+				Vector vecAlbedo;
+				pMat->GetReflectivity( vecAlbedo );
+				// (no surface throws back more than ~80 %: whiter than that and the bounces never end)
+				for ( int i = 0; i < 3; i++ )
+					vecAlbedo[i] = clamp( vecAlbedo[i], 0.02f, 0.8f );
+				iAlbedo = (unsigned short)s_nAlbedo;
+				s_Albedo[ s_nAlbedo++ ] = vecAlbedo;
+			}
 		}
+		s_AlbedoMap.Insert( key, iAlbedo );
 	}
-	s_AlbedoCache.Insert( key, vecAlbedo );
-	return vecAlbedo;
+	s_SurfaceCacheKey[ iCache ] = key;
+	s_SurfaceCacheVal[ iCache ] = iAlbedo;
+	return iAlbedo;
 }
 
-// what the job left in the probe -> counters, flags; true: the probe's light has to be gathered
-static bool FinishJob( GICascade_t &cas, GIJob_t &job, bool bInstant )
-{
-	GIProbe_t &p = *job.pProbe;
-	p.bQueued = false;
-	if ( job.bSkipped )
-		return false;
+// passes a probe is to have: near the camera, farther in the near grid, in the far grid (this frame)
+static int s_nPassesHQ = 6, s_nPassesMid = 3, s_nPassesFar = 2;
+static float s_flHQRadiusSqr = 1024.0f * 1024.0f;
 
-	s_nTracesLastFrame += job.nTraces;
+static inline int RaysToPasses( float flRays )
+{
+	return clamp( (int)( flRays / GI_RAYS + 0.5f ), 1, (int)GI_MAX_PASSES );
+}
+
+static void UpdateTargetPasses()
+{
+	s_nPassesHQ = RaysToPasses( r_deferred_gi_rays.GetFloat() );
+	s_nPassesMid = Min( s_nPassesHQ, RaysToPasses( r_deferred_gi_rays_mid.GetFloat() ) );
+	s_nPassesFar = RaysToPasses( r_deferred_gi_rays_far.GetFloat() );
+	s_flHQRadiusSqr = r_deferred_gi_hq_radius.GetFloat() * r_deferred_gi_hq_radius.GetFloat();
+}
+
+static inline int TargetPasses( int iCascade, float flDistSqr )
+{
+	if ( iCascade == 0 )
+		return ( flDistSqr <= s_flHQRadiusSqr ) ? s_nPassesHQ : s_nPassesMid;
+	return s_nPassesFar;
+}
+
+static GIJob_t *NewJob( GICascade_t &cas, int iCascade, GIProbe_t &p, int iType, const Vector &vecLight, bool bLight )
+{
+	GIJob_t *pJob = s_FreeJobs.Count() ? s_FreeJobs.Tail() : new GIJob_t;
+	if ( s_FreeJobs.Count() )
+		s_FreeJobs.RemoveMultipleFromTail( 1 );
+	memset( pJob, 0, sizeof( GIJob_t ) );
+	pJob->pProbe = &p;
+	pJob->gen = p.gen;
+	pJob->iCascade = iCascade;
+	pJob->iType = iType;
+	for ( int a = 0; a < 3; a++ )
+		pJob->cell[a] = p.cell[a];
+	pJob->flSpacing = cas.flSpacing;
+	pJob->vecLight = vecLight;
+	pJob->bLight = bLight;
+	pJob->vecTracePos = p.vecTracePos;
+	pJob->pHits = p.pHits;
+	pJob->nHits = p.nHits;
+	pJob->nPassesHave = p.nPasses;
+	for ( int i = 0; i < 4; i++ )
+		pJob->visSumIn[i] = ( iType == GIJOB_GATHER ) ? p.vis[i] : p.visSum[i];
+	pJob->nBackIn = p.nBack;
+	pJob->nStartSolidIn = p.nStartSolid;
+	for ( int i = 0; i < 6; i++ )
+		pJob->freeDistIn[i] = p.freeDist[i];
+	pJob->bSunValidIn = p.bSunValid;
+	pJob->vecSunDirIn = p.vecSunDir;
+	if ( iType != GIJOB_GATHER )
+	{
+		pJob->pBrushes = s_pBrushSnap;
+		if ( s_pBrushSnap )
+			s_pBrushSnap->nRefs++;
+	}
+	return pJob;
+}
+
+static void SubmitTrace( GICascade_t &cas, int iCascade, GIProbe_t &p, bool bFresh, int nPassesTarget, const Vector &vecLight, bool bLight )
+{
+	GIJob_t *pJob = NewJob( cas, iCascade, p, GIJOB_TRACE, vecLight, bLight );
+	if ( bFresh )
+	{
+		pJob->nPassesHave = 0;
+		pJob->nHits = 0;
+	}
+	pJob->nPassesTarget = Max( nPassesTarget, pJob->nPassesHave + 1 );
+	pJob->nPassesTarget = Min( pJob->nPassesTarget, (int)GI_MAX_PASSES );
+	SubmitJob( pJob );
+}
+
+static void MarkNeighboursGather( GICascade_t &cas, const GIProbe_t &p )
+{
+	for ( int dz = -1; dz <= 1; dz++ )
+		for ( int dy = -1; dy <= 1; dy++ )
+			for ( int dx = -1; dx <= 1; dx++ )
+			{
+				const int cx = p.cell[0] + dx, cy = p.cell[1] + dy, cz = p.cell[2] + dz;
+				GIProbe_t &q = cas.pProbes[ SlotIndex( cas, cx, cy, cz ) ];
+				if ( q.bAssigned && q.bTraced && q.cell[0] == cx && q.cell[1] == cy && q.cell[2] == cz )
+					q.bGather = true;
+			}
+}
+
+static bool ProbeChangedVisibly( const GIProbe_t &p )
+{
+	const float *now[3] = { p.visF, p.sun, p.sky };
+	for ( int k = 0; k < 3; k++ )
+	{
+		for ( int i = 0; i < 4; i++ )
+		{
+			const float a = now[k][i], b = p.uploaded[ k * 4 + i ];
+			if ( fabsf( a - b ) > 0.002f + 0.01f * fabsf( b ) )
+				return true;
+		}
+	}
+	return false;
+}
+
+static void IntegrateJob( GIJob_t *pJob )
+{
+	GIJob_t &job = *pJob;
+	GICascade_t &cas = s_Cascades[ job.iCascade ];
+	GIProbe_t &p = *job.pProbe;
+	const int iSlot = (int)( &p - cas.pProbes );
+	s_nOutstanding--;
+	p.bBusy = false;
+	ReleaseBrushSnapshot( job.pBrushes );
+
+	const bool bCurrent = !job.bSkipped && job.gen == p.gen && p.bAssigned && s_bProbesAllocated;
+	if ( !bCurrent )
+	{
+		free( job.pNewHits );
+		free( (void *)job.ppSurfaces );
+		FreeJob( pJob );
+		// (still waiting for its trace: back in the list)
+		if ( s_bProbesAllocated && p.bAssigned && ( !p.bTraced || p.bRetrace ) )
+			AddPending( cas, iSlot );
+		return;
+	}
+
+	s_nDoneTraces += job.nTraces;
 
 	if ( job.iType == GIJOB_TRACE )
 	{
-		for ( int i = job.iFirstNewHit, k = 0; i < p.nHits && k < GI_RAYS; i++, k++ )
-		{
-			const Vector vecAlbedo = SurfaceAlbedo( job.pszSurface[k] );
-			for ( int a = 0; a < 3; a++ )
-				p.pHits[i].albedo[a] = (unsigned char)clamp( (int)( vecAlbedo[a] * 255.0f + 0.5f ), 0, 255 );
-		}
+		const bool bFirstTrace = !p.bTraced || p.bRetrace;
+		for ( int i = job.iFirstNewHit; i < job.nNewHits; i++ )
+			job.pNewHits[i].albedo = SurfaceAlbedo( job.ppSurfaces[ i - job.iFirstNewHit ] );
+		free( (void *)job.ppSurfaces );
+		job.ppSurfaces = NULL;
 
-		const bool bFirstPass = !p.bTraced || p.bRetrace;
-		if ( bFirstPass )
+		// (the old hits were only read by this job: nothing else holds them now)
+		if ( p.pHits )
+			free( p.pHits );
+		p.pHits = job.pNewHits;
+		p.nHits = job.nNewHits;
+		job.pNewHits = NULL;
+
+		p.vecTracePos = job.vecTracePosOut;
+		for ( int i = 0; i < 6; i++ )
+			p.freeDist[i] = job.freeDist[i];
+		p.nBack = job.nBack;
+		p.nStartSolid = job.nStartSolid;
+		p.nPasses = (unsigned char)job.nPasses;
+		p.flValid = job.flValid;
+		const float flInv = 1.0f / ( Max( 1, job.nPasses ) * GI_RAYS );
+		for ( int i = 0; i < 4; i++ )
 		{
+			p.visSum[i] = job.visSum[i];
+			p.vis[i] = ( job.flValid > 0.0f ) ? job.visSum[i] * flInv : 0.0f;
+		}
+		if ( bFirstTrace )
+		{
+			// (until the gather smooths it: the probe lights with its own sky visibility)
+			for ( int i = 0; i < 4; i++ )
+				p.visF[i] = p.vis[i];
+			if ( !p.bTraced )
+			{
+				for ( int i = 0; i < 4; i++ )
+				{
+					p.sun[i] = 0.0f;
+					p.sky[i] = 0.0f;
+				}
+			}
 			cas.nPending--;
 			if ( job.nInvalid == 1 )
 				s_nInvalidSolid++;
 			else if ( job.nInvalid == 2 )
 				s_nInvalidClosed++;
-
-			// (it fades in; the probes of a map's first frame, and one starting over, are simply there)
-			if ( !p.bTraced )
-			{
-				p.flFade = ( bInstant || r_deferred_gi_fade.GetFloat() <= 0.0f ) ? 1.0f : 0.0f;
-				if ( p.flFade < 1.0f && !p.bFading )
-				{
-					p.bFading = true;
-					s_Fading.AddToTail( &p );
-				}
-			}
-			p.bTraced = true;
-			p.bRetrace = false;
+			s_nDoneTrace++;
 		}
+		else
+			s_nDoneRefine++;
+		p.bTraced = true;
+		p.bRetrace = false;
+		if ( job.bSunAll )
+		{
+			p.vecSunDir = job.vecLight;
+			p.bSunValid = true;
+		}
+		if ( p.flValid > 0.0f )
+		{
+			p.bGather = true;
+			MarkNeighboursGather( cas, p );
+		}
+		cas.bChanged = true;
+		// (its first light and its validity, at once - the gather follows)
+		AddDirty( cas, iSlot, false );
 	}
-
-	if ( job.bSunAll )
+	else if ( job.iType == GIJOB_SUN )
 	{
+		s_nDoneSun++;
 		p.vecSunDir = job.vecLight;
 		p.bSunValid = true;
-	}
-	p.bDirty = true;
-	return p.flValid > 0.0f;
-}
-
-static inline GIProbe_t &OrderedProbe( GICascade_t &cas, int i )
-{
-	const int o = cas.order[i];
-	const int cx = cas.iGridMin[0] + o % GI_NX, cy = cas.iGridMin[1] + ( o / GI_NX ) % GI_NY, cz = cas.iGridMin[2] + o / ( GI_NX * GI_NY );
-	return cas.pProbes[ SlotIndex( cx, cy, cz ) ];
-}
-
-static inline void AddJob( CUtlVector< GIJob_t > &jobs, GIProbe_t &p, int iCascade, int iType, const Vector &vecLight, bool bLight )
-{
-	p.bQueued = true;
-	GIJob_t &job = jobs[ jobs.AddToTail() ];
-	job.pProbe = &p;
-	job.iCascade = iCascade;
-	job.iType = iType;
-	job.vecLight = vecLight;
-	job.bLight = bLight;
-	job.nTraces = 0;
-	job.nInvalid = 0;
-	job.bSkipped = false;
-	job.bSunAll = false;
-	job.iFirstNewHit = 0;
-}
-
-// probes of one grid without their first pass, nearest first, until the batch holds nLimit jobs
-static void CollectPending( CUtlVector< GIJob_t > &jobs, int c, int nLimit, const Vector &vecLight, bool bLight )
-{
-	GICascade_t &cas = s_Cascades[c];
-	if ( cas.nPending <= 0 || !cas.bGridValid )
-		return;
-	for ( int i = 0; i < GI_NUM_PROBES && jobs.Count() < nLimit; i++ )
-	{
-		GIProbe_t &p = OrderedProbe( cas, i );
-		if ( ( p.bTraced && !p.bRetrace ) || p.bQueued )
-			continue;
-		AddJob( jobs, p, c, GIJOB_TRACE, vecLight, bLight );
-	}
-}
-
-static inline int TargetPasses( int iCascade )
-{
-	const float flRays = ( iCascade == 0 ) ? r_deferred_gi_rays.GetFloat() : r_deferred_gi_rays_far.GetFloat();
-	return clamp( (int)( flRays / GI_RAYS + 0.5f ), 1, (int)GI_MAX_PASSES );
-}
-
-// up to nMax probes with work to do, the most wanted first: first passes of the near grid
-// (nearest first; a quarter of the batch is kept for the far grid, which a walking player would
-// starve otherwise), of the far grid, the sun rays of probes the sun has moved away from, then
-// further passes (nearest first)
-static void CollectJobs( CUtlVector< GIJob_t > &jobs, int nMax, const Vector &vecLight, bool bLight, float flSunCos )
-{
-	const int nCascades = r_deferred_gi_far.GetBool() ? GI_CASCADES : 1;
-
-	const bool bFarWork = nCascades > 1 && s_Cascades[1].nPending > 0 && s_Cascades[1].bGridValid;
-	CollectPending( jobs, 0, bFarWork ? nMax - nMax / 4 : nMax, vecLight, bLight );
-	if ( nCascades > 1 )
-		CollectPending( jobs, 1, nMax, vecLight, bLight );
-	CollectPending( jobs, 0, nMax, vecLight, bLight );
-
-	for ( int c = 0; c < nCascades && jobs.Count() < nMax; c++ )
-	{
-		GICascade_t &cas = s_Cascades[c];
-		if ( !cas.bGridValid || cas.nPending > 0 )
-			continue;
-		if ( cas.bSunDone && DotProduct( cas.vecSunDone, vecLight ) < flSunCos )
-			cas.bSunDone = false;
-		if ( cas.bSunDone )
-			continue;
-
-		bool bAll = true;
-		for ( int i = 0; i < GI_NUM_PROBES; i++ )
-		{
-			GIProbe_t &p = OrderedProbe( cas, i );
-			if ( !p.bTraced || p.bQueued || p.nHits == 0 || ( p.bSunValid && DotProduct( p.vecSunDir, vecLight ) >= flSunCos ) )
-				continue;
-			if ( jobs.Count() >= nMax )
-			{
-				bAll = false;
-				break;
-			}
-			AddJob( jobs, p, c, GIJOB_SUN, vecLight, bLight );
-		}
-		if ( bAll )
-		{
-			// (true once the jobs collected here are done; the caller takes it back if the
-			// frame's time ran out before they all were)
-			cas.bSunDone = true;
-			cas.vecSunDone = vecLight;
-		}
-	}
-
-	for ( int c = 0; c < nCascades && jobs.Count() < nMax; c++ )
-	{
-		GICascade_t &cas = s_Cascades[c];
-		if ( !cas.bGridValid || cas.nPending > 0 || cas.bRefined )
-			continue;
-		const int nTarget = TargetPasses( c );
-		bool bAll = true;
-		for ( int i = 0; i < GI_NUM_PROBES; i++ )
-		{
-			GIProbe_t &p = OrderedProbe( cas, i );
-			if ( !p.bTraced || p.bQueued || p.flValid <= 0.0f || p.nPasses >= nTarget )
-				continue;
-			// (nothing but sky around it: two passes tell as much as eight)
-			if ( p.nHits == 0 && p.nPasses >= 2 )
-				continue;
-			if ( jobs.Count() >= nMax )
-			{
-				bAll = false;
-				break;
-			}
-			AddJob( jobs, p, c, GIJOB_TRACE, vecLight, bLight );
-		}
-		if ( bAll )
-			cas.bRefined = true;	// (taken back if a job of it was skipped)
-	}
-}
-
-// The engine's pool has 3 threads whatever the CPU. A pool of the GI's own with a thread for
-// every spare core is there to try (r_deferred_gi_threads 2), but measured it doesn't pay: on
-// demo_map (8 logical cores) 3 + 1 threads trace 33 - 47 probes a millisecond, 6 + 1 threads
-// 23 - 27, the main thread alone 17 - 19 - the batches of a millisecond are too short for more
-// threads to wake up for, and the traces share the cache.
-static IThreadPool *s_pGIPool = NULL;
-static int s_nGIPoolThreads = 0;
-
-static void ShutdownGIPool()
-{
-	if ( s_pGIPool )
-	{
-		s_pGIPool->Stop();
-		DestroyThreadPool( s_pGIPool );
-		s_pGIPool = NULL;
-	}
-	s_nGIPoolThreads = 0;
-}
-
-// the pool to trace on (NULL: the main thread alone)
-static IThreadPool *GetGIPool()
-{
-	const int iMode = r_deferred_gi_threads.GetInt();
-	if ( iMode <= 0 )
-		return NULL;
-	if ( iMode == 1 )
-	{
-		if ( s_pGIPool )
-			ShutdownGIPool();
-		return ( g_pThreadPool && g_pThreadPool->NumThreads() > 0 ) ? g_pThreadPool : NULL;
-	}
-
-	const int nWanted = ( iMode == 2 ) ? clamp( (int)GetCPUInformation()->m_nLogicalProcessors - 2, 1, 12 ) : clamp( iMode, 1, 16 );
-	if ( s_pGIPool && s_nGIPoolThreads != nWanted )
-		ShutdownGIPool();
-	if ( !s_pGIPool )
-	{
-		s_pGIPool = CreateThreadPool();
-		ThreadPoolStartParams_t params;
-		params.nThreads = nWanted;
-		params.fDistribute = TRS_FALSE;
-		params.bIOThreads = false;
-		if ( !s_pGIPool || !s_pGIPool->Start( params, "HL2RPM_GI" ) )
-		{
-			if ( s_pGIPool )
-				DestroyThreadPool( s_pGIPool );
-			s_pGIPool = NULL;
-			s_nGIPoolThreads = 0;
-			return ( g_pThreadPool && g_pThreadPool->NumThreads() > 0 ) ? g_pThreadPool : NULL;
-		}
-		s_nGIPoolThreads = nWanted;
-	}
-	return s_pGIPool;
-}
-
-static void RunJobs( CUtlVector< GIJob_t > &jobs, IThreadPool *pPool )
-{
-	if ( pPool && jobs.Count() > 1 )
-	{
-		CParallelProcessor< GIJob_t, CFuncJobItemProcessor< GIJob_t > > processor( "DeferredGI" );
-		processor.m_ItemProcessor.Init( &JobProcess, NULL, NULL );
-		processor.Run( jobs.Base(), jobs.Count(), INT_MAX, pPool );
+		p.bGather = true;
 	}
 	else
 	{
-		for ( int i = 0; i < jobs.Count(); i++ )
-			JobProcess( jobs[i] );
+		s_nDoneGather++;
+		for ( int i = 0; i < 4; i++ )
+		{
+			p.visF[i] = job.visF[i];
+			p.sun[i] = job.sun[i];
+			p.sky[i] = job.sky[i];
+		}
+		p.vecSunChroma = job.vecSunChroma;
+		p.vecSkyChroma = job.vecSkyChroma;
+		if ( ProbeChangedVisibly( p ) )
+			AddDirty( cas, iSlot, false );
 	}
+	FreeJob( pJob );
 }
 
-// a round of gathering over part of a grid (nCount probes from the cursor on)
-static int CollectSweep( CUtlVector< GIJob_t > &jobs, int c, int nCount, const Vector &vecLight, bool bLight )
+// the waiting probes nearest to the camera first (a counting sort by distance: after a teleport
+// or a new map the list holds the whole grid in slot order)
+static void SortPending( GICascade_t &cas )
 {
-	GICascade_t &cas = s_Cascades[c];
-	if ( !cas.bGridValid || !cas.pProbes || cas.nSweepsLeft <= 0 )
+	cas.nPendingUnsorted = 0;
+	const int n = cas.pending.Count();
+	if ( n < 2 )
+		return;
+	CUtlVector< unsigned char > key;
+	key.SetCount( n );
+	int counts[ 257 ];
+	memset( counts, 0, sizeof( counts ) );
+	const float flInvS = 1.0f / cas.flSpacing;
+	for ( int i = 0; i < n; i++ )
+	{
+		Vector vecPos;
+		ProbePos( cas, cas.pProbes[ cas.pending[i] ].cell, vecPos );
+		Vector d = vecPos - s_vecCamera;
+		d.z *= 1.41f;	// (other floors: height counts a bit more)
+		key[i] = (unsigned char)Min( 255, (int)( d.Length() * flInvS ) );
+		counts[ key[i] + 1 ]++;
+	}
+	for ( int b = 0; b < 256; b++ )
+		counts[ b + 1 ] += counts[b];
+	CUtlVector< int > sorted;
+	sorted.SetCount( n );
+	for ( int i = 0; i < n; i++ )
+		sorted[ counts[ key[i] ]++ ] = cas.pending[i];
+	cas.pending.Swap( sorted );
+}
+
+// probes of one grid without their first trace (or starting over), nearest first
+static int SchedulePending( int iCascade, int nMax, const Vector &vecLight, bool bLight )
+{
+	GICascade_t &cas = s_Cascades[ iCascade ];
+	if ( nMax <= 0 || cas.pending.Count() == 0 || !cas.bGridValid )
+		return 0;
+	if ( cas.nPendingUnsorted > 1024 )
+		SortPending( cas );
+	int nAdded = 0;
+	int i = 0;
+	CUtlVector< int > busy;
+	for ( ; i < cas.pending.Count() && nAdded < nMax; i++ )
+	{
+		const int iSlot = cas.pending[i];
+		GIProbe_t &p = cas.pProbes[ iSlot ];
+		if ( !p.bAssigned || ( p.bTraced && !p.bRetrace ) )
+		{
+			p.bInPending = false;
+			continue;
+		}
+		// (a job of it is out: it waits on at the end of the list)
+		if ( p.bBusy )
+		{
+			busy.AddToTail( iSlot );
+			continue;
+		}
+		p.bInPending = false;
+		Vector vecPos;
+		ProbePos( cas, p.cell, vecPos );
+		SubmitTrace( cas, iCascade, p, true, TargetPasses( iCascade, vecPos.DistToSqr( s_vecCamera ) ), vecLight, bLight );
+		nAdded++;
+	}
+	cas.pending.RemoveMultipleFromHead( i );
+	cas.pending.AddVectorToTail( busy );
+	return nAdded;
+}
+
+// The background: the probes in a scattered order (a sweep in slot order was seen as the light
+// of the grid changing slab by slab) - more rays for the ones the camera has come close to, the
+// sun rays where the sun has moved on, the light of the ones that want it gathered again; while
+// rounds of gathering everything are left, every probe.
+static int ScheduleBackground( int iCascade, int nMax, int nVisits, const Vector &vecLight, bool bLight, float flSunCos )
+{
+	GICascade_t &cas = s_Cascades[ iCascade ];
+	if ( nMax <= 0 || !cas.bGridValid )
 		return 0;
 	int nAdded = 0;
-	for ( int i = 0; i < nCount; i++ )
+	// (rows of the grid along x in a scattered order, the probes of a row one after another: the
+	// probes are visited where they lie in memory)
+	const int nx = cas.n[0];
+	const unsigned int nRows = (unsigned int)( cas.nProbes / nx );
+	for ( int v = 0; v < nVisits && nAdded < nMax; v++ )
 	{
-		GIProbe_t &p = cas.pProbes[ cas.iSweepCursor ];
-		if ( ++cas.iSweepCursor >= GI_NUM_PROBES )
+		const unsigned int iRow = ( (unsigned int)( cas.iSweep / nx ) * (unsigned int)GI_SWEEP_STRIDE ) % nRows;
+		const int iSlot = (int)iRow * nx + cas.iSweep % nx;
+		if ( ++cas.iSweep >= cas.nProbes )
 		{
-			cas.iSweepCursor = 0;
-			if ( --cas.nSweepsLeft <= 0 )
-			{
-				i = nCount;	// (this probe yet)
-			}
+			cas.iSweep = 0;
+			if ( cas.nSweepsLeft > 0 )
+				cas.nSweepsLeft--;
 		}
-		if ( !p.bAssigned || !p.bTraced || p.flValid <= 0.0f || p.bQueued )
+		GIProbe_t &p = cas.pProbes[ iSlot ];
+		if ( !p.bAssigned || !p.bTraced || p.bBusy || p.bRetrace || p.flValid <= 0.0f )
 			continue;
-		AddJob( jobs, p, c, GIJOB_GATHER, vecLight, bLight );
+
+		int nTarget = p.nPasses;
+		if ( p.nPasses < s_nPassesHQ )
+		{
+			Vector vecPos;
+			ProbePos( cas, p.cell, vecPos );
+			nTarget = TargetPasses( iCascade, vecPos.DistToSqr( s_vecCamera ) );
+		}
+		// (nothing but sky around it: two passes tell as much as eight)
+		if ( p.nPasses < nTarget && !( p.nHits == 0 && p.nPasses >= 2 ) )
+			SubmitTrace( cas, iCascade, p, false, nTarget, vecLight, bLight );
+		else if ( p.nHits > 0 && ( !p.bSunValid || DotProduct( p.vecSunDir, vecLight ) < flSunCos ) )
+			SubmitJob( NewJob( cas, iCascade, p, GIJOB_SUN, vecLight, bLight ) );
+		else if ( p.bGather || cas.nSweepsLeft > 0 )
+		{
+			p.bGather = false;
+			SubmitJob( NewJob( cas, iCascade, p, GIJOB_GATHER, vecLight, bLight ) );
+		}
+		else
+			continue;
 		nAdded++;
 	}
 	return nAdded;
 }
 
-static void TraceProbes( const Vector &vecLight, bool bLight )
+static void ScheduleJobs( const Vector &vecLight, bool bLight )
 {
-	const double flStart = Plat_FloatTime();
-	const float flSunCos = cosf( DEG2RAD( r_deferred_gi_sun_refresh.GetFloat() ) );
 	const int nCascades = r_deferred_gi_far.GetBool() ? GI_CASCADES : 1;
+	const float flSunCos = cosf( DEG2RAD( r_deferred_gi_sun_refresh.GetFloat() ) );
 
-	int nPending = 0;
-	for ( int c = 0; c < GI_CASCADES; c++ )
-		nPending += s_Cascades[c].nPending;
-
-	// the first frame of a map: everything around the camera at once (nobody sees this frame
-	// take longer); else the budget - and more of it the more is missing (a walking player
-	// uncovers ~900 probes a second, a teleport all of them), up to the catch-up time
-	const bool bFirstFill = s_bFirstFill;
-	float flBudgetMs = r_deferred_gi_budget_ms.GetFloat();
-	if ( bFirstFill )
-		flBudgetMs = Max( flBudgetMs, r_deferred_gi_load_ms.GetFloat() );
-	else
+	// a round of gathering everything again, now and then while things change: the light
+	// spreads farther than the neighbours of what was traced
+	for ( int c = 0; c < nCascades; c++ )
 	{
-		const float flBacklog = s_Cascades[0].nPending + s_Cascades[1].nPending * 0.5f;
-		flBudgetMs = Min( Max( flBudgetMs, r_deferred_gi_catchup_ms.GetFloat() ), flBudgetMs * ( 1.0f + flBacklog / 500.0f ) );
-	}
-	const double flEnd = flStart + flBudgetMs * 0.001;
-
-	IThreadPool *pPool = GetGIPool();
-
-	s_nTracesLastFrame = 0;
-	int nProbes = 0, nRefine = 0, nSun = 0, nGather = 0;
-
-	CUtlVector< GIJob_t > jobs;
-	CUtlVector< GIJob_t > gather;
-	for ( ;; )
-	{
-		const double flNow = Plat_FloatTime();
-		const float flLeftMs = (float)( ( flEnd - flNow ) * 1000.0 );
-		if ( flLeftMs <= 0.02f )
-			break;
-
-		// about twice what the workers would get done in the time left: they stop at the
-		// deadline themselves (JobProcess), what they didn't reach stays pending
-		const int nBatch = clamp( (int)( s_flProbesPerMs * flLeftMs * 2.0f ), 16, 1024 );
-		jobs.RemoveAll();
-		CollectJobs( jobs, nBatch, vecLight, bLight, flSunCos );
-		if ( jobs.Count() == 0 )
-			break;
-
-		s_flJobDeadline = flEnd;
-		s_flJobSunCos = flSunCos;
-		RunJobs( jobs, pPool );
-
-		int nDone = 0;
-		gather.RemoveAll();
-		for ( int i = 0; i < jobs.Count(); i++ )
+		GICascade_t &cas = s_Cascades[c];
+		if ( cas.bChanged && cas.nSweepsLeft <= 0 && gpGlobals->realtime >= cas.flNextSweep )
 		{
-			GIJob_t &job = jobs[i];
-			GICascade_t &cas = s_Cascades[ job.iCascade ];
-			const bool bFirstPass = job.iType == GIJOB_TRACE && ( !job.pProbe->bTraced || job.pProbe->bRetrace );
-			const bool bGather = FinishJob( cas, job, bFirstFill );
-			if ( job.bSkipped )
-			{
-				// (left undone: this grid is not "done for this sun" / "refined" yet)
-				if ( job.iType == GIJOB_SUN )
-					cas.bSunDone = false;
-				else if ( !bFirstPass )
-					cas.bRefined = false;
-				continue;
-			}
-			nDone++;
-			if ( job.iType == GIJOB_SUN )
-				nSun++;
-			else if ( bFirstPass )
-				nProbes++;
-			else
-				nRefine++;
-			cas.nSweepsLeft = Max( cas.nSweepsLeft, 3 );
-			if ( bGather )
-				AddJob( gather, *job.pProbe, job.iCascade, GIJOB_GATHER, vecLight, bLight );
-		}
-
-		// the light of what was just traced, right away (cheap next to the rays)
-		if ( gather.Count() )
-		{
-			RunJobs( gather, pPool );
-			for ( int i = 0; i < gather.Count(); i++ )
-				gather[i].pProbe->bQueued = false;
-			nGather += gather.Count();
-		}
-
-		const float flBatchMs = (float)( ( Plat_FloatTime() - flNow ) * 1000.0 );
-		if ( flBatchMs > 0.01f && nDone > 0 )
-		{
-			const float flRate = nDone / flBatchMs;
-			s_flProbesPerMs = clamp( s_flProbesPerMs * 0.7f + flRate * 0.3f, 1.0f, 400.0f );
+			cas.bChanged = false;
+			cas.nSweepsLeft = 1;
+			cas.flNextSweep = gpGlobals->realtime + r_deferred_gi_sweep_interval.GetFloat();
 		}
 	}
 
-	// The light goes round: every probe gathers again from the others as they are now - one
-	// more bounce each round. The first frame of a map does its rounds at once; later a round
-	// takes what the tracing left of the frame's time (a little of it at least, or it would
-	// never end while probes are being traced).
-	const int nRounds = bFirstFill ? 4 : 1;
-	for ( int r = 0; r < nRounds; r++ )
-	{
-		const double flRoundStart = Plat_FloatTime();
-		int nCount = GI_NUM_PROBES;
-		if ( !bFirstFill )
-		{
-			const float flLeftMs = Max( (float)( ( flEnd - flRoundStart ) * 1000.0 ), 0.12f );
-			nCount = clamp( (int)( s_flGathersPerMs * flLeftMs ), 16, GI_NUM_PROBES / 16 );
-		}
-		gather.RemoveAll();
-		for ( int c = 0; c < nCascades; c++ )
-		{
-			if ( bFirstFill )
-			{
-				s_Cascades[c].nSweepsLeft = 1;
-				s_Cascades[c].iSweepCursor = 0;
-			}
-			// (the grids in turn; a probe that can't light costs nothing)
-			const int nAdded = CollectSweep( gather, c, bFirstFill ? GI_NUM_PROBES : Max( 16, nCount - gather.Count() ) * 2, vecLight, bLight );
-			if ( !bFirstFill && nAdded >= nCount )
-				break;
-		}
-		if ( gather.Count() == 0 )
-			break;
-		RunJobs( gather, pPool );
-		for ( int i = 0; i < gather.Count(); i++ )
-			gather[i].pProbe->bQueued = false;
-		nGather += gather.Count();
+	// (a frame's work of the workers ahead - a gather takes some 30 us, a trace a millisecond: what
+	// is wanted most is decided again every frame)
+	const int nCap = Max( 1, s_nWorkers ) * 256;
+	int nFree = nCap - s_nOutstanding;
+	if ( nFree <= 0 )
+		return;
 
-		const float flRoundMs = (float)( ( Plat_FloatTime() - flRoundStart ) * 1000.0 );
-		if ( flRoundMs > 0.02f )
-			s_flGathersPerMs = clamp( s_flGathersPerMs * 0.8f + ( gather.Count() / flRoundMs ) * 0.2f, 20.0f, 4000.0f );
-	}
-	if ( bFirstFill )
-	{
-		for ( int c = 0; c < nCascades; c++ )
-			s_Cascades[c].nSweepsLeft = 2;
-	}
+	// first traces of the near grid, a quarter kept for the far one (a walking player would
+	// starve it otherwise), then what the grids have left
+	const bool bFarWork = nCascades > 1 && s_Cascades[1].nPending > 0;
+	nFree -= SchedulePending( 0, bFarWork ? nFree - nFree / 4 : nFree, vecLight, bLight );
+	if ( nCascades > 1 )
+		nFree -= SchedulePending( 1, nFree, vecLight, bLight );
+	nFree -= SchedulePending( 0, nFree, vecLight, bLight );
 
-	// (the first fill is over once it ran: what it didn't reach comes with the normal budget)
-	if ( bFirstFill && nPending > 0 )
-		s_bFirstFill = false;
-
-	s_nProbesLastFrame = nProbes;
-	s_nRefineLastFrame = nRefine;
-	s_nSunLastFrame = nSun;
-	s_nGatherLastFrame = nGather;
-	s_flMsLastFrame = (float)( ( Plat_FloatTime() - flStart ) * 1000.0 );
-	if ( !bFirstFill )
-		s_flMsWorst = Max( s_flMsWorst, s_flMsLastFrame );
+	for ( int c = 0; c < nCascades && nFree > 0; c++ )
+		nFree -= ScheduleBackground( c, ( c == 0 && nCascades > 1 ) ? nFree - nFree / 4 : nFree, 2048, vecLight, bLight, flSunCos );
 }
 
-// probes fade in after they were traced
-static void UpdateFades()
+// The first frame of a map: everything around the camera at once (nobody sees this frame take
+// longer) - the near grid within the radius of the full ray count, the far grid, the rest of the
+// near one; then one round of gathering. What the time doesn't allow follows in the background.
+static void FirstFill( const Vector &vecLight, bool bLight )
 {
-	const float flTime = r_deferred_gi_fade.GetFloat();
-	const float flStep = ( flTime > 0.001f ) ? clamp( gpGlobals->absoluteframetime, 0.0f, 0.1f ) / flTime : 1.0f;
-	for ( int i = s_Fading.Count() - 1; i >= 0; i-- )
+	const double flStart = Plat_FloatTime();
+	const double flEnd = flStart + r_deferred_gi_load_ms.GetFloat() * 0.001;
+	const int nCascades = r_deferred_gi_far.GetBool() ? GI_CASCADES : 1;
+
+	GICascade_t &nearCas = s_Cascades[0];
+	const float flRadius = r_deferred_gi_hq_radius.GetFloat();
+	int nNearFirst = 0;
+	while ( nNearFirst < nearCas.nProbes )
 	{
-		GIProbe_t *p = s_Fading[i];
-		p->flFade = Min( 1.0f, p->flFade + flStep );
-		p->bDirty = true;
-		if ( p->flFade >= 1.0f || !p->bTraced )
-		{
-			p->bFading = false;
-			s_Fading.FastRemove( i );
-		}
+		Vector vecPos;
+		ProbePos( nearCas, nearCas.pProbes[ OrderedSlot( nearCas, nNearFirst ) ].cell, vecPos );
+		if ( vecPos.DistToSqr( s_vecCamera ) > flRadius * flRadius )
+			break;
+		nNearFirst++;
 	}
+	int nSubmitted = SchedulePending( 0, nNearFirst, vecLight, bLight );
+	if ( nCascades > 1 )
+		nSubmitted += SchedulePending( 1, s_Cascades[1].nProbes, vecLight, bLight );
+	nSubmitted += SchedulePending( 0, nearCas.nProbes, vecLight, bLight );
+
+	while ( Plat_FloatTime() < flEnd )
+	{
+		HelpWithJobs( flEnd );
+		CollectJobs( 0.0 );
+		if ( s_nOutstanding <= 0 )
+			break;
+		ThreadSleep( 0 );
+	}
+	CollectJobs( 0.0 );
+
+	// one round of gathering (the bounces of the bounces follow in the background)
+	if ( s_nOutstanding <= 0 )
+	{
+		for ( int c = 0; c < nCascades; c++ )
+		{
+			GICascade_t &cas = s_Cascades[c];
+			for ( int i = 0; i < cas.nProbes; i++ )
+			{
+				GIProbe_t &p = cas.pProbes[i];
+				if ( !p.bAssigned || !p.bTraced || p.bBusy || p.flValid <= 0.0f )
+					continue;
+				p.bGather = false;
+				SubmitJob( NewJob( cas, c, p, GIJOB_GATHER, vecLight, bLight ) );
+			}
+			cas.nSweepsLeft = 2;
+			cas.iSweep = 0;
+		}
+		while ( Plat_FloatTime() < flEnd )
+		{
+			HelpWithJobs( flEnd );
+			CollectJobs( 0.0 );
+			if ( s_nOutstanding <= 0 )
+				break;
+			ThreadSleep( 0 );
+		}
+		CollectJobs( 0.0 );
+	}
+
+	for ( int c = 0; c < nCascades; c++ )
+	{
+		s_Cascades[c].bInitialUpload = true;
+		s_Cascades[c].bBlendReset = true;
+	}
+	s_flFirstFillMs = (float)( ( Plat_FloatTime() - flStart ) * 1000.0 );
+	s_nFirstFillDone = nSubmitted - s_nOutstanding;
+	s_nFirstFillLeft = s_nOutstanding;
+	s_bFirstFill = false;
+}
+
+static void UpdateGIWork( const Vector &vecLight, bool bLight )
+{
+	const double flStart = Plat_FloatTime();
+	UpdateTargetPasses();
+	if ( s_bFirstFill )
+	{
+		FirstFill( vecLight, bLight );
+		return;
+	}
+
+	// (no workers: the main thread traces for a while itself)
+	if ( s_nWorkers <= 0 )
+		HelpWithJobs( flStart + r_deferred_gi_budget_ms.GetFloat() * 0.001 );
+
+	double flMark = flStart;
+	s_nCollected += CollectJobs( flStart + r_deferred_gi_budget_ms.GetFloat() * 0.001 );
+	PhaseTime( GIPHASE_COLLECT, flMark );
+	ScheduleJobs( vecLight, bLight );
+	FlushJobs();
+	PhaseTime( GIPHASE_SCHEDULE, flMark );
 }
 
 // how much sky is in sight where the camera is (the probes of the near grid around it)
@@ -1875,36 +2427,51 @@ float DeferredGI_GetCameraSky()
 }
 
 //-----------------------------------------------------------------------------
-// Upload: one texel per probe and plane, written as tiny quads in clip space
+// Upload: one texel per probe and plane, written as points (or tiny quads) in clip
+// space into the target atlas; the display atlas the lighting reads eases toward it
 //-----------------------------------------------------------------------------
-static inline void EmitTexel( CMeshBuilder &mb, int u, int v, const float *d )
+static inline void EmitTexel( CMeshBuilder &mb, bool bPoints, int u, int v, int w, int h, const float *d )
 {
-	// (D3D9: pixel u's center is at screen x = u; the quad covers only it)
-	const float x0 = ( u - 0.4f ) * ( 2.0f / GI_ATLAS_W ) - 1.0f;
-	const float x1 = ( u + 0.4f ) * ( 2.0f / GI_ATLAS_W ) - 1.0f;
-	const float y0 = 1.0f - ( v - 0.4f ) * ( 2.0f / GI_ATLAS_H );
-	const float y1 = 1.0f - ( v + 0.4f ) * ( 2.0f / GI_ATLAS_H );
-
-	mb.Position3f( x0, y0, 0.0f );
+	// (D3D9: pixel u's center is at screen x = u; a point of size 1 or the quad covers only it)
+	const float x = u * ( 2.0f / w ) - 1.0f;
+	const float y = 1.0f - v * ( 2.0f / h );
+	if ( bPoints )
+	{
+		mb.Position3f( x, y, 0.0f );
+		mb.TexCoord4f( 0, d[0], d[1], d[2], d[3] );
+		mb.AdvanceVertex();
+		return;
+	}
+	const float dx = 0.4f * ( 2.0f / w ), dy = 0.4f * ( 2.0f / h );
+	mb.Position3f( x - dx, y + dy, 0.0f );
 	mb.TexCoord4f( 0, d[0], d[1], d[2], d[3] );
 	mb.AdvanceVertex();
-	mb.Position3f( x1, y0, 0.0f );
+	mb.Position3f( x + dx, y + dy, 0.0f );
 	mb.TexCoord4f( 0, d[0], d[1], d[2], d[3] );
 	mb.AdvanceVertex();
-	mb.Position3f( x1, y1, 0.0f );
+	mb.Position3f( x + dx, y - dy, 0.0f );
 	mb.TexCoord4f( 0, d[0], d[1], d[2], d[3] );
 	mb.AdvanceVertex();
-	mb.Position3f( x0, y1, 0.0f );
+	mb.Position3f( x - dx, y - dy, 0.0f );
 	mb.TexCoord4f( 0, d[0], d[1], d[2], d[3] );
 	mb.AdvanceVertex();
 }
 
-static void EmitProbe( CMeshBuilder &mb, int iSlot, const GIProbe_t &p, float flSpacing )
+// (which cell a slot holds, for the display atlas to tell a new probe in it: never 0 - the
+// cleared atlas)
+static inline float CellStamp( const int cell[3] )
 {
-	const int sx = iSlot % GI_NX;
-	const int sy = ( iSlot / GI_NX ) % GI_NY;
-	const int sz = iSlot / ( GI_NX * GI_NY );
-	const int u = sx + sz * GI_NX;
+	return (float)( 1 + ( ( (unsigned int)cell[0] * 73u + (unsigned int)cell[1] * 151u + (unsigned int)cell[2] * 283u ) & 1023u ) );
+}
+
+static void EmitProbe( CMeshBuilder &mb, bool bPoints, const GICascade_t &cas, int iSlot, GIProbe_t &p )
+{
+	const int nx = cas.n[0], ny = cas.n[1];
+	const int sx = iSlot % nx;
+	const int sy = ( iSlot / nx ) % ny;
+	const int sz = iSlot / ( nx * ny );
+	const int u = sx + sz * nx;
+	const int w = nx * cas.n[2], h = ny * GI_PLANES;
 
 	const bool bValid = p.bTraced && p.flValid > 0.0f;
 	float d[4];
@@ -1912,109 +2479,175 @@ static void EmitProbe( CMeshBuilder &mb, int iSlot, const GIProbe_t &p, float fl
 	// 0: sky visibility
 	for ( int i = 0; i < 4; i++ )
 		d[i] = bValid ? p.visF[i] : 0.0f;
-	EmitTexel( mb, u, sy, d );
+	EmitTexel( mb, bPoints, u, sy, w, h, d );
 
 	// 1: indirect sun light (luminance)
 	for ( int i = 0; i < 4; i++ )
 		d[i] = bValid ? p.sun[i] : 0.0f;
-	EmitTexel( mb, u, sy + GI_NY, d );
+	EmitTexel( mb, bPoints, u, sy + ny, w, h, d );
 
-	// 2: its color, weight (0 = in a wall / not traced yet; fading in after the trace)
+	// 2: its color, weight (0 = in a wall / not traced yet; the display atlas fades it in)
 	d[0] = p.vecSunChroma.x;
 	d[1] = p.vecSunChroma.y;
 	d[2] = p.vecSunChroma.z;
-	d[3] = bValid ? clamp( p.flFade, 0.0f, 1.0f ) : 0.0f;
-	EmitTexel( mb, u, sy + GI_NY * 2, d );
+	d[3] = bValid ? 1.0f : 0.0f;
+	EmitTexel( mb, bPoints, u, sy + ny * 2, w, h, d );
 
-	// 3: free distances, 5 bits each: +axis * 32 + -axis
+	// 3: free distances, 5 bits each: +axis * 32 + -axis; the cell's stamp
 	for ( int a = 0; a < 3; a++ )
 	{
-		const int qPos = clamp( (int)( p.freeDist[ a * 2 ] / flSpacing * 31.0f + 0.5f ), 0, 31 );
-		const int qNeg = clamp( (int)( p.freeDist[ a * 2 + 1 ] / flSpacing * 31.0f + 0.5f ), 0, 31 );
+		const int qPos = clamp( (int)( p.freeDist[ a * 2 ] / cas.flSpacing * 31.0f + 0.5f ), 0, 31 );
+		const int qNeg = clamp( (int)( p.freeDist[ a * 2 + 1 ] / cas.flSpacing * 31.0f + 0.5f ), 0, 31 );
 		d[a] = (float)( qPos * 32 + qNeg );
 	}
-	d[3] = 0.0f;
-	EmitTexel( mb, u, sy + GI_NY * 3, d );
+	d[3] = p.bAssigned ? CellStamp( p.cell ) : 0.0f;
+	EmitTexel( mb, bPoints, u, sy + ny * 3, w, h, d );
 
 	// 4: bounced sky light (luminance)
 	for ( int i = 0; i < 4; i++ )
 		d[i] = bValid ? p.sky[i] : 0.0f;
-	EmitTexel( mb, u, sy + GI_NY * 4, d );
+	EmitTexel( mb, bPoints, u, sy + ny * 4, w, h, d );
 
 	// 5: its color
 	d[0] = p.vecSkyChroma.x;
 	d[1] = p.vecSkyChroma.y;
 	d[2] = p.vecSkyChroma.z;
 	d[3] = 0.0f;
-	EmitTexel( mb, u, sy + GI_NY * 5, d );
+	EmitTexel( mb, bPoints, u, sy + ny * 5, w, h, d );
+
+	for ( int i = 0; i < 4; i++ )
+	{
+		p.uploaded[i] = p.visF[i];
+		p.uploaded[ 4 + i ] = p.sun[i];
+		p.uploaded[ 8 + i ] = p.sky[i];
+	}
 }
 
-// At most nMax probes a frame, the nearest to the camera first; the rest stay dirty for the
-// next frames. The quads go through the material system's call queue (mat_queue_mode 2), which
-// keeps the vertices of a frame's dynamic meshes in a memory stack of 16 MB: the first frame of
-// a map wrote every probe of both grids at once - 14 MB of vertices with the 32 x 32 grid and 6
-// planes - and whatever was drawn after it in that frame ran the stack over ("failed to commit",
-// a crash in materialsystem.dll during the first frame, now and then).
-static void UploadProbes( GICascade_t &cas, int nMax )
+// At most nMax probes a frame, the slots with a new cell first; the rest the next frames. The
+// texels go through the material system's call queue (mat_queue_mode 2), which keeps the vertices
+// of a frame's dynamic meshes in a memory stack of 16 MB: writing every probe of both grids at
+// once ran the stack over ("failed to commit", a crash in materialsystem.dll).
+static int UploadProbes( GICascade_t &cas, int nMax )
 {
-	if ( !cas.texProbes.IsValid() || !cas.pProbes )
-		return;
+	if ( !cas.texTarget.IsValid() || !cas.pProbes )
+		return 0;
 
 	CMatRenderContextPtr pRenderContext( materials );
+	const int w = cas.n[0] * cas.n[2], h = cas.n[1] * GI_PLANES;
 
 	if ( cas.bClearAtlas )
 	{
-		pRenderContext->PushRenderTargetAndViewport( cas.texProbes, 0, 0, GI_ATLAS_W, GI_ATLAS_H );
+		pRenderContext->PushRenderTargetAndViewport( cas.texTarget, 0, 0, w, h );
 		pRenderContext->ClearColor4ub( 0, 0, 0, 0 );
 		pRenderContext->ClearBuffers( true, false );
 		pRenderContext->PopRenderTargetAndViewport();
+		for ( int i = 0; i < 2; i++ )
+		{
+			pRenderContext->PushRenderTargetAndViewport( cas.texDisplay[i], 0, 0, w, h );
+			pRenderContext->ClearColor4ub( 0, 0, 0, 0 );
+			pRenderContext->ClearBuffers( true, false );
+			pRenderContext->PopRenderTargetAndViewport();
+		}
 		cas.bClearAtlas = false;
+		cas.bBlendReset = true;
 	}
 
 	if ( cas.bReuploadAll )
 	{
-		for ( int i = 0; i < GI_NUM_PROBES; i++ )
+		for ( int i = 0; i < cas.nProbes; i++ )
 		{
 			if ( cas.pProbes[i].bAssigned )
-				cas.pProbes[i].bDirty = true;
+				AddDirty( cas, i, false );
 		}
 		cas.bReuploadAll = false;
+		cas.bInitialUpload = true;
 	}
 
-	CUtlVector< int > dirty;
-	if ( cas.bGridValid )
+	if ( cas.dirtyNow.Count() + cas.dirty.Count() == 0 )
+		return 0;
+
+	CUtlVector< int > slots;
+	slots.EnsureCapacity( Min( nMax, cas.dirtyNow.Count() + cas.dirty.Count() ) );
+	// (the slots with a new cell all of them: the lighting must not read a probe of the other end
+	// of the grid for this cell)
+	const int nNow = Min( cas.dirtyNow.Count(), Max( nMax, 4096 ) );
+	for ( int i = 0; i < nNow; i++ )
 	{
-		for ( int i = 0; i < GI_NUM_PROBES && dirty.Count() < nMax; i++ )
-		{
-			const int o = cas.order[i];
-			const int iSlot = SlotIndex( cas.iGridMin[0] + o % GI_NX, cas.iGridMin[1] + ( o / GI_NX ) % GI_NY, cas.iGridMin[2] + o / ( GI_NX * GI_NY ) );
-			if ( cas.pProbes[ iSlot ].bDirty )
-				dirty.AddToTail( iSlot );
-		}
+		cas.pProbes[ cas.dirtyNow[i] ].bDirtyNow = false;
+		cas.pProbes[ cas.dirtyNow[i] ].bDirty = false;
+		slots.AddToTail( cas.dirtyNow[i] );
 	}
-	if ( dirty.Count() == 0 )
-		return;
+	cas.dirtyNow.RemoveMultipleFromHead( nNow );
+	int iTaken = 0;
+	for ( ; iTaken < cas.dirty.Count() && slots.Count() < nMax; iTaken++ )
+	{
+		GIProbe_t &p = cas.pProbes[ cas.dirty[ iTaken ] ];
+		if ( !p.bDirty )
+			continue;	// (already written as a new cell)
+		p.bDirty = false;
+		slots.AddToTail( cas.dirty[ iTaken ] );
+	}
+	cas.dirty.RemoveMultipleFromHead( iTaken );
+	if ( slots.Count() == 0 )
+		return 0;
 
-	pRenderContext->PushRenderTargetAndViewport( cas.texProbes, 0, 0, GI_ATLAS_W, GI_ATLAS_H );
+	const bool bPoints = r_deferred_gi_upload_points.GetBool();
+	const int nPerBatch = bPoints ? 2048 : 512;
+	pRenderContext->PushRenderTargetAndViewport( cas.texTarget, 0, 0, w, h );
 	pRenderContext->Bind( g_pMatGIUpload );
-
-	for ( int iFirst = 0; iFirst < dirty.Count(); iFirst += GI_PROBES_PER_BATCH )
+	for ( int iFirst = 0; iFirst < slots.Count(); iFirst += nPerBatch )
 	{
-		const int n = Min( (int)GI_PROBES_PER_BATCH, dirty.Count() - iFirst );
+		const int n = Min( nPerBatch, slots.Count() - iFirst );
 		IMesh *pMesh = pRenderContext->GetDynamicMesh( true );
 		CMeshBuilder mb;
-		mb.Begin( pMesh, MATERIAL_QUADS, n * GI_PLANES );
+		mb.Begin( pMesh, bPoints ? MATERIAL_POINTS : MATERIAL_QUADS, n * GI_PLANES );
 		for ( int i = 0; i < n; i++ )
 		{
-			const int iSlot = dirty[ iFirst + i ];
-			EmitProbe( mb, iSlot, cas.pProbes[ iSlot ], cas.flSpacing );
-			cas.pProbes[ iSlot ].bDirty = false;
+			const int iSlot = slots[ iFirst + i ];
+			EmitProbe( mb, bPoints, cas, iSlot, cas.pProbes[ iSlot ] );
 		}
 		mb.End();
 		pMesh->Draw();
 	}
-
 	pRenderContext->PopRenderTargetAndViewport();
+
+	cas.flLastUpload = gpGlobals->realtime;
+	return slots.Count();
+}
+
+// the display atlas one step toward the target (ping-pong)
+static void BlendAtlas( GICascade_t &cas )
+{
+	const float flSmooth = r_deferred_gi_smooth.GetFloat();
+	const float flFade = r_deferred_gi_fade.GetFloat();
+	// (nothing written for a while: everything has arrived)
+	if ( !cas.bBlendReset && !cas.bInitialUpload && gpGlobals->realtime - cas.flLastUpload > 6.0f * flSmooth + 2.0f * flFade + 0.5f )
+		return;
+
+	const float dt = clamp( gpGlobals->absoluteframetime, 0.0f, 0.25f );
+	const bool bReset = cas.bBlendReset || cas.bInitialUpload;
+	const int iFrom = cas.iDisplay, iTo = 1 - cas.iDisplay;
+	IMaterial *pMat = cas.pMatBlend[ iFrom ];
+	const int w = cas.n[0] * cas.n[2], h = cas.n[1] * GI_PLANES;
+
+	bool bFound = false;
+	IMaterialVar *pVar = pMat->FindVar( "$blendparams", &bFound, false );
+	if ( pVar && bFound )
+		pVar->SetVecValue( ( flSmooth > 0.001f ) ? 1.0f - expf( -dt / flSmooth ) : 1.0f, ( flFade > 0.001f ) ? dt / flFade : 1.0f, (float)cas.n[1], bReset ? 1.0f : 0.0f );
+	pVar = pMat->FindVar( "$atlassize", &bFound, false );
+	if ( pVar && bFound )
+		pVar->SetVecValue( (float)w, (float)h, 1.0f / w, 1.0f / h );
+
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->PushRenderTargetAndViewport( cas.texDisplay[ iTo ], 0, 0, w, h );
+	pRenderContext->DrawScreenSpaceRectangle( pMat, 0, 0, w, h, 0, 0, w - 1, h - 1, w, h );
+	pRenderContext->PopRenderTargetAndViewport();
+	cas.iDisplay = iTo;
+
+	cas.bBlendReset = false;
+	// (the first fill is written over a few frames: until it all is, the lighting reads it as it is)
+	if ( cas.bInitialUpload && cas.dirty.Count() == 0 && cas.dirtyNow.Count() == 0 )
+		cas.bInitialUpload = false;
 }
 
 //-----------------------------------------------------------------------------
@@ -2027,12 +2660,13 @@ static void DrawProbesDebug( const Vector &vecCamera )
 	const GICascade_t &cas = s_Cascades[0];
 	const float flDuration = Max( 0.05f, gpGlobals->frametime * 1.5f );
 	const Vector vecExt( 1.5f, 1.5f, 1.5f );
-	for ( int i = 0; i < GI_NUM_PROBES; i++ )
+	for ( int i = 0; i < cas.nProbes; i++ )
 	{
 		const GIProbe_t &p = cas.pProbes[i];
 		if ( !p.bAssigned )
 			continue;
-		const Vector vecPos( ( p.cell[0] + GI_OFFSET ) * cas.flSpacing, ( p.cell[1] + GI_OFFSET ) * cas.flSpacing, ( p.cell[2] + GI_OFFSET ) * cas.flSpacing );
+		Vector vecPos;
+		ProbePos( cas, p.cell, vecPos );
 		if ( vecPos.DistToSqr( vecCamera ) > 400.0f * 400.0f )
 			continue;
 		int r = 128, g = 128, b = 128;
@@ -2061,49 +2695,80 @@ static void DeferredGI_Stats()
 		Msg( "[gi] not started\n" );
 		return;
 	}
-	int nHitsTotal = 0, nHitsAlloc = 0;
+	int nHitsTotal = 0;
 	for ( int c = 0; c < GI_CASCADES; c++ )
 	{
 		const GICascade_t &cas = s_Cascades[c];
-		int nAssigned = 0, nTraced = 0, nValid = 0, nSun = 0, nPasses = 0, nFull = 0;
-		const int nTarget = TargetPasses( c );
-		for ( int i = 0; i < GI_NUM_PROBES; i++ )
+		int nAssigned = 0, nTraced = 0, nValid = 0, nSun = 0, nPasses = 0, nBusy = 0, nGather = 0, nUnder = 0;
+		for ( int i = 0; i < cas.nProbes; i++ )
 		{
 			const GIProbe_t &p = cas.pProbes[i];
 			nAssigned += p.bAssigned ? 1 : 0;
 			nTraced += p.bTraced ? 1 : 0;
 			nSun += p.bSunValid ? 1 : 0;
-			nHitsAlloc += p.nHitsAlloc;
+			nBusy += p.bBusy ? 1 : 0;
+			nGather += p.bGather ? 1 : 0;
 			if ( p.bTraced && p.flValid > 0.0f )
 			{
 				nValid++;
 				nPasses += p.nPasses;
-				nFull += ( p.nPasses >= nTarget || ( p.nHits == 0 && p.nPasses >= 2 ) ) ? 1 : 0;
 				nHitsTotal += p.nHits;
+				Vector vecPos;
+				ProbePos( cas, p.cell, vecPos );
+				if ( p.nPasses < TargetPasses( c, vecPos.DistToSqr( s_vecCamera ) ) && !( p.nHits == 0 && p.nPasses >= 2 ) )
+					nUnder++;
 			}
 		}
-		Msg( "[gi] %s grid %d %d %d (spacing %.0f): %d probes, %d traced, %d valid (%d with all their %d rays, %.1f passes on average), %d sun, %d pending, sweeps left %d\n", c ? "far" : "near",
-			cas.iGridMin[0], cas.iGridMin[1], cas.iGridMin[2], cas.flSpacing, nAssigned, nTraced, nValid, nFull, nTarget * GI_RAYS,
-			nValid ? (float)nPasses / nValid : 0.0f, nSun, cas.nPending, cas.nSweepsLeft );
+		Msg( "[gi] %s grid %dx%dx%d at %d %d %d (spacing %.0f): %d probes, %d traced, %d valid (%.1f passes on average, %d waiting for more), %d sun, %d pending, %d busy, %d want gathering, sweeps left %d, upload queue %d + %d\n",
+			c ? "far" : "near", cas.n[0], cas.n[1], cas.n[2], cas.iGridMin[0], cas.iGridMin[1], cas.iGridMin[2], cas.flSpacing,
+			nAssigned, nTraced, nValid, nValid ? (float)nPasses / nValid : 0.0f, nUnder, nSun, cas.nPending, nBusy, nGather, cas.nSweepsLeft,
+			cas.dirtyNow.Count(), cas.dirty.Count() );
 	}
-	Msg( "[gi] last frame: %d new, %d refined, %d sun, %d gathered, %d traces, %.2f ms (worst since the map loaded %.2f ms); %d fading in; %.0f probes traced / %.0f gathered per ms on %d threads; sky at the camera %.2f\n",
-		s_nProbesLastFrame, s_nRefineLastFrame, s_nSunLastFrame, s_nGatherLastFrame, s_nTracesLastFrame, s_flMsLastFrame, s_flMsWorst, s_Fading.Count(), s_flProbesPerMs, s_flGathersPerMs,
-		GetGIPool() ? GetGIPool()->NumThreads() + 1 : 1, s_flCameraSky );
-	Msg( "[gi] invalid since reset: %d in solid, %d closed (back faces); hits kept %d (%.1f MB allocated); brush entities blocking %d (%d tracked, %d changes)\n",
-		s_nInvalidSolid, s_nInvalidClosed, nHitsTotal, nHitsAlloc * sizeof( GIHit_t ) / ( 1024.0f * 1024.0f ),
-		s_BrushEnts.Count(), s_BrushTracks.Count(), s_nBrushInvalidations );
+	const float flSecs = Max( 0.001f, (float)( Plat_FloatTime() - s_flStatsStart ) );
+	Msg( "[gi] %d workers, %d jobs out (%d queued); since the map loaded (%.0f s): %d traced, %d refined, %d sun, %d gathered, %d rays (%.0f rays/s)\n",
+		s_nWorkers, s_nOutstanding, QueuedJobs(), flSecs, s_nDoneTrace, s_nDoneRefine, s_nDoneSun, s_nDoneGather, s_nDoneTraces, s_nDoneTraces / flSecs );
+	Msg( "[gi] first fill %.0f ms (%d jobs done, %d left to the background); main thread last frame %.2f ms (worst %.2f ms), %d probes written; sky at the camera %.2f\n",
+		s_flFirstFillMs, s_nFirstFillDone, s_nFirstFillLeft, s_flMsLastFrame, s_flMsWorst, s_nUploadLastFrame, s_flCameraSky );
+	if ( s_nPhaseLastFrames > 0 )
+	{
+		char szPhases[512] = "";
+		for ( int i = 0; i < GIPHASE_COUNT; i++ )
+		{
+			char szOne[64];
+			Q_snprintf( szOne, sizeof( szOne ), "%s%s %.2f / %.2f", i ? ", " : "", s_pszPhase[i], s_flPhaseLastSum[i] / s_nPhaseLastFrames, s_flPhaseLastMax[i] );
+			Q_strncat( szPhases, szOne, sizeof( szPhases ) );
+		}
+		Msg( "[gi] main thread ms per frame (average / worst over %d frames): %s; %.0f jobs taken in a frame\n", s_nPhaseLastFrames, szPhases, (float)s_nLastCollected / s_nPhaseLastFrames );
+	}
+	Msg( "[gi] invalid since reset: %d in solid, %d closed (back faces); hits kept %d (%.1f MB); %d albedos; brush entities blocking %d (%d tracked, %d changes)\n",
+		s_nInvalidSolid, s_nInvalidClosed, nHitsTotal, nHitsTotal * sizeof( GIHit_t ) / ( 1024.0f * 1024.0f ), s_nAlbedo,
+		s_pBrushSnap ? s_pBrushSnap->nEnts : 0, s_BrushTracks.Count(), s_nBrushInvalidations );
+	// (the ones within 512 units of the camera: what blocks the light there)
+	for ( int i = 0; s_pBrushSnap && i < s_pBrushSnap->nEnts; i++ )
+	{
+		const GIBrushEnt_t &e = s_pBrushSnap->pEnts[i];
+		const Vector &lo = e.collide.m_vecWorldMins, &hi = e.collide.m_vecWorldMaxs;
+		Vector vecNearest;
+		for ( int a = 0; a < 3; a++ )
+			vecNearest[a] = clamp( s_vecCamera[a], lo[a], hi[a] );
+		if ( vecNearest.DistTo( s_vecCamera ) > 512.0f )
+			continue;
+		C_BaseEntity *pEnt = e.hEnt.Get();
+		Msg( "[gi]   brush %s (%s) model %d, box %.0f %.0f %.0f .. %.0f %.0f %.0f\n", pEnt ? pEnt->GetClassname() : "?",
+			pEnt && pEnt->GetModel() ? modelinfo->GetModelName( pEnt->GetModel() ) : "?", e.collide.m_iModelIndex, lo.x, lo.y, lo.z, hi.x, hi.y, hi.z );
+	}
 
 	// per height of the near grid: valid / traced, mean sky visibility and indirect light of the valid ones
 	const GICascade_t &cas = s_Cascades[0];
-	for ( int z = 0; z < GI_NZ; z++ )
+	for ( int z = 0; z < cas.n[2]; z++ )
 	{
 		int nT = 0, nV = 0;
 		float flSky = 0.0f, flSun = 0.0f, flSkyB = 0.0f;
-		for ( int y = 0; y < GI_NY; y++ )
+		for ( int y = 0; y < cas.n[1]; y++ )
 		{
-			for ( int x = 0; x < GI_NX; x++ )
+			for ( int x = 0; x < cas.n[0]; x++ )
 			{
-				const GIProbe_t &p = cas.pProbes[ SlotIndex( cas.iGridMin[0] + x, cas.iGridMin[1] + y, cas.iGridMin[2] + z ) ];
+				const GIProbe_t &p = cas.pProbes[ SlotIndex( cas, cas.iGridMin[0] + x, cas.iGridMin[1] + y, cas.iGridMin[2] + z ) ];
 				if ( !p.bTraced )
 					continue;
 				nT++;
@@ -2116,7 +2781,7 @@ static void DeferredGI_Stats()
 				}
 			}
 		}
-		Msg( "[gi]   z %6.0f: %3d / %3d valid, sky %.3f, indirect sun %.3f, bounced sky %.3f\n", ( cas.iGridMin[2] + z ) * cas.flSpacing, nV, nT,
+		Msg( "[gi]   z %6.0f: %4d / %4d valid, sky %.3f, indirect sun %.3f, bounced sky %.3f\n", ( cas.iGridMin[2] + z ) * cas.flSpacing, nV, nT,
 			nV ? flSky / nV : 0.0f, nV ? flSun / nV : 0.0f, nV ? flSkyB / nV : 0.0f );
 	}
 }
@@ -2160,11 +2825,12 @@ CON_COMMAND_F( r_deferred_gi_probe_info, "GI probes: the 8 probes blended for th
 	for ( int c = 0; c < 8; c++ )
 	{
 		const int idx[3] = { base[0] + ( c & 1 ), base[1] + ( ( c >> 1 ) & 1 ), base[2] + ( ( c >> 2 ) & 1 ) };
-		const GIProbe_t &p = cas.pProbes[ SlotIndex( idx[0], idx[1], idx[2] ) ];
+		const GIProbe_t &p = cas.pProbes[ SlotIndex( cas, idx[0], idx[1], idx[2] ) ];
 		const bool bMatch = p.bAssigned && p.cell[0] == idx[0] && p.cell[1] == idx[1] && p.cell[2] == idx[2];
 		const float tw = ( ( c & 1 ) ? f[0] : 1.0f - f[0] ) * ( ( ( c >> 1 ) & 1 ) ? f[1] : 1.0f - f[1] ) * ( ( ( c >> 2 ) & 1 ) ? f[2] : 1.0f - f[2] );
 		const bool bValid = bMatch && p.bTraced && p.flValid > 0.0f;
-		const Vector probePos( ( idx[0] + GI_OFFSET ) * S, ( idx[1] + GI_OFFSET ) * S, ( idx[2] + GI_OFFSET ) * S );
+		Vector probePos;
+		ProbePos( cas, idx, probePos );
 		const Vector d = Ps - probePos;
 		float flOver = -1e9f;
 		float flFree[3];
@@ -2178,16 +2844,28 @@ CON_COMMAND_F( r_deferred_gi_probe_info, "GI probes: the 8 probes blended for th
 		const float flOpen = clamp( 1.0f - flOver / ( S * 0.125f ), 0.0f, 1.0f );
 		Vector toProbe = probePos - P;
 		const float flFacing = clamp( DotProduct( toProbe, N ) / Max( toProbe.Length(), 1.0f ) * 0.5f + 0.5f, 0.0f, 1.0f );
-		const float w = bValid ? tw * flOpen * p.flFade * ( flFacing * flFacing + 0.02f ) : 0.0f;
+		const float w = bValid ? tw * flOpen * ( flFacing * flFacing + 0.02f ) : 0.0f;
 		const float vis = clamp( p.visF[0] + p.visF[1] * N.x + p.visF[2] * N.y + p.visF[3] * N.z, 0.0f, 1.0f );
 		wsum += w;
 		sky += w * vis;
-		Msg( "[gi]  %d cell %d %d %d %s%s trace from %.0f %.0f %.0f, tw %.2f facing %.2f, free %.0f %.0f %.0f (d %.0f %.0f %.0f) open %.2f fade %.2f -> w %.3f, sky vis %.2f (avg %.2f, own rays %.2f), indirect sun %.3f sky %.3f, %d passes, %d hits\n",
+		Msg( "[gi]  %d cell %d %d %d %s%s trace from %.0f %.0f %.0f, tw %.2f facing %.2f, free %.0f %.0f %.0f (d %.0f %.0f %.0f) open %.2f -> w %.3f, sky vis %.2f (avg %.2f, own rays %.2f), indirect sun %.3f sky %.3f, %d passes, %d hits\n",
 			c, idx[0], idx[1], idx[2], bMatch ? "" : "[slot holds another cell] ", bValid ? "valid" : "INVALID",
 			p.vecTracePos.x, p.vecTracePos.y, p.vecTracePos.z, tw, flFacing, flFree[0], flFree[1], flFree[2], d.x, d.y, d.z,
-			flOpen, p.flFade, w, vis, p.visF[0], p.vis[0], p.sun[0], p.sky[0], (int)p.nPasses, p.nHits );
+			flOpen, w, vis, p.visF[0], p.vis[0], p.sun[0], p.sky[0], (int)p.nPasses, p.nHits );
 	}
 	Msg( "[gi]  total weight %.3f, sky visibility %.3f\n", wsum, wsum > 1e-5f ? sky / wsum : -1.0f );
+
+	// the column of probes over the point: what is above and below each
+	Msg( "[gi]  eye %.1f %.1f %.1f; the column at cell %d %d:\n", MainViewOrigin().x, MainViewOrigin().y, MainViewOrigin().z, base[0], base[1] );
+	for ( int z = cas.iGridMin[2]; z < cas.iGridMin[2] + cas.n[2]; z++ )
+	{
+		const GIProbe_t &p = cas.pProbes[ SlotIndex( cas, base[0], base[1], z ) ];
+		if ( !p.bAssigned || p.cell[0] != base[0] || p.cell[1] != base[1] || p.cell[2] != z )
+			continue;
+		Msg( "[gi]    z %6.0f: %s, trace from z %.0f, free up %.0f down %.0f, sky %.2f, %d hits of %d rays, back %d, start solid %d\n",
+			( z + GI_OFFSET ) * S, !p.bTraced ? "not traced" : ( p.flValid > 0.0f ? "valid" : "INVALID" ), p.vecTracePos.z,
+			p.freeDist[4], p.freeDist[5], p.vis[0] * 2.0f, p.nHits, p.nPasses * GI_RAYS, p.nBack, p.nStartSolid );
+	}
 	const lightData_Global_t &l = s_LastLight;
 	const float flSky = wsum > 1e-5f ? sky / wsum : 0.0f;
 	const float flMin = r_deferred_gi_min.GetFloat();
@@ -2196,16 +2874,18 @@ CON_COMMAND_F( r_deferred_gi_probe_info, "GI probes: the 8 probes blended for th
 		( l.ambh.x * 0.299f + l.ambh.y * 0.587f + l.ambh.z * 0.114f ) * ( flMin + ( 1.0f - flMin ) * flSky ) );
 }
 
-CON_COMMAND( r_deferred_gi_stats, "GI probes: how many are traced / valid, the cost of the last frame" )
+CON_COMMAND( r_deferred_gi_stats, "GI probes: how many are traced / valid, what the workers have done" )
 {
 	DeferredGI_Stats();
 }
 
-CON_COMMAND( r_deferred_gi_reset, "GI probes: trace every probe again (applies r_deferred_gi_spacing)" )
+CON_COMMAND( r_deferred_gi_reset, "GI probes: trace every probe again (applies r_deferred_gi_spacing; 1 = all at once, as on a new map)" )
 {
 	DeferredGI_Reset();
-	// (as after a teleport, not as on a map's first frame: the fill is spread over the frames)
+	// (as after a teleport, not as on a map's first frame: the work goes to the background)
 	s_bFirstFill = ( args.ArgC() > 1 && atoi( args[1] ) != 0 );
+	// (the workers again, with r_deferred_gi_threads as it is now)
+	StopWorkers();
 }
 
 CON_COMMAND_F( r_deferred_gi_bench, "GI probes: time N rays from the camera", FCVAR_CHEAT )
@@ -2213,7 +2893,7 @@ CON_COMMAND_F( r_deferred_gi_bench, "GI probes: time N rays from the camera", FC
 	const int n = ( args.ArgC() > 1 ) ? clamp( atoi( args[1] ), 1, 200000 ) : 4000;
 	const Vector vecOrigin = MainViewOrigin();
 	GICandidates_t cand;
-	FindCandidates( vecOrigin, GI_RAY_LENGTH, cand );
+	FindCandidates( s_pBrushSnap, vecOrigin, GI_RAY_LENGTH, cand );
 	int nSky = 0;
 	const double t0 = Plat_FloatTime();
 	trace_t tr;
@@ -2236,43 +2916,67 @@ void DeferredGI_Render( const CViewSetup &view, const lightData_Global_t &global
 {
 	giData_t data;
 
-	const bool bOn = r_deferred_gi.GetBool() && globalLight.bEnabled
-		&& s_Cascades[0].texProbes.IsValid() && s_Cascades[1].texProbes.IsValid()
-		&& g_tex_GI.IsValid() && g_tex_GIBlur.IsValid() && EnsureGIMaterials();
+	bool bOn = r_deferred_gi.GetBool() && globalLight.bEnabled && g_tex_GI.IsValid() && g_tex_GIBlur.IsValid() && EnsureGIMaterials();
+	for ( int c = 0; c < GI_CASCADES; c++ )
+		bOn = bOn && s_Cascades[c].texTarget.IsValid() && s_Cascades[c].texDisplay[0].IsValid() && s_Cascades[c].texDisplay[1].IsValid();
 
-	ITexture *pProbes = s_Cascades[0].texProbes;
-	ITexture *pProbesFar = s_Cascades[1].texProbes;
 	ITexture *pGI = g_tex_GI;
 	ITexture *pBlur = g_tex_GIBlur;
 
 	if ( !bOn )
 	{
+		ITexture *pProbes = s_Cascades[0].texDisplay[ s_Cascades[0].iDisplay ];
+		ITexture *pProbesFar = s_Cascades[1].texDisplay[ s_Cascades[1].iDisplay ];
 		QUEUE_FIRE( CommitGIData, data );
 		QUEUE_FIRE( CommitTexture_GI, pProbes, pProbesFar, pGI, pBlur );
 		return;
 	}
 
+	const double flStart = Plat_FloatTime();
+	const bool bFirstFrame = s_bFirstFill;
 	EnsureProbes();
+	StartWorkers();
 	if ( !s_Cascades[0].bGridValid )
 	{
-		s_Cascades[0].flSpacing = r_deferred_gi_spacing.GetFloat();
-		s_Cascades[1].flSpacing = s_Cascades[0].flSpacing * GI_FAR_SCALE;
+		for ( int c = 0; c < GI_CASCADES; c++ )
+			s_Cascades[c].flSpacing = r_deferred_gi_spacing.GetFloat() * s_GridDesc[c].flScale;
 	}
 
+	s_vecCamera = view.origin;
 	const bool bFar = r_deferred_gi_far.GetBool();
+	double flMark = flStart;
 	UpdateGrid( 0, view.origin );
 	if ( bFar )
 		UpdateGrid( 1, view.origin );
 	UpdateBrushEntities( s_bFirstFill );
+	PhaseTime( GIPHASE_GRID, flMark );
 
 	const Vector vecLight = globalLight.vecLight.AsVector3D();
 	s_LastLight = globalLight;
-	TraceProbes( vecLight, globalLight.bEnabled );
-	UpdateFades();
+	UpdateGIWork( vecLight, globalLight.bEnabled );
 	UpdateCameraSky( view.origin );
-	UploadProbes( s_Cascades[0], bFar ? 1536 : 2048 );
+	flMark = Plat_FloatTime();
+
+	// (writing a probe takes the main thread a microsecond: a round of gathering changes most of
+	// them, 8192 a frame was a hitch of 7 ms every few seconds of walking - the display atlas eases
+	// toward them anyway. A new map or a teleport writes the whole grid: faster then.)
+	const int nUploadMax = r_deferred_gi_upload_max.GetInt() / ( r_deferred_gi_upload_points.GetBool() ? 1 : 4 );
+	s_nUploadLastFrame = UploadProbes( s_Cascades[0], nUploadMax * ( s_Cascades[0].bInitialUpload ? 4 : 1 ) );
 	if ( bFar )
-		UploadProbes( s_Cascades[1], 512 );
+		s_nUploadLastFrame += UploadProbes( s_Cascades[1], nUploadMax / 2 * ( s_Cascades[1].bInitialUpload ? 4 : 1 ) );
+	PhaseTime( GIPHASE_UPLOAD, flMark );
+	BlendAtlas( s_Cascades[0] );
+	if ( bFar )
+		BlendAtlas( s_Cascades[1] );
+	PhaseTime( GIPHASE_BLEND, flMark );
+
+	// (the main thread's part of the frame: taking in, scheduling, writing to the GPU)
+	if ( !bFirstFrame )
+	{
+		s_flMsLastFrame = (float)( ( Plat_FloatTime() - flStart ) * 1000.0 );
+		s_flMsWorst = Max( s_flMsWorst, s_flMsLastFrame );
+		PhaseFrameDone();
+	}
 
 	const int iDebug = r_deferred_gi_debug.GetInt();
 	if ( iDebug == 2 )
@@ -2289,9 +2993,12 @@ void DeferredGI_Render( const CViewSetup &view, const lightData_Global_t &global
 		const bool bUse = ( c == 0 ) || ( bFar && cas.bGridValid );
 		data.vecGrid[c].Init( cas.iGridMin[0], cas.iGridMin[1], cas.iGridMin[2], 1.0f / cas.flSpacing );
 		// (no probes per axis: the cascade is off)
-		data.vecDims[c].Init( bUse ? GI_NX : 0, bUse ? GI_NY : 0, bUse ? GI_NZ : 0, cas.flSpacing );
+		data.vecDims[c].Init( bUse ? cas.n[0] : 0, bUse ? cas.n[1] : 0, bUse ? cas.n[2] : 0, cas.flSpacing );
 	}
-	data.vecAtlas.Init( 1.0f / GI_ATLAS_W, 1.0f / GI_ATLAS_H, r_deferred_gi_normal_offset.GetFloat(), (float)iDebug );
+	// (xy: r_deferred_gi_debug 9 shows the distance of every pixel's position from this point)
+	float flDebugPoint[2] = { 0.0f, 0.0f };
+	sscanf( r_deferred_gi_debug_point.GetString(), "%f %f", &flDebugPoint[0], &flDebugPoint[1] );
+	data.vecAtlas.Init( flDebugPoint[0], flDebugPoint[1], r_deferred_gi_normal_offset.GetFloat(), (float)iDebug );
 	data.vecParams0.Init( r_deferred_gi_bounce.GetFloat(), r_deferred_gi_skybounce.GetFloat(), 1.0f / r_deferred_gi_fade_cells.GetFloat(), r_deferred_gi_min.GetFloat() );
 	data.vecParams1.Init( r_deferred_gi_leak_tolerance.GetFloat() / 64.0f, GI_OFFSET, r_deferred_gi_sky_open.GetFloat(), r_deferred_gi_indoor_boost.GetFloat() );
 	data.vecParams2.Init( s_flCameraSky, r_deferred_gi_sky_gamma.GetFloat(), r_deferred_gi_sky_desat.GetFloat(), r_deferred_gi_sky_indoor.GetFloat() );
@@ -2299,6 +3006,8 @@ void DeferredGI_Render( const CViewSetup &view, const lightData_Global_t &global
 	data.vecBlurV.Init( 0.0f, 1.0f / h, 0.04f, flUVScale );
 	data.vecApply.Init( 1.0f, ( iDebug == 1 || iDebug >= 3 ) ? 1.0f : 0.0f, 0.0f, flUVScale );
 
+	ITexture *pProbes = s_Cascades[0].texDisplay[ s_Cascades[0].iDisplay ];
+	ITexture *pProbesFar = s_Cascades[1].texDisplay[ s_Cascades[1].iDisplay ];
 	QUEUE_FIRE( CommitGIData, data );
 	QUEUE_FIRE( CommitTexture_GI, pProbes, pProbesFar, pGI, pBlur );
 
