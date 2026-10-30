@@ -20,6 +20,9 @@ extern CChoreoScene *BlockingLoadScene( const char *filename );
 #include "sceneentity.h"
 #include "quest_system.h"
 #endif
+#ifndef NO_STEAM
+#include "steam/steam_api.h"
+#endif
 
 // Helper: escape backslashes and double-quotes for a quoted console argument
 static CUtlString EscapeForQuotedArg(const char *s)
@@ -42,6 +45,12 @@ static CUtlString EscapeForQuotedArg(const char *s)
 ConVar dialog_debug("dialog_debug", "0", FCVAR_GAMEDLL, "Enable dialog system debug prints");
 extern ConVar quest_reward_debug;
 
+// HL2RPM: one dialog file carries every language ("line" + "line_russian", "choreo" + "choreo_russian"...)
+static void DialogLanguageChanged( IConVar *var, const char *pOldValue, float flOldValue );
+ConVar dialog_language( "dialog_language", "", FCVAR_GAMEDLL,
+    "Language of NPC dialogs: english, russian... (\"<key>_<language>\" keys of scripts/dialogs). Empty = game language (cl_language / Steam)",
+    DialogLanguageChanged );
+
 namespace DialogDefinitions
 {
     static CUtlVector<CUtlString> g_SpoiledEntities;
@@ -50,6 +59,43 @@ namespace DialogDefinitions
     static CUtlDict<DSDialog*, int> g_DialogByEntity;
     static CUtlVector<DSDialog*> g_LoadedDialogs;
     static bool g_DialogsLoaded = false;
+    static char g_szDialogLanguage[64];
+
+    const char *GetDialogLanguage()
+    {
+        const char *lang = dialog_language.GetString();
+        if ( !lang[0] )
+        {
+            // single player: the client's language convar lives in the same process
+            ConVarRef cl_language( "cl_language" );
+            if ( cl_language.IsValid() )
+                lang = cl_language.GetString();
+        }
+#ifndef NO_STEAM
+        if ( !lang[0] && steamapicontext && steamapicontext->SteamApps() )
+        {
+            const char *steamLang = steamapicontext->SteamApps()->GetCurrentGameLanguage();
+            if ( steamLang )
+                lang = steamLang;
+        }
+#endif
+        if ( !lang[0] )
+            lang = "english";
+        Q_strncpy( g_szDialogLanguage, lang, sizeof( g_szDialogLanguage ) );
+        Q_strlower( g_szDialogLanguage );
+        return g_szDialogLanguage;
+    }
+
+    // "<key>_<language>" if the file has it (even empty: "choreo_russian" "" = this line has no
+    // Russian voice, text only), otherwise the plain key of the base language
+    static const char *LocString( KeyValues *pKV, const char *key, const char *def = "" )
+    {
+        char locKey[128];
+        Q_snprintf( locKey, sizeof( locKey ), "%s_%s", key, g_szDialogLanguage );
+        if ( g_szDialogLanguage[0] && pKV->FindKey( locKey ) )
+            return pKV->GetString( locKey, def );
+        return pKV->GetString( key, def );
+    }
 
     static void DeleteDialog(DSDialog *pDialog)
     {
@@ -118,7 +164,7 @@ namespace DialogDefinitions
 
     static void ParseOptionKV(KeyValues *pOptKV, DSDialogOption &outOpt)
     {
-        const char *text = pOptKV->GetString("text", "");
+        const char *text = LocString(pOptKV, "text");
         Q_strncpy(outOpt.text, text ? text : "", sizeof(outOpt.text));
         outOpt.nextId = pOptKV->GetInt("next", -1);
         outOpt.flags = pOptKV->GetInt("flags", 0);
@@ -190,9 +236,9 @@ namespace DialogDefinitions
             }
         }
 
-        Q_strncpy(outOpt.afterLine, pOptKV->GetString("after_line", ""), sizeof(outOpt.afterLine));
-        Q_strncpy(outOpt.afterChoreography, pOptKV->GetString("after_choreo", ""), sizeof(outOpt.afterChoreography));
-        Q_strncpy(outOpt.afterSoundName, pOptKV->GetString("after_sound", ""), sizeof(outOpt.afterSoundName));
+        Q_strncpy(outOpt.afterLine, LocString(pOptKV, "after_line"), sizeof(outOpt.afterLine));
+        Q_strncpy(outOpt.afterChoreography, LocString(pOptKV, "after_choreo"), sizeof(outOpt.afterChoreography));
+        Q_strncpy(outOpt.afterSoundName, LocString(pOptKV, "after_sound"), sizeof(outOpt.afterSoundName));
         Q_strncpy(outOpt.afterSequenceName, pOptKV->GetString("after_sequence", ""), sizeof(outOpt.afterSequenceName));
         outOpt.afterNextId = pOptKV->GetInt("after_next", -1);
     }
@@ -224,8 +270,8 @@ namespace DialogDefinitions
         {
             QuestDef def;
             def.id = pQuestKV->GetName();
-            def.title = pQuestKV->GetString("title", def.id.Get());
-            def.description = pQuestKV->GetString("desc", "");
+            def.title = LocString(pQuestKV, "title", def.id.Get());
+            def.description = LocString(pQuestKV, "desc");
             def.minReputation = pQuestKV->GetInt("min_rep", 0);
             def.killTarget = pQuestKV->GetString("kill_target", "");
             def.killTargets.RemoveAll();
@@ -285,8 +331,8 @@ namespace DialogDefinitions
                     }
 
                     QuestStageDef &st = def.stages[stageIndex];
-                    st.title = pStageKV->GetString("title", def.title.Get());
-                    st.description = pStageKV->GetString("desc", def.description.Get());
+                    st.title = LocString(pStageKV, "title", def.title.Get());
+                    st.description = LocString(pStageKV, "desc", def.description.Get());
                     st.killTarget = pStageKV->GetString("kill_target", "");
                     st.killCount = pStageKV->GetInt("kill_count", 0);
                     st.killTargets.RemoveAll();
@@ -370,14 +416,15 @@ namespace DialogDefinitions
 
     static void ParseNodeKV(KeyValues *pNodeKV, DSDialogNode &outNode)
     {
-        outNode.speakerLine = pNodeKV->GetString("line", "");
-        outNode.choreography = pNodeKV->GetString("choreo", "");
-        outNode.soundName = pNodeKV->GetString("sound", "");
+        outNode.speakerLine = LocString(pNodeKV, "line");
+        outNode.choreography = LocString(pNodeKV, "choreo");
+        outNode.soundName = LocString(pNodeKV, "sound");
         outNode.sequenceName = pNodeKV->GetString("sequence", "");
         outNode.serverSequenceName = pNodeKV->GetString("server_sequence", "");
         outNode.spoils = IsTrueString(pNodeKV->GetString("spoils", "0"));
         outNode.autoNextId = pNodeKV->GetInt("auto_next", -1);
-        outNode.autoClose = IsTrueString(pNodeKV->GetString("end", "0")) || IsTrueString(pNodeKV->GetString("close", "0"));
+        outNode.autoClose = IsTrueString(pNodeKV->GetString("end", "0")) || IsTrueString(pNodeKV->GetString("close", "0")) ||
+            IsTrueString(pNodeKV->GetString("auto_close", "0"));
 
         const char *delayStr = pNodeKV->GetString("option_delay", "");
         if (!delayStr[0] || !Q_stricmp(delayStr, "auto"))
@@ -428,8 +475,10 @@ namespace DialogDefinitions
 
         DSDialog *pDialog = new DSDialog();
         pDialog->entityName = pRootKV->GetString("entity", fallbackEntityName ? fallbackEntityName : "");
-        pDialog->returningLine = pRootKV->GetString("returning_line", "");
-        pDialog->returningChoreography = pRootKV->GetString("returning_choreo", "");
+        pDialog->displayName = LocString(pRootKV, "display_name");
+        pDialog->returningLine = LocString(pRootKV, "returning_line");
+        pDialog->returningChoreography = LocString(pRootKV, "returning_choreo");
+        pDialog->returningSound = LocString(pRootKV, "returning_sound");
         pDialog->returningAutoNextId = pRootKV->GetInt("returning_auto_next", INT_MIN);
         pDialog->returningNoOptions = IsTrueString(pRootKV->GetString("returning_no_options", "0"));
         pDialog->returningAutoClose = -1;
@@ -554,8 +603,15 @@ namespace DialogDefinitions
     {
         ClearLoadedDialogs();
         QuestSystem().ClearQuestDefs();
+        GetDialogLanguage();
         LoadDialogsFromScripts();
         g_DialogsLoaded = true;
+    }
+
+    void ReloadDialogsIfLoaded()
+    {
+        if ( g_DialogsLoaded )
+            ReloadDialogs();
     }
 
     void MarkEntitySpoiled(const char *entityName)
@@ -607,6 +663,14 @@ namespace DialogDefinitions
         return g_DialogByEntity[idx];
     }
 
+    const char *GetDisplayNameForEntity(const char *entityName)
+    {
+        const DSDialog *pDialog = FindDialogForEntity(entityName);
+        if (!pDialog || pDialog->displayName.Length() <= 0)
+            return NULL;
+        return pDialog->displayName.Get();
+    }
+
     static void SendClientCommandSafe(CBasePlayer *pPlayer, const char *fmt, ...)
     {
         va_list args;
@@ -632,6 +696,10 @@ namespace DialogDefinitions
             int targetNodeId = firstNodeId;
             if (!dialog->returningNoOptions)
             {
+                // HL2RPM: returning_auto_next picks the node whose options follow the returning line
+                // (it was used only with returning_no_options before)
+                if (dialog->returningAutoNextId != INT_MIN && dialog->returningAutoNextId >= 0)
+                    targetNodeId = dialog->returningAutoNextId;
                 const DSDialogNode *node = NULL;
                 int hop = 0;
                 while (hop < 16)
@@ -661,6 +729,9 @@ namespace DialogDefinitions
                 targetNodeId,
                 entIndex,
                 dialog->returningLine.Get(),
+                dialog->returningChoreography.Get(),
+                dialog->returningSound.Get(),
+                NULL,
                 dialog->returningNoOptions,
                 false,
                 dialog->returningNoOptions ? dialog->returningAutoNextId : -1,
@@ -781,6 +852,9 @@ namespace DialogDefinitions
         if (pNPC)
             displayName = pNPC->GetLootDisplayName();
 #endif
+        // HL2RPM: the name from the dialog file (in the dialog language) wins over Hammer's loot_displayname
+        if (dialog->displayName.Length() > 0)
+            displayName = dialog->displayName.Get();
         if (displayName) payload.Append(displayName);
         payload.Append("|");
         char nodebuf[32];
@@ -793,27 +867,34 @@ namespace DialogDefinitions
             payload.Append(overrideLine);
         else if (node->speakerLine.Length() > 0) payload.Append(node->speakerLine.Get());
         payload.Append("|");
-        // Decide which choreography to send:
-        // 1) explicit override
-        // 2) returning choreography when an override line is used
-        // 3) node choreography
+        // Which scene/sound goes with the line: a line that replaces the node's (returning visit,
+        // text after completing a quest) brings its own voice or none - never the node's own voice
+        // under a different text (HL2RPM: before, a returning line without its own scene played the
+        // node's scene, and an after_line without after_choreo played the returning scene)
+        const bool bOverrideLine = overrideLine && overrideLine[0];
         const char *choreoToUse = NULL;
-        if (overrideChoreo && overrideChoreo[0])
+        const char *soundToUse = NULL;
+        if (bOverrideLine)
         {
-            choreoToUse = overrideChoreo;
+            if (overrideChoreo && overrideChoreo[0])
+                choreoToUse = overrideChoreo;
+            if (overrideSound && overrideSound[0])
+                soundToUse = overrideSound;
         }
-        else if (overrideLine && overrideLine[0] && dialog->returningChoreography.Length() > 0)
+        else
         {
-            choreoToUse = dialog->returningChoreography.Get();
-        }
-        else if (node->choreography.Length() > 0)
-        {
-            choreoToUse = node->choreography.Get();
+            if (overrideChoreo && overrideChoreo[0])
+                choreoToUse = overrideChoreo;
+            else if (node->choreography.Length() > 0)
+                choreoToUse = node->choreography.Get();
+            if (overrideSound && overrideSound[0])
+                soundToUse = overrideSound;
+            else if (node->soundName.Length() > 0)
+                soundToUse = node->soundName.Get();
         }
         if (choreoToUse) payload.Append(choreoToUse);
         payload.Append("|");
-        if (overrideSound && overrideSound[0]) payload.Append(overrideSound);
-        else if (node->soundName.Length() > 0) payload.Append(node->soundName.Get());
+        if (soundToUse) payload.Append(soundToUse);
         payload.Append("|");
         // optional sequence name
         if (overrideSequence && overrideSequence[0]) payload.Append(overrideSequence);
@@ -867,13 +948,13 @@ namespace DialogDefinitions
                 DIALOG_DEVMSG("DialogSystem: failed to load scene for delay computation: %s\n", scenefile);
             }
         }
-        if ((node->optionDelayAuto || delay <= 0.0f) && delay <= 0.0f && node->soundName.Length() > 0)
+        if ((node->optionDelayAuto || delay <= 0.0f) && delay <= 0.0f && soundToUse && soundToUse[0])
         {
 #if defined( GAME_DLL )
             const char *actorModel = NULL;
             if (pOwner)
                 actorModel = STRING(pOwner->GetModelName());
-            float soundDur = CBaseEntity::GetSoundDuration(node->soundName.Get(), actorModel);
+            float soundDur = CBaseEntity::GetSoundDuration(soundToUse, actorModel);
             if (soundDur > 0.0f)
                 delay = soundDur + 0.05f;
 #endif
@@ -1095,52 +1176,6 @@ namespace DialogDefinitions
             DIALOG_DEVMSG("DialogSystem: node %d has spoils=1; waiting for dialog_finish_spoil\n", node->id);
         }
 
-        // Optionally start a server-side choreo scene on the NPC so server-side events execute
-#if defined( GAME_DLL )
-        if ( node && node->choreography.Length() > 0 )
-        {
-            char scenefile[MAX_PATH];
-            Q_strncpy(scenefile, node->choreography.Get(), sizeof(scenefile));
-            Q_SetExtension(scenefile, ".vcd", sizeof(scenefile));
-            Q_FixSlashes(scenefile);
-
-            CChoreoScene *pScene = BlockingLoadScene(scenefile);
-                if ( pScene )
-                {
-                    CBaseEntity *pOwner = NULL;
-                    if ( entIndex > 0 )
-                        pOwner = UTIL_EntityByIndex(entIndex);
-                    if ( !pOwner && dialog && dialog->entityName.Length() > 0 )
-                        pOwner = gEntList.FindEntityByName(NULL, dialog->entityName.Get());
-
-                    if ( pOwner )
-                    {
-                        CBaseFlex *pFlexOwner = dynamic_cast<CBaseFlex*>(pOwner);
-                        if ( pFlexOwner )
-                        {
-                            EHANDLE hSceneEnt;
-                            InstancedScriptedScene( pFlexOwner, scenefile, &hSceneEnt, 0.0f, false, NULL, false, NULL );
-                            DevMsg("DialogSystem: instanced server choreo scene '%s' started on owner %s\n", scenefile, pOwner->GetEntityName().ToCStr());
-                            delete pScene;
-                        }
-                        else
-                        {
-                            DevMsg("DialogSystem: owner not a CBaseFlex, cannot start server choreo for %s\n", pOwner->GetClassname());
-                            delete pScene;
-                        }
-                    }
-                    else
-                    {
-                        DevMsg("DialogSystem: no owner found to start server choreo %s\n", scenefile);
-                        delete pScene;
-                    }
-                }
-            else
-            {
-                DevMsg("DialogSystem: BlockingLoadScene failed for %s\n", scenefile);
-            }
-        }
-#endif
     }
 }
 
@@ -1162,10 +1197,16 @@ public:
 
 static CDialogDefinitionsGameSystem g_DialogDefinitionsGameSystem;
 
-CON_COMMAND_F( dialog_reload, "Reload dialogs from scripts/dialogs/*.txt", FCVAR_GAMEDLL | FCVAR_CHEAT )
+// HL2RPM: not a cheat - the dialog editor sends it to a running game after saving (hl2.exe -hijack)
+CON_COMMAND_F( dialog_reload, "Reload dialogs from scripts/dialogs/*.txt", FCVAR_GAMEDLL )
 {
     DialogDefinitions::ReloadDialogs();
-    DevMsg("DialogSystem: reloaded dialogs\n");
+    Msg("DialogSystem: reloaded dialogs, language '%s'\n", DialogDefinitions::GetDialogLanguage());
+}
+
+static void DialogLanguageChanged( IConVar *var, const char *pOldValue, float flOldValue )
+{
+    DialogDefinitions::ReloadDialogsIfLoaded();
 }
 
 #if defined( GAME_DLL )

@@ -1,0 +1,4 @@
+PySide6-Essentials>=6.8
+numpy>=2.0
+pyinstaller>=6.10
+pillow>=10

@@ -10,7 +10,8 @@ Checks: root "Dialog", "entity", nodes, start_node, every next/auto_next/
 after_next/returning_auto_next target, quest ids used by options exist in some
 dialog's "quests" block, quest states (inactive/active/completed|done/failed),
 characters the client payload can't carry (| ; ~ in lines and option texts),
-option text <= 255 bytes (UTF-8), choreo .vcd files present in the mod,
+option text <= 255 bytes (UTF-8), choreo .vcd files present in the mod
+(or its testmaps), the same in every "<key>_<language>" translation,
 the same entity defined by two files (the later file wins, e.g. *_rus.txt).
 Exit code 1 if there are errors (warnings don't count).
 """
@@ -143,23 +144,41 @@ def check_file(path, all_quests, problems, show_tree):
         if limit and len(s.encode("utf-8")) > limit:
             err("%s is %d bytes, max %d" % (where, len(s.encode("utf-8")), limit))
 
-    text_ok(dlg.get("returning_line"), "returning_line")
+    def loc(block, key):
+        """key and its translations key_<language> (dialog editor format)"""
+        out = []
+        for c in block.children:
+            if c.value is not None and (c.name.lower() == key or c.name.lower().startswith(key + "_")):
+                if c.name.lower() == key or c.name[len(key) + 1:].isalpha():
+                    out.append((c.name, c.value))
+        return out
+
+    def texts_ok(block, key, where, limit=None):
+        for k, v in loc(block, key):
+            text_ok(v, "%s %s" % (where, k) if where else k, limit)
+
+    texts_ok(dlg, "returning_line", "")
+    texts_ok(dlg, "display_name", "")
 
     def choreo_ok(v, where):
         if v:
-            p = os.path.join(MOD, v.replace("/", os.sep))
-            if not p.lower().endswith(".vcd"):
-                p += ".vcd"
-            if not os.path.exists(p):
+            rel = v.replace("/", os.sep)
+            if not rel.lower().endswith(".vcd"):
+                rel += ".vcd"
+            if not any(os.path.exists(os.path.join(r, rel)) for r in (MOD, os.path.join(MOD, "testmaps"))):
                 warn("%s: %s not found in the mod (only loose .vcd files are checked)" % (where, v))
 
-    choreo_ok(dlg.get("returning_choreo"), "returning_choreo")
+    def choreos_ok(block, key, where):
+        for k, v in loc(block, key):
+            choreo_ok(v, "%s %s" % (where, k) if where else k)
+
+    choreos_ok(dlg, "returning_choreo", "")
 
     used_quests = []
     for nid, n in sorted(nodes.items()):
         w = "node %d" % nid
-        text_ok(n.get("line"), w + " line")
-        choreo_ok(n.get("choreo"), w + " choreo")
+        texts_ok(n, "line", w)
+        choreos_ok(n, "choreo", w)
         if n.get("auto_next") not in (None, ""):
             target_ok(n.get("auto_next"), w + " auto_next")
         opts = n.block("options")
@@ -169,7 +188,9 @@ def check_file(path, all_quests, problems, show_tree):
             continue
         for o in opts.blocks():
             ow = "%s option %s" % (w, o.name)
-            text_ok(o.get("text"), ow + " text", 255)
+            texts_ok(o, "text", ow, 255)
+            texts_ok(o, "after_line", ow)
+            choreos_ok(o, "after_choreo", ow)
             if o.get("next") is not None:
                 target_ok(o.get("next"), ow + " next")
             if o.get("after_next") is not None:

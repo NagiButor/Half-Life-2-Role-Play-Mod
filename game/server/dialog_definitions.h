@@ -50,10 +50,12 @@ namespace DialogDefinitions
     struct DSDialog
     {
         CUtlString entityName;
+        CUtlString displayName;     // HL2RPM: name in the dialog and loot windows (localized); empty = Hammer loot_displayname
         int startNodeId;
         CUtlVector<DSDialogNode*> nodes;
         CUtlString returningLine;
         CUtlString returningChoreography;
+        CUtlString returningSound;
         int returningAutoNextId;
         int returningAutoClose;
         bool returningNoOptions;
@@ -69,6 +71,10 @@ namespace DialogDefinitions
     void SendDialogNodeToPlayerEx(CBasePlayer *pPlayer, const DSDialog *dialog, int nodeId, int entIndex, const char *overrideLine, bool forceNoOptions, bool forcePendingSpoil, int forcedAutoNextId, int forcedAutoClose);
     void SendDialogNodeToPlayerEx(CBasePlayer *pPlayer, const DSDialog *dialog, int nodeId, int entIndex, const char *overrideLine, const char *overrideChoreo, const char *overrideSound, const char *overrideSequence, bool forceNoOptions, bool forcePendingSpoil, int forcedAutoNextId, int forcedAutoClose);
     const DSDialog *FindDialogForEntity(const char *entityName);
+    // HL2RPM: display name of a dialog NPC in the current dialog language, NULL if its file has none
+    const char *GetDisplayNameForEntity(const char *entityName);
+    // HL2RPM: language the dialogs are loaded in (dialog_language, else cl_language / Steam, else english)
+    const char *GetDialogLanguage();
 
     // Mark an entity as having its dialog "spoiled" (unopenable) and query that state
     void MarkEntitySpoiled(const char *entityName);

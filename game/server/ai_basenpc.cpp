@@ -117,6 +117,7 @@ extern ConVar sk_healthkit;
 
 #include "utlbuffer.h"
 #include "gamestats.h"
+#include "dialog_definitions.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -13647,6 +13648,23 @@ bool CAI_BaseNPC::LoadSchedules(void)
 bool CAI_BaseNPC::LoadedSchedules(void)
 {
 	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: HL2RPM: name in the dialog and loot windows. The dialog file of the NPC
+//			names it in the current dialog language; Hammer's loot_displayname is
+//			the fallback for NPCs without one.
+//-----------------------------------------------------------------------------
+const char *CAI_BaseNPC::GetLootDisplayName() const
+{
+	string_t iszTargetname = const_cast<CAI_BaseNPC *>( this )->GetEntityName();
+	if ( iszTargetname != NULL_STRING )
+	{
+		const char *pszName = DialogDefinitions::GetDisplayNameForEntity( STRING( iszTargetname ) );
+		if ( pszName && pszName[0] )
+			return pszName;
+	}
+	return STRING( m_iszLootDisplayName );
 }
 
 //-----------------------------------------------------------------------------

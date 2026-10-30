@@ -19,6 +19,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `hl2rpm-playtest` — запуск мода со сценарием, скриншоты, FPS, save/load (`run_game.ps1`, `shots.py`);
 `hl2rpm-dialogs` — формат диалогов/квестов, ключи NPC и лута, валидатор `dialog_check.py`.
 
+## Редактор диалогов (HL2RPM Dialog Editor)
+
+Пользователь строит диалоги, квесты и озвучку в своей программе (2026-10-30): `E:\SourceModding\HL2RPMSOURCE\HL2RPM Dialog Editor\HL2RPM Dialog Editor.exe`; исходники — `hl2rpm_extras/tools/dialog_editor` (Python 3.14 + PySide6, сборка `build_editor.ps1` → PyInstaller, venv в `E:\SourceModding\HL2RPMSOURCE\dialog_editor_build`), подробности — README там и навык `hl2rpm-dialogs`.
+
+- Проект `*.hl2dlg` (JSON) — источник правды; Ctrl+S пишет `scripts/dialogs/<npc>.txt` (заголовок `// HL2RPM Dialog Editor: generated` — руками такие файлы не править), WAV → `sound/dialogs/<npc>/<язык>/`, сцены с липсинком → `scenes/dialogs/<npc>/<язык>/` (генераторы мода `dlgedit/lipsync_gen/vcd_<язык>.py`). Тестовый проект — `E:\SourceModding\HL2RPMSOURCE\dialogsrc\test_dialogs.hl2dlg` (папка игры `hl2rpm\testmaps`).
+- **Языки в одном файле**: обычные ключи — основной язык, `<ключ>_<язык>` — перевод и своя озвучка (`line_russian`, `choreo_russian`; присутствующий пустой ключ = «на этом языке без звука»). Сервер берёт язык из `dialog_language` (пусто → `cl_language` → Steam; здесь `russian`), смена конвара перечитывает диалоги. `display_name` файла диалога — имя в окне диалога и лута (важнее `loot_displayname` из Hammer).
+- Поведение сервера, изменённое вместе с редактором (`dialog_definitions.cpp`): `returning_auto_next` без `returning_no_options` выбирает реплику, чьи варианты идут после повторной реплики (раньше игнорировался — узел 12 demo_npc_2 был недостижим); повторная реплика и `after_line` играют только свою озвучку (раньше — сцену узла, а сервер запускал сцену узла второй раз поверх); `auto_close` = `end`; `dialog_reload` не чит.
+
 ## Расположение частей проекта
 
 | Что | Где |

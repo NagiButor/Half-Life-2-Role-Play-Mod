@@ -978,7 +978,7 @@ public:
 	AI_SleepState_t		GetSleepState() const						{ return m_SleepState; }
 	void				SetSleepState( AI_SleepState_t sleepState )	{ m_SleepState = sleepState; }
 	const char			*GetLootItems() const { return STRING( m_iszLootItems ); }
-	const char			*GetLootDisplayName() const { return STRING( m_iszLootDisplayName ); }
+	const char			*GetLootDisplayName() const;
 	void				AddSleepFlags( int flags ) { m_SleepFlags |= flags; }
 	void				RemoveSleepFlags( int flags ) { m_SleepFlags &= ~flags; }
 	bool				HasSleepFlags( int flags ) { return (m_SleepFlags & flags) == flags; }

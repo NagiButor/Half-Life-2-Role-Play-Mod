@@ -13,6 +13,36 @@ client UI: `game/client/vgui_dialogpanel.cpp`, `vgui_lootpanel.cpp`,
 BaseNPC block, `hl2rpm.fgd`). Placing entities: `hl2rpm-hammer` skill.
 Testing in game: `hl2rpm-playtest` skill.
 
+## The dialog editor (preferred way for the user)
+
+`E:\SourceModding\HL2RPMSOURCE\HL2RPM Dialog Editor\HL2RPM Dialog Editor.exe`
+(sources + build: `hl2rpm_extras/tools/dialog_editor`, `build_editor.ps1`; README there).
+A project (`*.hl2dlg`, JSON) holds NPCs, nodes, quests, voices of all languages and
+canvas positions. Saving writes `scripts/dialogs/<npc>.txt`, converts/copies voices to
+`sound/dialogs/<npc>/<language>/<key>.wav` and generates lip sync scenes
+`scenes/dialogs/<npc>/<language>/<key>.vcd` (`<key>` = node id, `returning`,
+`<node>_<option>_after`) into the project's game folder. Lip sync = the mod's
+generator (`dlgedit/lipsync_gen/vcd_english.py`, `vcd_russian.py`), regenerated only
+for changed text/audio. Files written by the editor carry the header
+`// HL2RPM Dialog Editor: generated` — **edit those NPCs in the editor, not by hand**
+(hand edits are overwritten on the next save; import them back with Файл → Импорт).
+The user's test project: `E:\SourceModding\HL2RPMSOURCE\dialogsrc\test_dialogs.hl2dlg`
+(game folder = `hl2rpm\testmaps`). Screenshot mode for reports:
+`"HL2RPM Dialog Editor.exe" <project> --shot out.png --npc demo_npc_1 --lang russian --zoom 0.85 --select node:1|option:1:2|returning|quest:<id> [--sim --sim-steps c,0]`.
+
+## Languages
+
+One file carries every language: plain keys = the project's base language (english),
+`<key>_<language>` = translations (`line_russian`, `text_russian`, `after_line_*`,
+`returning_line_*`, `display_name_*`, quest/stage `title_*`/`desc_*`) and per-language
+voice (`choreo_russian`, `sound_russian`, `returning_choreo_*`, `returning_sound_*`,
+`after_choreo_*`, `after_sound_*`). A present `<key>_<lang>` wins even when empty
+(`"choreo_russian" ""` = no Russian voice, text only). The server picks the language
+from `dialog_language` (empty = `cl_language`, then Steam; on this machine `russian`);
+changing it reloads the dialogs at once (`dialog_language english` to test).
+The old copies `demo_npc_1_rus.txt` / `demo_npc_2_rus.txt` (entity `*_rus`, quests `*_rus`,
+for `demo_map_rus`) still load; the editor merged them into `demo_npc_1`/`demo_npc_2`.
+
 ## How a dialog starts
 
 - The player presses USE on **any entity whose targetname has a dialog file**
@@ -21,11 +51,13 @@ Testing in game: `hl2rpm-playtest` skill.
   `npc_approach` 1 = the NPC walks/runs (`approach_run`) to the player first,
   `approach_distance` (96). Needs line of sight at the end of the approach.
 - Console: `dialog_force <targetname>`; reload files after editing:
-  `sv_cheats 1; dialog_reload`. Debug prints: `dialog_debug 1` (+ `developer 1`).
+  `dialog_reload` (no cheats needed; the editor sends it with `hl2.exe -hijack`).
+  Debug prints: `dialog_debug 1` (+ `developer 1`).
 
 The dialog key is the NPC **targetname**, case-insensitive. Without a
-targetname no dialog is possible. The display name shown in the dialog/loot
-window is the NPC key `loot_displayname`.
+targetname no dialog is possible. The name shown in the dialog/loot window is
+`display_name` of the dialog file (localized); NPCs without it use the Hammer key
+`loot_displayname` (`CAI_BaseNPC::GetLootDisplayName`).
 
 ## Dialog file: `hl2rpm\scripts\dialogs\<any>.txt`
 
@@ -40,10 +72,13 @@ files in the mod use different entity names (`demo_npc_1_rus`) for the Russian m
 	"start_node"    "0"
 	"auto_face_npc" "1"                 // camera turns to the NPC
 
+	"display_name"          "Trader"              // dialog + loot window name ("display_name_russian" ...)
+
 	// second and later visits (after the dialog was finished once)
 	"returning_line"        "Back again?"
-	"returning_choreo"      "scenes/trader_1/returning"
-	"returning_auto_next"   "1"          // node to continue with (optional)
+	"returning_choreo"      "scenes/trader_1/returning"   // its own voice only (never the node's)
+	"returning_auto_next"   "1"          // options of this node follow the line (auto_next chain is
+	                                     // followed); with returning_no_options: node to go to after it
 	"returning_no_options"  "0"
 	"returning_auto_close"  "0"
 
@@ -78,7 +113,7 @@ files in the mod use different entity names (`demo_npc_1_rus`) for the Russian m
 
 Node keys: `line`, `choreo`, `sound`, `sequence`, `server_sequence` (targetname
 of a scripted_sequence/logic entity that gets `BeginSequence`), `option_delay`,
-`auto_next`, `end`/`close`, `spoils` (1 = after this node the NPC never talks again).
+`auto_next`, `end`/`close`/`auto_close`, `spoils` (1 = after this node the NPC never talks again).
 
 Option keys:
 - flow: `text` (≤ 255 bytes), `next` (-1 = no node), `close` 1, `spoils` 1,
@@ -119,9 +154,10 @@ changes through quest penalties (`fail_rep_penalty`). Console: `quest_dump_def <
 
 ### Scenes (lip sync, gestures)
 
-`scenes/<npc>/<node>.vcd` + the voice `sound/<npc>/<node>.wav` (phonemes for lip
-sync are inside the WAV; the `.txt` files next to the scenes are their
-phoneme extraction source). Minimal hand-written VCD (no facial animation):
+The editor's layout: `scenes/dialogs/<npc>/<lang>/<node>.vcd` + `sound/dialogs/<npc>/<lang>/<node>.wav`
+(older files: `scenes/<npc>/<node>.vcd` + `sound/<npc>/<node>.wav`). Phonemes for lip
+sync are inside the WAV (VDAT chunk; the Russian generator writes words in cp1251).
+Minimal hand-written VCD (no facial animation):
 
 ```
 // Choreo version 1
