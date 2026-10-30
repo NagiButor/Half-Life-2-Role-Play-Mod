@@ -1354,3 +1354,13 @@ bool UTIL_HasLoadedAnyMap()
 
 	return g_pFullFileSystem->FileExists( szFilename, "MOD" );
 }
+
+const char *UTIL_GetLevelFileName()
+{
+	// model 1 is the world, its name the whole path (known from the start of the level load)
+	const model_t *pWorld = modelinfo ? modelinfo->GetModel( 1 ) : NULL;
+	const char *pszName = pWorld ? modelinfo->GetModelName( pWorld ) : NULL;
+	if ( pszName && !V_strnicmp( pszName, "maps/", 5 ) && V_stristr( pszName, ".bsp" ) )
+		return pszName;
+	return engine->GetLevelName();
+}

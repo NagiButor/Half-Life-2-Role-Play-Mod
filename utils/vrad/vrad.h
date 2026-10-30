@@ -275,6 +275,7 @@ extern bool			bRed2Black;
 extern bool         g_bNoSkyRecurse;
 extern bool			bDumpNormals;
 extern bool			g_bFastAmbient;
+extern bool			g_bDeferredLighting;	// HL2RPM: flat lightmaps (vrad.cpp)
 extern float		maxchop;
 extern FileHandle_t	pFileSamples[4][4];
 extern qboolean		g_bLowPriority;

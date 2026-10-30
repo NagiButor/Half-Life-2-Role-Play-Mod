@@ -23,6 +23,7 @@
 | `make_lightning_tex.py` | генерирует `materials\hl2rpm\weather\lightning_glow.vtf` + `lightning_bolt.vmt` (канал молнии) |
 | `add_loc_tokens.py` | вписывает токены `#HL2RPM_*` в `resource\hl2rpm_<язык>.txt` мода (UTF-16LE с BOM, делает `.bak_`) — после запуска скопировать файлы в `resource/` здесь |
 | `fgdcheck.py <fgd>...` | упрощённая проверка FGD в порядке загрузки Hammer (скобки, неизвестные base-классы) |
+| `install_compilers.ps1 [-NoBuild]` | собирает компиляторы карт мода (форк vbsp/vvis/vrad Mapbase в `utils/`) и ставит их в `bin` SDK как `hl2rpm_vbsp/vvis/vrad.exe` (+ `hl2rpm_*_dll.dll`); их запускают Hammer++ и `compile_map.ps1` |
 | `run_tour.ps1 -Map <карта> -Extra "<+команды>"` | запускает фото-тур погоды, выводит скриншоты и важные строки `console.log` |
 | `dmx_dump.py <file.pcf> [фильтр]` | дамп систем частиц из бинарного `.pcf` (операторы и их параметры) |
 | `dmx.py` | чтение/запись бинарного DMX (`.pcf`) — модуль для скриптов ниже |

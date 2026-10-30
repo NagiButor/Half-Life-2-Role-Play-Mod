@@ -37,6 +37,17 @@ void RPMCrash_DumpCrumbs( void (*pfnPrint)( const char *pLine ), int nCount );
 // Write a dump + report right now without crashing (for testing the pipeline).
 void RPMCrash_WriteManualReport();
 
+// True = nBytes from p are committed memory that can be read (VirtualQuery, no exception:
+// for looking at the closed engine's structures - a fault would reach the crash handler first).
+bool RPMCrash_IsReadable( const void *p, unsigned int nBytes );
+
+// The image of a loaded module (e.g. "shaderapidx9.dll"): false if it is not loaded.
+bool RPMCrash_GetModuleRange( const char *pszModule, const unsigned char **ppStart, unsigned int *pnSize );
+
+// The committed writable regions of a loaded module's image - its global variables - at most
+// nMax of them; returns how many were written.
+int RPMCrash_GetModuleDataRegions( const char *pszModule, const unsigned char **ppStarts, unsigned int *pnSizes, int nMax );
+
 #define RPM_CRUMB( ... ) RPMCrash_Crumb( __VA_ARGS__ )
 
 #endif // HL2RPM_CRASHDEBUG_H

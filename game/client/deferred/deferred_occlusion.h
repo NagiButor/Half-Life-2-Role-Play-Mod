@@ -26,4 +26,14 @@ bool DeferredOcclusion_IsBoxHidden( const Vector &vecMins, const Vector &vecMaxs
 void DeferredOcclusion_SetCollecting( bool bMainView );
 bool DeferredOcclusion_IsCollecting();
 
+// Around the engine building the world lists of the view the buffer was drawn for: the leaves
+// of the map behind the walls lose their visibility mark (Hide), and get it back (Restore -
+// always called after Hide, right after the lists are built)
+void DeferredOcclusion_HideWorldLeaves( const Vector &vecOrigin, const QAngle &angles );
+void DeferredOcclusion_RestoreWorldLeaves();
+
+// True = the part of the box within each of the leaves (the whole list of leaves the box
+// touches) is behind the walls or out of the visibility data's view: a lamp lights nothing seen
+bool DeferredOcclusion_AreLeafPartsHidden( const int *pLeaves, int nLeaves, const Vector &vecMins, const Vector &vecMaxs );
+
 #endif // DEFERRED_OCCLUSION_H

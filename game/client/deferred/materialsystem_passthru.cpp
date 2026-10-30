@@ -431,7 +431,7 @@ CON_COMMAND( r_deferred_pbr_reload, "Read scripts/hl2rpm_pbr.txt again and load 
 static void DetectMapCubemaps()
 {
 	char szMap[MAX_PATH];
-	V_FileBase( engine->GetLevelName(), szMap, sizeof( szMap ) );
+	V_FileBase( UTIL_GetLevelFileName(), szMap, sizeof( szMap ) );
 	char szPath[MAX_PATH];
 	V_snprintf( szPath, sizeof( szPath ), "materials/maps/%s/c*.vtf", szMap );
 	FileFindHandle_t hFind = FILESYSTEM_INVALID_FIND_HANDLE;

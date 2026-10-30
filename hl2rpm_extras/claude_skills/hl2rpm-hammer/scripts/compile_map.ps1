@@ -1,12 +1,13 @@
 <#
-HL2RPM map compile: vbsp -> vvis -> vrad with the Source SDK Base 2013 SP tools
-(the same ones Hammer++ uses), then copies the BSP into the mod's maps folder.
+HL2RPM map compile: vbsp -> vvis -> vrad, then copies the BSP into the mod's maps folder.
+The tools are the mod's own (hl2rpm_vbsp/vvis/vrad in the SDK's bin, built from sp\src\utils by
+hl2rpm_extras\tools\install_compilers.ps1; Hammer++ runs the same ones). -Tools stock = Valve's.
 
-  .\compile_map.ps1 -Map test_deferred                 # normal compile (fast vis, normal rad, LDR+HDR)
-  .\compile_map.ps1 -Map test_deferred -Profile final  # full vis, -final rad
-  .\compile_map.ps1 -Map test_deferred -Profile quick  # no vis, -fast rad (entity/layout iteration)
+  .\compile_map.ps1 -Map test_deferred                 # normal: quick vis, flat lightmaps (LDR+HDR)
+  .\compile_map.ps1 -Map test_deferred -Profile final  # full vis, baked -final rad (for -nodeferred)
+  .\compile_map.ps1 -Map test_deferred -Profile quick  # no vis (entity/layout iteration)
   .\compile_map.ps1 -Vmf "D:\path\other.vmf"           # any VMF
-  .\compile_map.ps1 -Map x -RadArgs "-StaticPropLighting -StaticPropPolys"
+  .\compile_map.ps1 -Map x -Tools stock                # Valve's tools (normal: vvis -fast, vrad baked)
 
 The previous BSP in the mod is kept in E:\SourceModding\HL2RPMSOURCE\map_backups.
 Exit code 0 = compiled and copied, 1 = a tool failed or the map leaked.
@@ -15,6 +16,7 @@ param(
     [string]$Map = "",
     [string]$Vmf = "",
     [ValidateSet("quick", "normal", "final")] [string]$Profile = "normal",
+    [ValidateSet("rpm", "stock")] [string]$Tools = "rpm",
     [string]$VbspArgs = "",
     [string]$VvisArgs = "",
     [string]$RadArgs = "",
@@ -44,28 +46,46 @@ if (Get-Process hl2 -ErrorAction SilentlyContinue) {
     Write-Warning "hl2.exe is running: the copy into the mod may fail if this map is loaded"
 }
 
-switch ($Profile) {
-    "quick"  { $vis = $null;   $rad = "-fast -both" }
-    "normal" { $vis = "-fast"; $rad = "-both" }
-    "final"  { $vis = "";      $rad = "-final -both -StaticPropLighting -StaticPropPolys -TextureShadows" }
+if ($Tools -eq "rpm") {
+    # hl2rpm_vvis: quick portal vis unless -full; hl2rpm_vrad: flat lightmaps unless -full / -final
+    $exe = @{ bsp = "hl2rpm_vbsp.exe"; vis = "hl2rpm_vvis.exe"; rad = "hl2rpm_vrad.exe" }
+    switch ($Profile) {
+        "quick"  { $vis = $null;   $rad = "-both" }
+        "normal" { $vis = "";      $rad = "-both" }
+        "final"  { $vis = "-full"; $rad = "-final -both -StaticPropLighting -StaticPropPolys -TextureShadows" }
+    }
+} else {
+    $exe = @{ bsp = "vbsp.exe"; vis = "vvis.exe"; rad = "vrad.exe" }
+    switch ($Profile) {
+        "quick"  { $vis = $null;   $rad = "-fast -both" }
+        "normal" { $vis = "-fast"; $rad = "-both" }
+        "final"  { $vis = "";      $rad = "-final -both -StaticPropLighting -StaticPropPolys -TextureShadows" }
+    }
+}
+foreach ($t in $exe.Values) {
+    if (-not (Test-Path (Join-Path $bin $t))) { throw "$t is not in $bin (run hl2rpm_extras\tools\install_compilers.ps1, or pass -Tools stock)" }
 }
 
+$runId = [guid]::NewGuid().ToString("N").Substring(0, 8)   # (two compiles at once must not share the capture files)
 function Run-Tool([string]$exe, [string]$toolArgs) {
     $full = Join-Path $bin $exe
     Write-Host "==> $exe $toolArgs" -ForegroundColor Cyan
+    $outFile = "$env:TEMP\hl2rpm_compile_out_$runId.txt"
+    $errFile = "$env:TEMP\hl2rpm_compile_err_$runId.txt"
     $p = Start-Process -FilePath $full -ArgumentList $toolArgs -WorkingDirectory $bin -NoNewWindow -Wait -PassThru `
-        -RedirectStandardOutput "$env:TEMP\hl2rpm_compile_out.txt" -RedirectStandardError "$env:TEMP\hl2rpm_compile_err.txt"
-    $out = Get-Content "$env:TEMP\hl2rpm_compile_out.txt" -Raw -ErrorAction SilentlyContinue
-    $err = Get-Content "$env:TEMP\hl2rpm_compile_err.txt" -Raw -ErrorAction SilentlyContinue
+        -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+    $out = Get-Content $outFile -Raw -ErrorAction SilentlyContinue
+    $err = Get-Content $errFile -Raw -ErrorAction SilentlyContinue
+    Remove-Item $outFile, $errFile -ErrorAction SilentlyContinue
     # keep the console readable: warnings/errors and the timing lines
     ($out + $err) -split "`n" | Where-Object {
-        $_ -match "(?i)error|warning|leak|\*\*\*|elapsed|seconds elapsed|too many|exceeded|bad|invalid"
+        $_ -match "(?i)error|warning|leak|\*\*\*|elapsed|seconds elapsed|too many|exceeded|bad|invalid|assert|nearly full|t-junction"
     } | Select-Object -First 40 | ForEach-Object { Write-Host "    $_" }
     return @{ Code = $p.ExitCode; Text = ($out + $err) }
 }
 
 $start = Get-Date
-$r = Run-Tool "vbsp.exe" "-game `"$game`" $VbspArgs `"$base`""
+$r = Run-Tool $exe.bsp "-game `"$game`" $VbspArgs `"$base`""
 if ($r.Code -ne 0) { Write-Error "vbsp failed ($($r.Code))"; exit 1 }
 $leaked = $r.Text -match "(?i)\*\*\*\* leaked \*\*\*\*"
 if ($leaked) {
@@ -74,11 +94,11 @@ if ($leaked) {
 }
 
 if ($vis -ne $null -and -not $leaked) {
-    $r = Run-Tool "vvis.exe" "-game `"$game`" $vis $VvisArgs `"$base`""
+    $r = Run-Tool $exe.vis "-game `"$game`" $vis $VvisArgs `"$base`""
     if ($r.Code -ne 0) { Write-Error "vvis failed ($($r.Code))"; exit 1 }
 }
 
-$r = Run-Tool "vrad.exe" "-game `"$game`" $rad $RadArgs `"$base`""
+$r = Run-Tool $exe.rad "-game `"$game`" $rad $RadArgs `"$base`""
 if ($r.Code -ne 0) { Write-Error "vrad failed ($($r.Code))"; exit 1 }
 
 $secs = [int]((Get-Date) - $start).TotalSeconds

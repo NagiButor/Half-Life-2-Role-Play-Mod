@@ -145,6 +145,9 @@ public:
 	// Get leaves this renderable is in
 	virtual bool GetRenderableLeaf ( ClientRenderHandle_t handle, int* pOutLeaf, const int* pInIterator = 0, int* pOutIterator = 0 );
 
+	// HL2RPM: is the world space box of every renderable in the leaf hidden by pfnIsHidden?
+	bool AreRenderablesInLeafHidden( int leaf, bool ( *pfnIsHidden )( const Vector &vecMins, const Vector &vecMaxs ) );
+
 	// Singleton instance...
 	static CClientLeafSystem s_ClientLeafSystem;
 
@@ -427,9 +430,30 @@ void CalcRenderableWorldSpaceAABB_Fast( IClientRenderable *pRenderable, Vector &
 	}
 	else
 	{
-		// Start out with our own render bounds. Since we don't have a parent, this won't incur any nasty 
+		// Start out with our own render bounds. Since we don't have a parent, this won't incur any nasty
 		CalcRenderableWorldSpaceAABB( pRenderable, absMin, absMax );
 	}
+}
+
+// HL2RPM: deferred_occlusion.cpp leaves a leaf of the map out of the view only when what stands
+// in it is hidden too (the leaf list is also what the renderables of the view are collected from).
+// The placement bounds: no bones of a parent are set up for them, and they hold the render bounds.
+bool CClientLeafSystem::AreRenderablesInLeafHidden( int leaf, bool ( *pfnIsHidden )( const Vector &vecMins, const Vector &vecMaxs ) )
+{
+	for ( unsigned short idx = m_RenderablesInLeaf.FirstElement( leaf ); idx != m_RenderablesInLeaf.InvalidIndex(); idx = m_RenderablesInLeaf.NextElement( idx ) )
+	{
+		const RenderableInfo_t &renderable = m_Renderables[ m_RenderablesInLeaf.Element( idx ) ];
+		Vector vecMins, vecMaxs;
+		CalcRenderableWorldSpaceAABB_Fast( renderable.m_pRenderable, vecMins, vecMaxs );
+		if ( !pfnIsHidden( vecMins, vecMaxs ) )
+			return false;
+	}
+	return true;
+}
+
+bool ClientLeafSystem_AreRenderablesInLeafHidden( int leaf, bool ( *pfnIsHidden )( const Vector &vecMins, const Vector &vecMaxs ) )
+{
+	return CClientLeafSystem::s_ClientLeafSystem.AreRenderablesInLeafHidden( leaf, pfnIsHidden );
 }
 
 

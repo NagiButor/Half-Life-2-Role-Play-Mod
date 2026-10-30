@@ -1167,7 +1167,14 @@ void CBaseWorldViewDeferred::DrawSetup( float waterHeight, int nSetupFlags, floa
 
 	const bool bDrawEntities = ( nSetupFlags & DF_DRAW_ENTITITES ) != 0;
 	const bool bDrawReflection = ( nSetupFlags & DF_RENDER_REFLECTION ) != 0;
+	// HL2RPM: the leaves of the map behind the walls are left out of the main view's world lists
+	// (not the shadow views': what the eye can't see still casts its shadow into view)
+	const bool bOccludeWorld = !IsShadowMapView() && !bDrawReflection;
+	if ( bOccludeWorld )
+		DeferredOcclusion_HideWorldLeaves( origin, angles );
 	BuildWorldRenderLists( bDrawEntities, iForceViewLeaf, ShouldCacheLists(), bShadowDepth && r_deferred_shadow_worldlists.GetBool(), bDrawReflection ? &waterHeight : NULL );
+	if ( bOccludeWorld )
+		DeferredOcclusion_RestoreWorldLeaves();
 
 	PruneWorldListInfo();
 

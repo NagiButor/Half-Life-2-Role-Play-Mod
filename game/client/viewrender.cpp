@@ -87,6 +87,7 @@
 
 // HL2RPM: the fog takes the color of the weather / time of day
 #include "weather/weather_render.h"
+#include "deferred/deferred_worldlists.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -3983,6 +3984,11 @@ void CRendering3dView::BuildWorldRenderLists( bool bDrawEntities, int iForceView
 		render->BuildWorldLists( m_pWorldRenderList, m_pWorldListInfo, 
 			( m_pCustomVisibility ) ? m_pCustomVisibility->m_iForceViewLeaf : iForceViewLeaf, 
 			pVisData, bShadowDepth, pReflectionWaterHeight );
+
+		// HL2RPM: the material groups in the order of the engine's static meshes - with a lot of
+		// an open map in view the engine went over its 127 mesh changes a batch and dropped the
+		// rest of the world ("Too many vertex format changes in frame")
+		DeferredWorldLists_SortByMesh( m_pWorldRenderList );
 
 		if ( bUseCache && !pVisData )
 		{

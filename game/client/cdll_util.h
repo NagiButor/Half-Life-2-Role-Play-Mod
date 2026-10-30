@@ -186,4 +186,8 @@ int UTIL_GetMapKeyCount( const char *pszCustomKey );
 // Returns true if the user has loaded any maps, false otherwise.
 bool UTIL_HasLoadedAnyMap();
 
+// HL2RPM: the path of the map's .bsp ("maps/<name>.bsp"). engine->GetLevelName() keeps 39
+// characters: the name of a map longer than 30 is cut short there ("maps/rpm_trainstation_te...").
+const char *UTIL_GetLevelFileName();
+
 #endif // !UTIL_H

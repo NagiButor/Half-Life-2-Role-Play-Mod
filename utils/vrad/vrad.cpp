@@ -99,6 +99,13 @@ float		reflectivityScale = 1.0;
 qboolean	do_extra = true;
 bool		debug_extra = false;
 qboolean	do_fast = false;
+// HL2RPM (-deferred): the mod's renderer lights the world itself and never reads the
+// lightmaps. They are written flat (the ambient), without tracing a ray per luxel; what the
+// game does read is still computed - the light list (the classic lamps and texture lights
+// become deferred lamps from it), the ambient of the leaves and the detail props' light.
+// It is the default: -full or -final ask for the baked lighting of stock vrad (for -nodeferred).
+bool		g_bDeferredLighting = false;
+bool		g_bFullLighting = false;
 qboolean	do_centersamples = false;
 int			extrapasses = 4;
 float		smoothing_threshold = 0.7071067; // cos(45.0*(M_PI/180)) 
@@ -2222,6 +2229,16 @@ void VRAD_LoadBSP( char const *pFilename )
 		dvis->numclusters = CountClusters();
 	}
 
+	// HL2RPM: the flat lightmaps of -deferred are a mid grey (what -nodeferred would show), unless -ambient says
+	if ( g_bDeferredLighting )
+	{
+		Msg( "HL2RPM -deferred: flat lightmaps, no bounces; lights, leaf ambient and detail props are computed\n" );
+		if ( ambient[0] <= 0.1f && ambient[1] <= 0.1f && ambient[2] <= 0.1f )
+		{
+			ambient[0] = ambient[1] = ambient[2] = 0.4f * 128;
+		}
+	}
+
 	//
 	// patches and referencing data (ensure capacity)
 	//
@@ -2474,14 +2491,24 @@ int ParseCommandLine( int argc, char **argv, bool *onlydetail )
 			do_fast = true;
 		}
 #ifdef MAPBASE
-		else if(!Q_stricmp(argv[i], "-ultrafast")) 
+		else if(!Q_stricmp(argv[i], "-ultrafast"))
 		{
 			do_fast = true;
 			g_bFastAmbient = true;
-			do_extra = false; 
+			do_extra = false;
 			numbounce = 1;
 		}
 #endif
+		else if (!Q_stricmp(argv[i], "-deferred"))
+		{
+			// HL2RPM: see g_bDeferredLighting (the default; RunVRAD applies it)
+			g_bDeferredLighting = true;
+		}
+		else if (!Q_stricmp(argv[i], "-full"))
+		{
+			// HL2RPM: the baked lighting of stock vrad
+			g_bFullLighting = true;
+		}
 		else if (!Q_stricmp(argv[i],"-noskyboxrecurse"))
 		{
 			g_bNoSkyRecurse = true;
@@ -2489,6 +2516,7 @@ int ParseCommandLine( int argc, char **argv, bool *onlydetail )
 		else if (!Q_stricmp(argv[i],"-final"))
 		{
 			g_flSkySampleScale = 16.0;
+			g_bFullLighting = true;	// HL2RPM
 		}
 		else if (!Q_stricmp(argv[i],"-extrasky"))
 		{
@@ -2810,6 +2838,9 @@ void PrintUsage( int argc, char **argv )
 		"  -fast           : Quick and dirty lighting.\n"
 #ifdef MAPBASE
 		"  -ultrafast	  : Very quick and dirty lighting, same as -fast -fastambient -noextra -bounce 1\n"
+		"  -deferred       : HL2RPM (the default): flat lightmaps - the mod's renderer lights the world\n"
+		"                    itself; the light list, leaf ambient and detail prop light are computed\n"
+		"  -full           : HL2RPM: the baked lighting of stock vrad (-final implies it)\n"
 #endif
 		"  -fastambient    : Per-leaf ambient sampling is lower quality to save compute time.\n"
 		"  -final          : High quality processing. equivalent to -extrasky 16.\n"
@@ -2919,6 +2950,16 @@ int RunVRAD( int argc, char **argv )
 		PrintUsage( argc, argv );
 		DeleteCmdLine( argc, argv );
 		CmdLib_Exit( 1 );
+	}
+
+	// HL2RPM: flat lightmaps unless the baked lighting is asked for (g_bDeferredLighting)
+	if ( !g_bFullLighting )
+	{
+		g_bDeferredLighting = true;
+		do_fast = true;
+		g_bFastAmbient = true;
+		do_extra = false;
+		numbounce = 0;
 	}
 
 	VRAD_LoadBSP( argv[i] );

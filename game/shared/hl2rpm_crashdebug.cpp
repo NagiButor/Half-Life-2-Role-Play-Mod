@@ -619,6 +619,71 @@ bool RPMCrash_IsHandlerInstalled()
 	return s_hVeh != NULL;
 }
 
+bool RPMCrash_IsReadable( const void *p, unsigned int nBytes )
+{
+	if ( !p || !nBytes )
+		return false;
+	const char *pCur = (const char *)p;
+	const char *pEnd = pCur + nBytes;
+	if ( pEnd < pCur )
+		return false;
+	while ( pCur < pEnd )
+	{
+		MEMORY_BASIC_INFORMATION mbi;
+		if ( !VirtualQuery( pCur, &mbi, sizeof( mbi ) ) || mbi.State != MEM_COMMIT )
+			return false;
+		const DWORD nProtect = mbi.Protect & 0xFF;
+		if ( ( mbi.Protect & PAGE_GUARD ) || nProtect == PAGE_NOACCESS || nProtect == PAGE_EXECUTE )
+			return false;
+		pCur = (const char *)mbi.BaseAddress + mbi.RegionSize;
+	}
+	return true;
+}
+
+// Walks the regions of the image of a loaded module (they all share its allocation base)
+template < class FN >
+static bool ForEachModuleRegion( const char *pszModule, FN fn )
+{
+	HMODULE hModule = GetModuleHandleA( pszModule );
+	if ( !hModule )
+		return false;
+	const char *pCur = (const char *)hModule;
+	MEMORY_BASIC_INFORMATION mbi;
+	while ( VirtualQuery( pCur, &mbi, sizeof( mbi ) ) && mbi.AllocationBase == (void *)hModule && mbi.RegionSize )
+	{
+		fn( mbi );
+		pCur = (const char *)mbi.BaseAddress + mbi.RegionSize;
+	}
+	return true;
+}
+
+bool RPMCrash_GetModuleRange( const char *pszModule, const unsigned char **ppStart, unsigned int *pnSize )
+{
+	const unsigned char *pEnd = NULL;
+	if ( !ForEachModuleRegion( pszModule, [&]( const MEMORY_BASIC_INFORMATION &mbi ) { pEnd = (const unsigned char *)mbi.BaseAddress + mbi.RegionSize; } ) )
+		return false;
+	*ppStart = (const unsigned char *)GetModuleHandleA( pszModule );
+	*pnSize = pEnd ? (unsigned int)( pEnd - *ppStart ) : 0;
+	return *pnSize != 0;
+}
+
+int RPMCrash_GetModuleDataRegions( const char *pszModule, const unsigned char **ppStarts, unsigned int *pnSizes, int nMax )
+{
+	int nCount = 0;
+	ForEachModuleRegion( pszModule, [&]( const MEMORY_BASIC_INFORMATION &mbi )
+	{
+		const DWORD nProtect = mbi.Protect & 0xFF;
+		const bool bWritable = nProtect == PAGE_READWRITE || nProtect == PAGE_WRITECOPY || nProtect == PAGE_EXECUTE_READWRITE;
+		if ( nCount < nMax && mbi.State == MEM_COMMIT && bWritable && !( mbi.Protect & PAGE_GUARD ) )
+		{
+			ppStarts[nCount] = (const unsigned char *)mbi.BaseAddress;
+			pnSizes[nCount] = (unsigned int)mbi.RegionSize;
+			nCount++;
+		}
+	} );
+	return nCount;
+}
+
 void RPMCrash_WriteManualReport()
 {
 	if ( !s_hWorker )

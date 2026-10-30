@@ -893,6 +893,85 @@ void ProcessModels (void)
 }
 
 
+//-----------------------------------------------------------------------------
+// HL2RPM: how much of each limit of the map format the map takes. An open world is built of
+// several maps joined by level transitions; this says how much room is left in this one.
+//-----------------------------------------------------------------------------
+extern int num_visclusters;
+
+static void PrintMapBudget()
+{
+	struct Budget_t
+	{
+		const char *pszName;
+		int nUsed;
+		int nMax;
+		bool bHard;		// running out stops the compile (not: the t-junction lists, see AssignTJunctionPrims)
+	};
+	const Budget_t budgets[] =
+	{
+		{ "faces",					numfaces,				MAX_MAP_FACES,				true },
+		{ "leaves",					numleafs,				MAX_MAP_LEAFS,				true },
+		{ "vis clusters",			num_visclusters,		MAX_MAP_CLUSTERS,			true },
+		{ "nodes",					numnodes,				MAX_MAP_NODES,				true },
+		{ "planes",					numplanes,				MAX_MAP_PLANES,				true },
+		{ "brushes",				numbrushes,				MAX_MAP_BRUSHES,			true },
+		{ "brush sides",			numbrushsides,			MAX_MAP_BRUSHSIDES,			true },
+		{ "vertexes",				numvertexes,			MAX_MAP_VERTS,				true },
+		{ "edges",					numedges,				MAX_MAP_EDGES,				true },
+		{ "surfedges",				numsurfedges,			MAX_MAP_SURFEDGES,			true },
+		{ "leaf faces",				numleaffaces,			MAX_MAP_LEAFFACES,			true },
+		{ "leaf brushes",			numleafbrushes,			MAX_MAP_LEAFBRUSHES,		true },
+		{ "texinfos",				texinfo.Count(),		MAX_MAP_TEXINFO,			true },
+		{ "texdata",				numtexdata,				MAX_MAP_TEXDATA,			true },
+		{ "brush models",			nummodels,				MAX_MAP_MODELS,				true },
+		{ "t-junction lists",		g_numprimitives,		MAX_MAP_PRIMITIVES,			false },
+		{ "t-junction indices",		g_numprimindices,		MAX_MAP_PRIMINDICES,		false },
+		{ "cubemaps",				g_nCubemapSamples,		MAX_MAP_CUBEMAPSAMPLES,		true },
+		{ "physics (KB)",			g_PhysCollideSize / 1024,	4 * 1024,				false },
+		{ "entity text (KB)",		dentdata.Count() / 1024,	384,					false },
+	};
+
+	Msg( "\nMap budget (share of the map format's limits):\n" );
+	int nFull = 0;
+	for ( int i = 0; i < ARRAYSIZE( budgets ); i++ )
+	{
+		const Budget_t &b = budgets[i];
+		const float flShare = b.nMax > 0 ? 100.0f * b.nUsed / b.nMax : 0.0f;
+		char szBar[21];
+		const int nBar = clamp( (int)( flShare / 5.0f + 0.5f ), 0, 20 );
+		for ( int j = 0; j < 20; j++ )
+			szBar[j] = ( j < nBar ) ? '#' : '.';
+		szBar[20] = 0;
+		if ( flShare >= 80.0f && b.bHard )
+		{
+			Warning( "  %-20s %7d / %-7d %5.1f%% [%s]  <-- nearly full\n", b.pszName, b.nUsed, b.nMax, flShare, szBar );
+			nFull++;
+		}
+		else
+		{
+			Msg( "  %-20s %7d / %-7d %5.1f%% [%s]\n", b.pszName, b.nUsed, b.nMax, flShare, szBar );
+		}
+	}
+	Msg( "  (entities: %d. Not limits of the format: the t-junction lists - when they run out, the smallest\n"
+		 "   faces go without one; physics and the entity text - Valve's goals)\n", num_entities );
+	if ( nFull )
+	{
+		Warning( "%d of the map's limits are over 80%%: move part of the area into a neighbouring map, or turn small brushes into func_detail.\n", nFull );
+	}
+
+	// (the engine keeps 31 characters of the map's name in a save game: a longer one does not load -
+	// "Save file is not valid"; the client's level name is cut at 34)
+	char szMapName[ MAX_PATH ];
+	V_FileBase( source, szMapName, sizeof( szMapName ) );
+	if ( V_strlen( szMapName ) > 31 )
+	{
+		Warning( "The map's name \"%s\" is %d characters long: saved games of it will not load (the engine keeps 31). Use a shorter name.\n",
+			szMapName, V_strlen( szMapName ) );
+	}
+}
+
+
 void LoadPhysicsDLL( void )
 {
 	PhysicsDLLPath( "vphysics.dll" );
@@ -1533,6 +1612,7 @@ int RunVBSP( int argc, char **argv )
 		SetLightStyles ();
 		LoadEmitDetailObjectDictionary( gamedir );
 		ProcessModels ();
+		PrintMapBudget();
 	}
 
 	end = Plat_FloatTime();

@@ -578,6 +578,83 @@ void Triangulate_r( CUtlVector<int> &out, const CUtlVector<int> &inIndices, cons
 	Assert(0);
 }
 
+// HL2RPM: the triangle lists that hide t-junction cracks are handed out after all faces are
+// fixed, the biggest faces first. The map format has room for 65536 indices of them: an open
+// map (one big sky box around everything) has thousands of such faces, and vbsp used to stop
+// with "Too many t-junctions to fix up!" at the first one past the limit.
+struct TJuncPrimCandidate_t
+{
+	face_t	*pFace;
+	float	flArea;
+	int		iFirstIndex;	// into s_TJuncIndices
+	int		nIndices;
+};
+static CUtlVector< TJuncPrimCandidate_t > s_TJuncCandidates;
+static CUtlVector< unsigned short > s_TJuncIndices;
+
+static int __cdecl CompareTJuncCandidates( const TJuncPrimCandidate_t *pA, const TJuncPrimCandidate_t *pB )
+{
+	if ( pA->flArea != pB->flArea )
+		return ( pA->flArea > pB->flArea ) ? -1 : 1;
+	return ( pA->iFirstIndex < pB->iFirstIndex ) ? -1 : ( pA->iFirstIndex > pB->iFirstIndex ) ? 1 : 0;
+}
+
+static void AssignTJunctionPrims()
+{
+	if ( s_TJuncCandidates.Count() == 0 )
+		return;
+
+	s_TJuncCandidates.Sort( CompareTJuncCandidates );
+
+	int nKept = 0, nDropped = 0;
+	float flDroppedArea = 0.0f, flLargestDropped = 0.0f;
+	for ( int i = 0; i < s_TJuncCandidates.Count(); i++ )
+	{
+		const TJuncPrimCandidate_t &c = s_TJuncCandidates[i];
+		if ( g_numprimitives + 1 > MAX_MAP_PRIMITIVES || g_numprimindices + c.nIndices > MAX_MAP_PRIMINDICES )
+		{
+			// (drawn as a fan from its corner with the fewest t-junctions next to it: a crack of a
+			// pixel is possible along those edges, as with -notjunc)
+			nDropped++;
+			flDroppedArea += c.flArea;
+			if ( c.flArea > flLargestDropped )
+				flLargestDropped = c.flArea;
+			continue;
+		}
+
+		dprimitive_t &newPrim = g_primitives[g_numprimitives];
+		c.pFace->firstPrimID = g_numprimitives;
+		c.pFace->numPrims = 1;
+		g_numprimitives++;
+		newPrim.firstIndex = g_numprimindices;
+		newPrim.firstVert = g_numprimverts;
+		newPrim.indexCount = c.nIndices;
+		newPrim.vertCount = 0;
+		newPrim.type = PRIM_TRILIST;
+		for ( int j = 0; j < c.nIndices; j++ )
+		{
+			g_primindices[ g_numprimindices + j ] = s_TJuncIndices[ c.iFirstIndex + j ];
+		}
+		g_numprimindices += c.nIndices;
+		nKept++;
+	}
+
+	if ( nDropped )
+	{
+		Warning( "FixTjuncs: %d faces need a triangle list against t-junction cracks, the map format holds %d of them "
+			"(%d of %d indices). The other %d (%.0f sq units in all, the largest %.0f) are drawn without one: "
+			"a crack of a pixel is possible along their edges.\n",
+			s_TJuncCandidates.Count(), nKept, g_numprimindices, MAX_MAP_PRIMINDICES, nDropped, flDroppedArea, flLargestDropped );
+	}
+	else
+	{
+		qprintf( "%5i faces got a triangle list against t-junction cracks (%d indices)\n", nKept, g_numprimindices );
+	}
+
+	s_TJuncCandidates.Purge();
+	s_TJuncIndices.Purge();
+}
+
 /*
 ==================
 FixFaceEdges
@@ -639,6 +716,22 @@ void FixFaceEdges (face_t **pList, face_t *f)
 		c_badstartverts++;
 		base = 0;
 
+		// HL2RPM: a face that may get no triangle list (see AssignTJunctionPrims) is drawn as a
+		// fan from its first corner: start it at the corner with the fewest t-junctions on its two
+		// edges. (A face too long for one is split into several, and those keep corner 0.)
+		if ( numsuperverts <= MAXEDGES )
+		{
+			int nBest = INT_MAX;
+			for ( int k = 0; k < f->numpoints; k++ )
+			{
+				const int nAround = count[k] + count[(k+f->numpoints-1)%f->numpoints];
+				if ( count[k] > 0 && nAround < nBest )
+				{
+					nBest = nAround;
+					base = start[k];
+				}
+			}
+		}
 	}
 	else
 	{	// rotate the vertex order
@@ -649,7 +742,8 @@ void FixFaceEdges (face_t **pList, face_t *f)
 	FaceFromSuperverts (pList, f, base);
 
 	// if this is the world, then re-triangulate to sew cracks
-	if ( f->badstartvert && entity_num == 0 )
+	// HL2RPM: (not a fragmented face: its parts are what gets written, the list would go unused)
+	if ( f->badstartvert && entity_num == 0 && numsuperverts <= MAXEDGES )
 	{
 		CUtlVector<face_vert_table_t> poly;
 		CUtlVector<int> inIndices;
@@ -673,23 +767,16 @@ void FixFaceEdges (face_t **pList, face_t *f)
 			inIndices.AddToTail( i );
 		}
 		Triangulate_r( outIndices, inIndices, poly );
-		dprimitive_t &newPrim = g_primitives[g_numprimitives];
-		f->firstPrimID = g_numprimitives;
-		g_numprimitives++;
-		f->numPrims = 1;
-		newPrim.firstIndex = g_numprimindices;
-		newPrim.firstVert = g_numprimverts;
-		newPrim.indexCount = outIndices.Count();
-		newPrim.vertCount = 0;
-		newPrim.type = PRIM_TRILIST;
-		g_numprimindices += newPrim.indexCount;
-		if ( g_numprimitives > MAX_MAP_PRIMITIVES || g_numprimindices > MAX_MAP_PRIMINDICES )
-		{
-			Error("Too many t-junctions to fix up! (%d prims, max %d :: %d indices, max %d)\n", g_numprimitives, MAX_MAP_PRIMITIVES, g_numprimindices, MAX_MAP_PRIMINDICES );
-		}
+
+		// HL2RPM: kept for AssignTJunctionPrims; the face's corners start at superverts[base]
+		TJuncPrimCandidate_t &c = s_TJuncCandidates[ s_TJuncCandidates.AddToTail() ];
+		c.pFace = f;
+		c.flArea = f->w ? WindingArea( f->w ) : 0.0f;
+		c.iFirstIndex = s_TJuncIndices.Count();
+		c.nIndices = outIndices.Count();
 		for ( i = 0; i < outIndices.Count(); i++ )
 		{
-			g_primindices[newPrim.firstIndex + i] = outIndices[i];
+			s_TJuncIndices.AddToTail( (unsigned short)( ( outIndices[i] - base + numsuperverts ) % numsuperverts ) );
 		}
 	}
 }
@@ -773,6 +860,7 @@ face_t *FixTjuncs (node_t *headnode, face_t *pLeafFaceList)
 		}
 	}
 
+	AssignTJunctionPrims();
 
 	qprintf ("%i unique from %i\n", c_uniqueverts, c_totalverts);
 	qprintf ("%5i edges degenerated\n", c_degenerate);

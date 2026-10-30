@@ -3132,6 +3132,10 @@ void BuildFacelights (int iThread, int facenum)
 		positions.LoadAndSwizzle( v[0], v[1], v[2], v[3] );
 		normals.LoadAndSwizzle( n[0], n[1], n[2], n[3] );
 
+		// HL2RPM: -deferred writes the lightmaps flat - no light is gathered per luxel
+		if ( g_bDeferredLighting )
+			continue;
+
 		ComputeIlluminationPointAndNormalsSSE( l, positions, normals, &sampleInfo, numSamples );
 
 		// Fixup sample normals in case of smooth faces

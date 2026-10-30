@@ -16,7 +16,7 @@ Hammer++ is only launched to show a result to the user.
 |---|---|
 | Map sources (`.vmf`; `.vmx` = Hammer's autosave copy, never edit it) | `E:\XBLAH's modding tool\content\Mapbase\hl2rpm\mapsrc` (game maps), `mapsrc\test\` (test/dev maps) |
 | Compiled maps the game loads | `E:\Steam\steamapps\sourcemods\hl2rpm\maps` (game maps), `hl2rpm\testmaps\maps` (test maps: separate search path below the mod root, not shipped) |
-| Compile tools (stock SDK 2013 SP) | `E:\Steam\steamapps\common\Source SDK Base 2013 Singleplayer\bin\{vbsp,vvis,vrad}.exe` |
+| Compile tools: the mod's own (a fork of the Mapbase compilers, `sp/src/utils`; Hammer++ runs them too) | `E:\Steam\steamapps\common\Source SDK Base 2013 Singleplayer\bin\hl2rpm_{vbsp,vvis,vrad}.exe` (+ `hl2rpm_vvis_dll.dll`, `hl2rpm_vrad_dll.dll`); build + install: `powershell -File <sp/src>\hl2rpm_extras\tools\install_compilers.ps1`. Valve's `vbsp/vvis/vrad.exe` stay beside them (`-Tools stock`) |
 | Hammer++ | `...\Source SDK Base 2013 Singleplayer\bin\hammerplusplus.exe` (config `bin\hammerplusplus\hammerplusplus_gameconfig.txt`) |
 | FGDs (entity definitions, custom keys) | `E:\XBLAH's modding tool\tools\FGDs\Mapbase\` — `base_vizzys.fgd` (BaseNPC with dialog/loot/faction keys), `halflife2_vizzys.fgd`, `hl2rpm.fgd`, `deferred.fgd` |
 | BSP backups made by compile_map.ps1 | `E:\SourceModding\HL2RPMSOURCE\map_backups` |
@@ -114,11 +114,25 @@ compile with `-Vmf`, and delete the BSPs from `hl2rpm\maps` after the test.
 
 ## Compiling
 
-PowerShell: `& "E:\SourceModding\HL2RPMSOURCE\.claude\skills\hl2rpm-hammer\scripts\compile_map.ps1" -Map test_deferred [-Profile quick|normal|final]`
+PowerShell: `& "E:\SourceModding\HL2RPMSOURCE\.claude\skills\hl2rpm-hammer\scripts\compile_map.ps1" -Map test_deferred [-Profile quick|normal|final] [-Tools rpm|stock]`
 
-- `quick`: no vis, `vrad -fast` — layout/entity iteration (seconds).
-- `normal` (default): `vvis -fast`, `vrad -both` (LDR+HDR).
-- `final`: full vis, `vrad -final -StaticPropLighting -StaticPropPolys -TextureShadows`.
+With the mod's tools (`-Tools rpm`, the default):
+- `quick`: no vis, flat lightmaps — layout/entity iteration.
+- `normal` (default): quick portal vis (the default of `hl2rpm_vvis`), flat lightmaps
+  (the default of `hl2rpm_vrad`: the deferred renderer lights the world itself; worldlights,
+  leaf ambient and detail prop light are still computed), LDR+HDR. A 15k-face map in ~80 s.
+- `final`: `vvis -full`, `vrad -final` (baked light of stock vrad, for `-nodeferred`) + static prop lighting.
+- `hl2rpm_vvis -radius N` (or `farz` of `env_fog_controller`) bounds what the visibility data lets through.
+- `hl2rpm_vbsp` never stops on "Too many t-junctions" (the smallest faces go without the
+  triangle list, it says how many) and ends with a **map budget** — the share of every limit
+  of the map format; over 80 % is a warning. Read it after compiling a big map.
+- Open-world maps need no areaportals / hint / skip: the game culls what is behind walls itself
+  (`r_deferred_occlusion`, `_world`; CLAUDE.md "Occlusion culling для открытого мира").
+- Run one compile at a time per VMF (two different maps at once are fine).
+- Map names: 31 characters at most — the engine keeps 31 in a save game, a longer map's saves
+  do not load ("Save file is not valid"); `hl2rpm_vbsp` warns.
+
+Common:
 - Extra switches: `-VbspArgs`, `-VvisArgs`, `-RadArgs`, `-Vmf <any path>`, `-NoCopy`, `-AllowLeak`.
 - A leak stops the script; the pointfile is `<map>.lin` next to the VMF.
 - Full log: `<map>.log` next to the VMF. Big maps (map_v11) take many minutes with

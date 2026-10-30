@@ -45,6 +45,10 @@ int			leaflongs;
 int			portalbytes, portallongs;
 
 bool		fastvis;
+// HL2RPM: the complete portal flow only on request. On an open map without hint brushes and
+// areaportals it takes hours and still lets most of the map through; what is behind a wall
+// is culled in the game (r_deferred_occlusion), the visibility data only has to bound it.
+bool		g_bFullVis = false;
 bool		nosort;
 
 int			totalvis;
@@ -921,12 +925,17 @@ int ParseCommandLine( int argc, char **argv )
 			Msg ("fastvis = true\n");
 			fastvis = true;
 		}
+		else if (!Q_stricmp(argv[i], "-full"))
+		{
+			Msg ("fullvis = true\n");
+			g_bFullVis = true;
+		}
 		else if (!Q_stricmp(argv[i], "-v") || !Q_stricmp(argv[i], "-verbose"))
 		{
 			Msg ("verbose = true\n");
 			verbose = true;
 		}
-		else if( !Q_stricmp( argv[i], "-radius_override" ) )
+		else if( !Q_stricmp( argv[i], "-radius_override" ) || !Q_stricmp( argv[i], "-radius" ) )
 		{
 			g_bUseRadius = true;
 			g_VisRadius = atof( argv[i+1] );
@@ -1015,7 +1024,10 @@ void PrintUsage( int argc, char **argv )
 		"Common options:\n"
 		"\n"
 		"  -v (or -verbose): Turn on verbose output (also shows more command\n"
-		"  -fast           : Only do first quick pass on vis calculations.\n"
+		"  -fast           : Only do first quick pass on vis calculations (HL2RPM: the default).\n"
+		"  -full           : HL2RPM: the complete portal flow (slow on open maps).\n"
+		"  -radius <units> : HL2RPM: nothing farther is visible (default: farz of the\n"
+		"                    env_fog_controller, if it has one).\n"
 		"  -mpi            : Use VMPI to distribute computations.\n"
 		"  -low            : Run as an idle-priority process.\n"
 		"                    env_fog_controller specifies one.\n"
@@ -1088,6 +1100,13 @@ int RunVVis( int argc, char **argv )
 	LoadCmdLineFromFile( argc, argv, source, "vvis" );
 	int i = ParseCommandLine( argc, argv );
 
+	// HL2RPM: quick vis unless the complete one is asked for
+	if ( !g_bFullVis && !fastvis )
+	{
+		Msg( "HL2RPM: quick portal vis (pass -full for the complete one)\n" );
+		fastvis = true;
+	}
+
 	// This part is just for VMPI. VMPI's file system needs the basedir in front of all filenames,
 	// so we prepend qdir here.
 	strcpy( source, ExpandPath( source ) );
@@ -1134,6 +1153,7 @@ int RunVVis( int argc, char **argv )
 		{
 			g_bUseRadius = true;
 			g_VisRadius = flRadius * flRadius;
+			Msg( "Vis Radius = %.0f (farz of the env_fog_controller)\n", flRadius );
 		}
 	}
 

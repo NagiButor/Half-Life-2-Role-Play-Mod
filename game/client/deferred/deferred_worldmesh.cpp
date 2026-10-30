@@ -131,6 +131,8 @@ static int s_nDebugViews = 0, s_nDebugMeshes = 0, s_nDebugTris = 0;
 
 // the walls for the occlusion culling (the smallest face that counts, units^2)
 #define WORLD_OCCLUDER_MIN_AREA 2048.0f
+// (a triangle of a displacement: they come in hundreds, the frame's budget of walls takes the largest on screen)
+#define WORLD_OCCLUDER_MIN_DISP_AREA 512.0f
 static CUtlVector< WorldOccluder_t > s_Occluders;
 
 const WorldOccluder_t *DeferredWorldMesh_GetOccluders( int &nCount )
@@ -309,7 +311,8 @@ static int __cdecl CompareMeshes( const WMMesh_t *pA, const WMMesh_t *pB )
 
 static bool BuildWorldMeshes()
 {
-	const char *pszLevel = engine->GetLevelName();
+	// (engine->GetLevelName() cuts the name of a long map short)
+	const char *pszLevel = UTIL_GetLevelFileName();
 	if ( !pszLevel || !pszLevel[0] )
 		return false;
 
@@ -391,7 +394,9 @@ static bool BuildWorldMeshes()
 	// the occluders: which face each edge of the map belongs to, per wall (plane and side) - an
 	// edge two faces of one wall share is no silhouette
 	s_Occluders.RemoveAll();
-	CUtlVector< int > occluderEdges;		// per occluder: its WORLD_OCCLUDER_MAX_VERTS edge numbers
+	CUtlVector< int > occluderEdges;		// the map edges of each occluder's sides, in order
+	CUtlVector< int > occluderEdgeStart;	// per occluder: where its edges start in occluderEdges
+	CUtlVector< int > occluderEdgeSides;	// per side of each occluder (in order): how many edges it is made of
 	CUtlVector< int > occluderPlane;		// per occluder: plane * 2 + side
 	CUtlMap< uint64, int > edgeUse( DefLessFunc( uint64 ) );	// ( plane, side, edge ) -> faces using it
 
@@ -457,9 +462,10 @@ static bool BuildWorldMeshes()
 			continue;
 
 		WMFaceBasis_t basis;
+		// (planenum is the face's own plane - vbsp writes it so; side only says it is turned away
+		// from the plane of the node that holds the face. Flipped by side, half the walls of a
+		// map faced away from the eye and were never occluders.)
 		basis.vecNormal = planes[ face.planenum ].normal;
-		if ( face.side )
-			basis.vecNormal = -basis.vecNormal;
 		basis.vecS.Init( ti.textureVecsTexelsPerWorldUnits[0][0], ti.textureVecsTexelsPerWorldUnits[0][1], ti.textureVecsTexelsPerWorldUnits[0][2] );
 		basis.vecT.Init( ti.textureVecsTexelsPerWorldUnits[1][0], ti.textureVecsTexelsPerWorldUnits[1][1], ti.textureVecsTexelsPerWorldUnits[1][2] );
 		basis.flOffsetS = ti.textureVecsTexelsPerWorldUnits[0][3];
@@ -544,6 +550,64 @@ static bool BuildWorldMeshes()
 					}
 				}
 			}
+
+			// HL2RPM: the triangles of an opaque displacement are walls for the occlusion culling
+			// too (the hills of an open map). Its edges inside the grid are seams; a triangle hides
+			// only from its front - the side of the base face (it is drawn one-sided).
+			if ( iGroup == GROUP_OPAQUE )
+			{
+				#define DISP_POS( i, j ) pBatch->verts[ iBase + ( i ) * nSide + ( j ) ].vecPos
+				Vector vecSum( 0, 0, 0 );
+				for ( int i = 0; i < nSide - 1; i++ )
+					for ( int j = 0; j < nSide - 1; j++ )
+						vecSum += CrossProduct( DISP_POS( i + 1, j ) - DISP_POS( i, j ), DISP_POS( i, j + 1 ) - DISP_POS( i, j ) );
+				const float flSign = ( DotProduct( vecSum, basis.vecNormal ) >= 0.0f ) ? 1.0f : -1.0f;
+				for ( int i = 0; i < nSide - 1; i++ )
+				{
+					for ( int j = 0; j < nSide - 1; j++ )
+					{
+						const Vector &a = DISP_POS( i, j ), &b = DISP_POS( i + 1, j ), &c = DISP_POS( i + 1, j + 1 ), &d = DISP_POS( i, j + 1 );
+						const bool bInAB = j > 0, bInBC = i + 1 < nSide - 1, bInCD = j + 1 < nSide - 1, bInDA = i > 0;
+						const Vector *pTris[2][3];
+						unsigned int nInner[2];
+						if ( ( i * nSide + j ) & 1 )
+						{
+							pTris[0][0] = &a; pTris[0][1] = &b; pTris[0][2] = &d;	// a-b, b-d (the diagonal), d-a
+							nInner[0] = ( bInAB ? 1u : 0u ) | 2u | ( bInDA ? 4u : 0u );
+							pTris[1][0] = &d; pTris[1][1] = &b; pTris[1][2] = &c;	// d-b (the diagonal), b-c, c-d
+							nInner[1] = 1u | ( bInBC ? 2u : 0u ) | ( bInCD ? 4u : 0u );
+						}
+						else
+						{
+							pTris[0][0] = &a; pTris[0][1] = &b; pTris[0][2] = &c;	// a-b, b-c, c-a (the diagonal)
+							nInner[0] = ( bInAB ? 1u : 0u ) | ( bInBC ? 2u : 0u ) | 4u;
+							pTris[1][0] = &a; pTris[1][1] = &c; pTris[1][2] = &d;	// a-c (the diagonal), c-d, d-a
+							nInner[1] = 1u | ( bInCD ? 2u : 0u ) | ( bInDA ? 4u : 0u );
+						}
+						for ( int t = 0; t < 2; t++ )
+						{
+							const Vector &p0 = *pTris[t][0], &p1 = *pTris[t][1], &p2 = *pTris[t][2];
+							Vector vecN = CrossProduct( p1 - p0, p2 - p0 );
+							const float flTriArea = VectorNormalize( vecN ) * 0.5f;
+							if ( flTriArea < WORLD_OCCLUDER_MIN_DISP_AREA )
+								continue;
+							WorldOccluder_t &occ = s_Occluders[ s_Occluders.AddToTail() ];
+							occ.nVerts = 3;
+							occ.vecVerts[0] = p0; occ.vecVerts[1] = p1; occ.vecVerts[2] = p2;
+							occ.vecCenter = ( p0 + p1 + p2 ) / 3.0f;
+							occ.vecNormal = vecN * flSign;
+							occ.flArea = flTriArea;
+							occ.nInnerEdges = nInner[t];
+							// (no wall seams to look up: -1)
+							occluderPlane.AddToTail( -1 );
+							occluderEdgeStart.AddToTail( occluderEdges.Count() );
+							for ( int k = 0; k < 3; k++ )
+								occluderEdgeSides.AddToTail( 0 );
+						}
+					}
+				}
+				#undef DISP_POS
+			}
 			nDisps++;
 			continue;
 		}
@@ -557,34 +621,91 @@ static bool BuildWorldMeshes()
 		vecCenter /= (float)poly.Count();
 
 		// a wall for the occlusion culling: opaque, flat, large
-		if ( iGroup == GROUP_OPAQUE && poly.Count() <= WORLD_OCCLUDER_MAX_VERTS )
+		if ( iGroup == GROUP_OPAQUE )
 		{
 			Vector vecCross( 0, 0, 0 );
 			for ( int k = 1; k < poly.Count() - 1; k++ )
 				vecCross += CrossProduct( poly[k].vecPos - poly[0].vecPos, poly[k + 1].vecPos - poly[0].vecPos );
 			const float flArea = vecCross.Length() * 0.5f;
-			if ( flArea >= WORLD_OCCLUDER_MIN_AREA )
+			const int iPlaneSide = face.planenum * 2 + ( face.side ? 1 : 0 );
+
+			// every edge of the face counts towards the seams of its wall
+			for ( int k = 0; k < poly.Count(); k++ )
+			{
+				const uint64 key = ( (uint64)iPlaneSide << 32 ) | (uint64)(unsigned int)abs( surfedges[ face.firstedge + k ] );
+				const unsigned short idx = edgeUse.Find( key );
+				if ( idx == edgeUse.InvalidIndex() )
+					edgeUse.Insert( key, 1 );
+				else
+					edgeUse[ idx ]++;
+			}
+
+			// The corners on a straight side go: vbsp puts one wherever another brush meets the
+			// side (t-junctions), and a long wall had dozens - more than an occluder holds. A
+			// corner is dropped only where that does not make the wall larger than it is (a
+			// convex one, or one off the side by less than a hair). A side made of several edges
+			// is a seam only if all of them are.
+			int nCorners = poly.Count();
+			int iCorner[ 64 ];
+			int nSideEdges[ 64 ];		// the edges from corner k to the next one kept
+			bool bOccluder = nCorners <= 64 && flArea >= WORLD_OCCLUDER_MIN_AREA;
+			if ( bOccluder )
+			{
+				for ( int k = 0; k < nCorners; k++ )
+				{
+					iCorner[k] = k;
+					nSideEdges[k] = 1;
+				}
+				const Vector vecTurn = vecCross;	// (the winding's own normal: its turns are convex this way)
+				bool bDropped = true;
+				while ( bDropped && nCorners > 3 )
+				{
+					bDropped = false;
+					for ( int k = 0; k < nCorners && nCorners > 3; k++ )
+					{
+						const Vector &a = poly[ iCorner[ ( k + nCorners - 1 ) % nCorners ] ].vecPos;
+						const Vector &b = poly[ iCorner[k] ].vecPos;
+						const Vector &c = poly[ iCorner[ ( k + 1 ) % nCorners ] ].vecPos;
+						const Vector vecAC = c - a;
+						const float flLen = vecAC.Length();
+						if ( flLen < 0.01f )
+							continue;
+						const Vector vecTurnB = CrossProduct( b - a, c - b );
+						const float flOff = vecTurnB.Length() / flLen;	// how far b is from the line a-c
+						const bool bConvex = DotProduct( vecTurnB, vecTurn ) >= 0.0f;
+						if ( !( ( bConvex && flOff <= 0.3f ) || flOff <= 0.02f ) || DotProduct( b - a, c - b ) <= 0.0f )
+							continue;
+						// the side before b takes over b's
+						const int iPrev = ( k + nCorners - 1 ) % nCorners;
+						nSideEdges[ iPrev ] += nSideEdges[k];
+						for ( int m = k; m < nCorners - 1; m++ )
+						{
+							iCorner[m] = iCorner[ m + 1 ];
+							nSideEdges[m] = nSideEdges[ m + 1 ];
+						}
+						nCorners--;
+						k--;
+						bDropped = true;
+					}
+				}
+				bOccluder = nCorners <= WORLD_OCCLUDER_MAX_VERTS;
+			}
+			if ( bOccluder )
 			{
 				WorldOccluder_t &occ = s_Occluders[ s_Occluders.AddToTail() ];
-				occ.nVerts = poly.Count();
+				occ.nVerts = nCorners;
 				occ.vecCenter = vecCenter;
 				occ.vecNormal = basis.vecNormal;
 				occ.flArea = flArea;
 				occ.nInnerEdges = 0;
-				const int iPlaneSide = face.planenum * 2 + ( face.side ? 1 : 0 );
 				occluderPlane.AddToTail( iPlaneSide );
-				const int iEdgeBase = occluderEdges.AddMultipleToTail( WORLD_OCCLUDER_MAX_VERTS );
-				for ( int k = 0; k < poly.Count(); k++ )
+				occluderEdgeStart.AddToTail( occluderEdges.Count() );
+				for ( int k = 0; k < nCorners; k++ )
 				{
-					occ.vecVerts[k] = poly[k].vecPos;
-					const int iEdge = abs( surfedges[ face.firstedge + k ] );
-					occluderEdges[ iEdgeBase + k ] = iEdge;
-					const uint64 key = ( (uint64)iPlaneSide << 32 ) | (uint64)(unsigned int)iEdge;
-					const unsigned short idx = edgeUse.Find( key );
-					if ( idx == edgeUse.InvalidIndex() )
-						edgeUse.Insert( key, 1 );
-					else
-						edgeUse[ idx ]++;
+					occ.vecVerts[k] = poly[ iCorner[k] ].vecPos;
+					occluderEdgeSides.AddToTail( nSideEdges[k] );
+					for ( int m = 0; m < nSideEdges[k]; m++ )
+						occluderEdges.AddToTail( abs( surfedges[ face.firstedge + ( iCorner[k] + m ) % poly.Count() ] ) );
 				}
 			}
 		}
@@ -601,14 +722,27 @@ static bool BuildWorldMeshes()
 		nFaces++;
 	}
 
-	for ( int i = 0; i < s_Occluders.Count(); i++ )
+	for ( int i = 0, iSide = 0; i < s_Occluders.Count(); i++ )
 	{
 		WorldOccluder_t &occ = s_Occluders[i];
-		for ( int k = 0; k < occ.nVerts; k++ )
+		if ( occluderPlane[i] < 0 )
 		{
-			const uint64 key = ( (uint64)occluderPlane[i] << 32 ) | (uint64)(unsigned int)occluderEdges[ i * WORLD_OCCLUDER_MAX_VERTS + k ];
-			const unsigned short idx = edgeUse.Find( key );
-			if ( idx != edgeUse.InvalidIndex() && edgeUse[ idx ] > 1 )
+			// (a triangle of a displacement: its seams are known already)
+			iSide += occ.nVerts;
+			continue;
+		}
+		int iEdge = occluderEdgeStart[i];
+		for ( int k = 0; k < occ.nVerts; k++, iSide++ )
+		{
+			bool bInner = true;
+			for ( int m = 0; m < occluderEdgeSides[ iSide ]; m++, iEdge++ )
+			{
+				const uint64 key = ( (uint64)occluderPlane[i] << 32 ) | (uint64)(unsigned int)occluderEdges[ iEdge ];
+				const unsigned short idx = edgeUse.Find( key );
+				if ( idx == edgeUse.InvalidIndex() || edgeUse[ idx ] <= 1 )
+					bInner = false;
+			}
+			if ( bInner )
 				occ.nInnerEdges |= ( 1u << k );
 		}
 	}

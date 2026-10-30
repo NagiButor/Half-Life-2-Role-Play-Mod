@@ -332,7 +332,8 @@ void CVGUILightEditor_Controls::BuildVmfPath( char *pszOut, int maxlen, bool bMa
 
 bool CVGUILightEditor_Controls::BuildCurrentVmfPath( char *pszOut, int maxlen )
 {
-	const char *pszLevelname = engine->GetLevelName();
+	// HL2RPM: (engine->GetLevelName() cuts the name of a long map short)
+	const char *pszLevelname = UTIL_GetLevelFileName();
 
 	if ( !pszLevelname || !*pszLevelname )
 		return false;

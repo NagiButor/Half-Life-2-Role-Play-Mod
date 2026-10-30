@@ -254,7 +254,10 @@ SpewRetval_t CmdLib_SpewOutputFunc( SpewType_t type, char const *pMsg )
 		else if( type == SPEW_ASSERT )
 		{
 			old = SetConsoleTextColor( 1, 0, 0, 1 );
-			retVal = SPEW_DEBUGGER;
+			// HL2RPM: the libraries the tools link (mathlib.lib) are built with their asserts in:
+			// without a debugger an assert used to stop the compile with a modal "Assertion Failed"
+			// window (vrad, a light brighter than the lightmap format holds). It goes to the log.
+			retVal = Plat_IsInDebugSession() ? SPEW_DEBUGGER : SPEW_CONTINUE;
 
 #ifdef MPI
 			// VMPI workers don't want to bring up dialogs and suchlike.
@@ -292,26 +295,45 @@ SpewRetval_t CmdLib_SpewOutputFunc( SpewType_t type, char const *pMsg )
 			retVal = SPEW_CONTINUE;
 		}
 
-		if ( !g_bSuppressPrintfOutput || type == SPEW_ERROR )
-			printf( "%s", pMsg );
-
-		OutputDebugString( pMsg );
-		
-		if ( type == SPEW_ERROR )
+		// HL2RPM: an assert that went to the log once is not repeated (vrad hit the same one
+		// hundreds of times a compile)
+		bool bRepeat = false;
+		if ( type == SPEW_ASSERT && retVal != SPEW_DEBUGGER )
 		{
-			printf( "\n" );
-			OutputDebugString( "\n" );
+			static unsigned int s_AssertHashes[256];
+			static int s_nAssertHashes = 0;
+			unsigned int nHash = 2166136261u;
+			for ( const char *p = pMsg; *p; p++ )
+				nHash = ( nHash ^ (unsigned char)*p ) * 16777619u;
+			for ( int i = 0; i < s_nAssertHashes && !bRepeat; i++ )
+				bRepeat = ( s_AssertHashes[i] == nHash );
+			if ( !bRepeat && s_nAssertHashes < 256 )
+				s_AssertHashes[ s_nAssertHashes++ ] = nHash;
 		}
 
-		if( g_pLogFile )
+		if ( !bRepeat )
 		{
-			CmdLib_FPrintf( g_pLogFile, "%s", pMsg );
-			g_pFileSystem->Flush( g_pLogFile );
-		}
+			if ( !g_bSuppressPrintfOutput || type == SPEW_ERROR )
+				printf( "%s", pMsg );
 
-		// Dispatch to other spew hooks.
-		FOR_EACH_LL( g_ExtraSpewHooks, i )
-			g_ExtraSpewHooks[i]( pMsg );
+			OutputDebugString( pMsg );
+
+			if ( type == SPEW_ERROR )
+			{
+				printf( "\n" );
+				OutputDebugString( "\n" );
+			}
+
+			if( g_pLogFile )
+			{
+				CmdLib_FPrintf( g_pLogFile, "%s", pMsg );
+				g_pFileSystem->Flush( g_pLogFile );
+			}
+
+			// Dispatch to other spew hooks.
+			FOR_EACH_LL( g_ExtraSpewHooks, i )
+				g_ExtraSpewHooks[i]( pMsg );
+		}
 
 		RestoreConsoleTextColor( old );
 	}

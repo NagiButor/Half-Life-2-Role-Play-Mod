@@ -615,7 +615,10 @@ void CLightingManager::CullLights()
 			continue;
 
 		// FIXME: inaccurate with e.g. angled lights, causes popping - performance impact when disabled
-		if ( !render->AreAnyLeavesVisible( l->iLeaveIDs, l->iNumLeaves ) && r_deferred_light_visleaf_cull.GetBool() )
+		// HL2RPM: (only with the whole list: it holds the first DEFLIGHT_MAX_LEAVES leaves - the
+		// leaves of a big lamp in an open map that are in view could be the ones left out)
+		const bool bAllLeaves = l->iNumLeaves < DEFLIGHT_MAX_LEAVES;
+		if ( bAllLeaves && !render->AreAnyLeavesVisible( l->iLeaveIDs, l->iNumLeaves ) && r_deferred_light_visleaf_cull.GetBool() )
 			continue;
 
 		// if the optimized bounds cause popping for you, use the naive ones or
@@ -629,6 +632,12 @@ void CLightingManager::CullLights()
 
 		// HL2RPM: all the light reaches is behind walls - no pass and no shadow maps for it
 		if ( DeferredOcclusion_IsBoxHidden( l->bounds_min_naive, l->bounds_max_naive ) )
+			continue;
+
+		// HL2RPM: the same leaf by leaf - the part of its reach within each leaf is hidden (a lamp
+		// in the next room or yard; one box over all it reaches is seldom hidden whole). On an open
+		// map without areaportals the visibility data alone lets the lamps of half the town through.
+		if ( bAllLeaves && DeferredOcclusion_AreLeafPartsHidden( l->iLeaveIDs, l->iNumLeaves, l->bounds_min, l->bounds_max ) )
 			continue;
 
 		if ( l->IsSpot() && l->HasShadow() )
