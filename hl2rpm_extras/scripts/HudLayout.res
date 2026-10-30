@@ -34,6 +34,26 @@
 		"digit_xpos" "60"
 		"digit_ypos" "-1"
 	}
+
+	// HL2RPM: without the HEV suit - a heart monitor in the place of the health box (hud_vitals.cpp)
+	HudVitals
+	{
+		"fieldName"		"HudVitals"
+		"xpos"	"16"
+		"ypos"	"432"
+		"wide"	"102"
+		"tall"  "36"
+		"visible" "1"
+		"enabled" "1"
+
+		"PaintBackgroundType"	"2"
+
+		"trace_inset_x"	"3"
+		"trace_inset_y"	"3"
+		"line_width"	"1.25"
+		"glow_width"	"3"
+		"baseline"	"0.55"
+	}
 	
 	HudSuit [$WIN32]
 	{

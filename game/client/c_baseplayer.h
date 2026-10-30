@@ -433,8 +433,9 @@ public:
 	// Data for only the local player
 	CNetworkVarEmbedded( CPlayerLocalData, m_Local );
 
-	// Suitless health overlay (received from server). 0..1 intensity used to tint screen and drive breathing sound.
-	float		m_flSuitlessHealthOverlay;
+	// HL2RPM: health is shown as a share of the maximum without the suit (hl2rpm_vitals.cpp)
+	int			m_iMaxHealth;
+	virtual int	GetMaxHealth() const { return m_iMaxHealth; }
 
 #if defined USES_ECON_ITEMS
 	CNetworkVarEmbedded( CAttributeList, m_AttributeList );
@@ -450,12 +451,6 @@ public:
 	int						m_iDefaultFOV;		// default FOV if no other zooms are occurring
 	EHANDLE					m_hZoomOwner;		// This is a pointer to the entity currently controlling the player's zoom
 												// Only this entity can change the zoom state once it has ownership
-
-		// True when the client-side suitless breathing sound is currently playing
-		bool	m_bPlayingSuitlessBreath;
-
-		// GUID returned by enginesound for the last ambient breathe sound emitted
-		int		m_nSuitlessBreathGuid;
 
 	// For weapon prediction
 	bool			m_fOnTarget;		//Is the crosshair on a target?

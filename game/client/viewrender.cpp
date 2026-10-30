@@ -87,6 +87,7 @@
 
 // HL2RPM: the fog takes the color of the weather / time of day
 #include "weather/weather_render.h"
+#include "hl2rpm_vitals.h"
 #include "deferred/deferred_worldlists.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -2276,6 +2277,10 @@ void CViewRender::RenderView( const CViewSetup &view, int nClearFlags, int whatT
 
 		// Draw an overlay to make it even harder to see inside smoke particle systems.
 		DrawSmokeFogOverlay();
+
+		// HL2RPM: the view of a wounded man without the suit (hl2rpm_vitals.cpp), under the fade
+		if ( !building_cubemaps.GetBool() && view.m_bDoBloomAndToneMapping )
+			HL2RPM_Vitals_DrawScreenEffect( view.x, view.y, view.width, view.height );
 
 		// Overlay screen fade on entire screen
 		IMaterial* pMaterial = blend ? m_ModulateSingleColor : m_TranslucentSingleColor;

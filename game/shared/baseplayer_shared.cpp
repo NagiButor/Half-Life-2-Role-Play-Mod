@@ -21,6 +21,7 @@
 	#include "c_world.h"
 	#include "view.h"
 	#include "client_virtualreality.h"
+	#include "hl2rpm_vitals.h"
 	#define CRecipientFilter C_RecipientFilter
 	#include "sourcevr/isourcevirtualreality.h"
 
@@ -1663,6 +1664,9 @@ void CBasePlayer::CalcPlayerView( Vector& eyeOrigin, QAngle& eyeAngles, float& f
 		// Shake it up baby!
 		vieweffects->CalcShake();
 		vieweffects->ApplyShake( eyeOrigin, eyeAngles, 1.0 );
+
+		// HL2RPM: badly hurt without the suit the view sways (hl2rpm_vitals.cpp)
+		HL2RPM_Vitals_ApplyView( eyeAngles );
 	}
 #endif
 

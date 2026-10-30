@@ -942,6 +942,7 @@ public:
 
 	IMPLEMENT_NETWORK_VAR_FOR_DERIVED( m_lifeState );
 	IMPLEMENT_NETWORK_VAR_FOR_DERIVED( m_iHealth );
+	IMPLEMENT_NETWORK_VAR_FOR_DERIVED( m_iMaxHealth );	// HL2RPM: the share of health without the suit (hl2rpm_vitals.cpp)
 	IMPLEMENT_NETWORK_VAR_FOR_DERIVED( m_vecBaseVelocity );
 	IMPLEMENT_NETWORK_VAR_FOR_DERIVED( m_nNextThinkTick );
 	IMPLEMENT_NETWORK_VAR_FOR_DERIVED( m_vecVelocity );
@@ -1167,9 +1168,7 @@ private:
 
 // Replicated to all clients
 	CNetworkVar( float, m_flMaxspeed );
-	// Suitless health overlay intensity (0.0 - 1.0). Transmitted so client can draw screen tint and breathing.
-	CNetworkVar( float, m_flSuitlessHealthOverlay );
-	
+
 // Not transmitted
 	float					m_flWaterJumpTime;  // used to be called teleport_time
 	Vector					m_vecWaterJumpVel;

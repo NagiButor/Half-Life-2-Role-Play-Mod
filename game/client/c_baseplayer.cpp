@@ -70,9 +70,6 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-#include "health_sync.h"
-#include "../shared/sound_channels.h"
-
 // Don't alias here
 #if defined( CBasePlayer )
 #undef CBasePlayer	
@@ -81,9 +78,6 @@
 int g_nKillCamMode = OBS_MODE_NONE;
 int g_nKillCamTarget1 = 0;
 int g_nKillCamTarget2 = 0;
-
-ConVar cl_suitless_blink_freq( "cl_suitless_blink_freq", "1.0", FCVAR_ARCHIVE, "Suitless overlay blink frequency (Hz)" );
-ConVar cl_suitless_blink_intensity( "cl_suitless_blink_intensity", "0.75", FCVAR_ARCHIVE, "Suitless overlay intensity multiplier" );
 
 extern ConVar mp_forcecamera; // in gamevars_shared.h
 
@@ -345,7 +339,7 @@ END_RECV_TABLE()
 		RecvPropInt		(RECVINFO(m_iBonusChallenge)),
 
 		RecvPropFloat	(RECVINFO(m_flMaxspeed)),
-		RecvPropFloat	(RECVINFO(m_flSuitlessHealthOverlay)),
+		RecvPropInt		(RECVINFO(m_iMaxHealth)),
 		RecvPropInt		(RECVINFO(m_fFlags)),
 
 
@@ -507,8 +501,7 @@ C_BasePlayer::C_BasePlayer() : m_iv_vecViewOffset( "C_BasePlayer::m_iv_vecViewOf
 
 	m_bFiredWeapon = false;
 
-	// suitless overlay defaults
-	m_flSuitlessHealthOverlay = 0.0f;
+	m_iMaxHealth = 100;
 
 	m_nForceVisionFilterFlags = 0;
 
@@ -1099,81 +1092,6 @@ void C_BasePlayer::OnDataChanged( DataUpdateType_t updateType )
 		if ( m_hOldFogController != m_Local.m_PlayerFog.m_hCtrl )
 		{
 			FogControllerChanged( updateType == DATA_UPDATE_CREATED );
-		}
-	}
-
-	// If the suitless overlay intensity changed, apply a screen tint and breathing sound for the local player
-	if ( IsLocalPlayer() )
-	{
-		// Clamp to valid range
-		float flIntensity = clamp( m_flSuitlessHealthOverlay, 0.0f, 1.0f );
-		// client-tweakable blink frequency and intensity multiplier
-		extern ConVar cl_suitless_blink_freq;
-		extern ConVar cl_suitless_blink_intensity;
-
-		if ( flIntensity > 0.001f )
-		{
-			DevMsg( "[SuitlessOverlay] local intensity %.3f\n", flIntensity );
-			// Use vieweffects to apply a short, updated screen fade. This will be called every update when intensity changes.
-			ScreenFade_t sf;
-			memset( &sf, 0, sizeof( sf ) );
-			// small duration so we can refresh it each tick
-			sf.duration = (float)(1<<SCREENFADE_FRACBITS) * 0.06f;
-			sf.holdTime = 0;
-			sf.fadeFlags = FFADE_IN | FFADE_PURGE;
-			sf.r = 255;
-			sf.g = 0;
-			sf.b = 0;
-			// Apply a pulse synchronized to the HUD's HealthLow animation if available.
-			// Resource timings from scripts/hudanimations.txt: initial delay = 1.0s, loop period = 0.8s
-			const float kInitialDelay = 1.0f;
-			const float kLoopPeriod = 0.8f;
-			float mult = clamp( cl_suitless_blink_intensity.GetFloat(), 0.0f, 1.0f );
-			float finalIntensity = 0.0f;
-			float flHealthLowStart = GetHealthLowStartTime();
-			#ifndef M_PI
-			#define M_PI 3.14159265358979323846f
-			#endif
-			if ( flHealthLowStart >= 0.0f )
-			{
-				float elapsed = gpGlobals->curtime - ( flHealthLowStart + kInitialDelay );
-				if ( elapsed >= 0.0f )
-				{
-					float phase = fmodf( elapsed, kLoopPeriod ) / kLoopPeriod;
-					float pulse = 0.5f * ( 1.0f + sinf( 2.0f * (float)M_PI * phase ) );
-					finalIntensity = flIntensity * mult * pulse;
-				}
-				else
-				{
-					// ramp up towards the first scheduled pulse
-					float ramp = clamp( ( gpGlobals->curtime - flHealthLowStart ) / kInitialDelay, 0.0f, 1.0f );
-					finalIntensity = flIntensity * mult * ( 0.5f * ramp );
-				}
-			}
-			else
-			{
-				// fallback to user-configurable frequency when HUD timing unknown
-				float freq = clamp( cl_suitless_blink_freq.GetFloat(), 0.1f, 10.0f );
-				float pulse = 0.5f * ( 1.0f + sinf( 2.0f * (float)M_PI * freq * gpGlobals->curtime ) );
-				finalIntensity = flIntensity * mult * pulse;
-			}
-			sf.a = (unsigned char)( finalIntensity * 255.0f );
-			vieweffects->Fade( sf );
-
-			// Play breathing sound with volume proportional to intensity (base, not pulsed).
-			// Use CHAN_ITEM (not CHAN_BODY) so footstep sounds (CHAN_BODY) are not overridden.
-			EmitSound_t params;
-			params.m_pSoundName = "player/breathe1.wav";
-			params.m_flVolume = flIntensity * mult; // 0..1
-			params.m_nChannel = CHAN_BREATHING;
-			CPASAttenuationFilter filter( this, params.m_pSoundName );
-			C_BaseEntity::EmitSound( filter, GetSoundSourceIndex(), params );
-		}
-		else
-		{
-			// stop breathing sound when intensity goes to zero
-			// Call StopSound with channel so raw .wav playback is stopped correctly.
-			C_BaseEntity::StopSound( GetSoundSourceIndex(), CHAN_BREATHING, "player/breathe1.wav" );
 		}
 	}
 }

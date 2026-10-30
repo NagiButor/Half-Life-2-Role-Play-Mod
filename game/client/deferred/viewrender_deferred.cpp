@@ -42,6 +42,7 @@
 #include "deferred/deferred_occlusion.h"
 #include "detailobjectsystem.h"
 #include "c_func_reflective_glass.h"
+#include "hl2rpm_vitals.h"
 
 #include "vgui_int.h"
 #include "vgui/IPanel.h"
@@ -4443,6 +4444,11 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	// HL2RPM: eye adaptation, bloom, grading, lens effects (the HUD comes after)
 	if ( !building_cubemaps.GetBool() )
 		DeferredPostFX_Draw( worldView );
+
+	// HL2RPM: the view of a wounded man without the suit - red edges, vessels, clouding
+	// (hl2rpm_vitals.cpp); on the finished frame, under the engine's fades and the HUD
+	if ( !building_cubemaps.GetBool() && worldView.m_bDoBloomAndToneMapping )
+		HL2RPM_Vitals_DrawScreenEffect( worldView.x, worldView.y, worldView.width, worldView.height );
 
 	// Overlay screen fade on entire screen (see above: on the finished frame)
 	{

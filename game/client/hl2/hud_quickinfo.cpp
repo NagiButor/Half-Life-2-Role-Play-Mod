@@ -273,9 +273,13 @@ void CHUDQuickInfo::Paint()
 			{
 				m_healthFade = 255;
 				m_warnHealth = true;
-				
-				CLocalPlayerFilter filter;
-				C_BaseEntity::EmitSound( filter, SOUND_FROM_LOCAL_PLAYER, "HUDQuickInfo.LowHealth" );
+
+				// HL2RPM: the suit's warning - without the suit the heart says it (hl2rpm_vitals.cpp)
+				if ( player->IsSuitEquipped() )
+				{
+					CLocalPlayerFilter filter;
+					C_BaseEntity::EmitSound( filter, SOUND_FROM_LOCAL_PLAYER, "HUDQuickInfo.LowHealth" );
+				}
 			}
 		}
 		else

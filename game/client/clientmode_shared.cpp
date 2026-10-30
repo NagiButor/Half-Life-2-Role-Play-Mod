@@ -76,6 +76,8 @@ extern ConVar replay_rendersetting_renderglow;
 #include "clienteffectprecachesystem.h"
 #endif
 
+#include "hl2rpm_vitals.h"
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -589,6 +591,9 @@ bool ClientModeShared::CreateMove( float flInputSampleTime, CUserCmd *cmd )
 
 	// Let the player at it
 	bool bRet = pPlayer->CreateMove( flInputSampleTime, cmd );
+
+	// HL2RPM: badly hurt without the suit the aim wanders a little (hl2rpm_vitals.cpp)
+	HL2RPM_Vitals_CreateMove( bRet ? cmd : NULL );
 
 	CVGuiLootPanel *pLoot = GetGlobalLootPanel();
 	if ( cmd && pLoot && pLoot->IsVisible() )

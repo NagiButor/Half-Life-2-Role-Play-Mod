@@ -331,7 +331,6 @@ BEGIN_DATADESC( CBasePlayer )
 	// DEFINE_FIELD( m_PlayerInfo, CPlayerInfo ),
 
 	DEFINE_FIELD( m_flSwimTime, FIELD_TIME ),
-	DEFINE_FIELD( m_flSuitlessHealthOverlay, FIELD_FLOAT ),
 	DEFINE_FIELD( m_flDuckTime, FIELD_TIME ),
 	DEFINE_FIELD( m_flDuckJumpTime, FIELD_TIME ),
 
@@ -760,8 +759,6 @@ CBasePlayer::CBasePlayer( )
 	m_impactEnergyScale = 1.0f;
 	m_fLastPlayerTalkTime = 0.0f;
 
-	// suitless overlay defaults
-	m_flSuitlessHealthOverlay = 0.0f;
 	m_PlayerInfo.SetParent( this );
 
 	ResetObserverMode();
@@ -4941,59 +4938,6 @@ void CBasePlayer::PostThink()
 		UpdatePlayerSound();
 		VPROF_SCOPE_END();
 
-		// Update suitless health overlay each tick: only when alive and not wearing suit
-		{
-			float flNewOverlay = 0.0f;
-			if ( IsAlive() )
-			{
-				if ( !IsSuitEquipped() )
-				{
-					float flHealth = (float)GetHealth();
-					float flMax = (float)GetMaxHealth();
-					if ( flMax > 0.0f )
-					{
-							float flRatio = flHealth / flMax;
-							flRatio = clamp( flRatio, 0.0f, 1.0f );
-							// Only show suitless overlay when health is below 60%
-							if ( flRatio < 0.60f )
-							{
-								// intensity increases as health decreases
-								flNewOverlay = 1.0f - flRatio;
-							}
-							else
-							{
-								flNewOverlay = 0.0f;
-							}
-					}
-					else
-					{
-						flNewOverlay = 1.0f;
-					}
-				}
-				else
-				{
-					flNewOverlay = 0.0f;
-				}
-			}
-			else
-			{
-				flNewOverlay = 0.0f;
-			}
-
-			// Normalize very small values to zero to avoid client-side blinking
-			if ( flNewOverlay < 0.005f )
-			{
-				flNewOverlay = 0.0f;
-			}
-
-			// Only update networked value when it changed noticeably
-			if ( fabsf( m_flSuitlessHealthOverlay - flNewOverlay ) > 0.001f )
-			{
-				m_flSuitlessHealthOverlay = flNewOverlay;
-				DevMsg( "[SuitlessOverlay] player %d overlay=%.3f\n", entindex(), m_flSuitlessHealthOverlay );
-			}
-		}
-
 		if ( m_bForceOrigin )
 		{
 			SetLocalOrigin( m_vForcedOrigin );
@@ -5244,8 +5188,6 @@ CBaseEntity *CBasePlayer::EntSelectSpawnPoint()
 		}
 	}
 
-	// NOTE: suitless overlay update moved to PostThink so it updates each tick
-
 	// If startspot is set, (re)spawn there.
 	if ( !gpGlobals->startspot || !strlen(STRING(gpGlobals->startspot)))
 	{
@@ -5347,9 +5289,6 @@ void CBasePlayer::Spawn( void )
 
 	// Shared spawning code..
 	SharedSpawn();
-
-	// Ensure breathing sound is precached so clients can play it for suitless overlay
-	CBaseEntity::PrecacheScriptSound("player/breathe1.wav");
 	
 	SetSimulatedEveryTick( true );
 	SetAnimatedEveryTick( true );
@@ -9034,8 +8973,8 @@ void SendProxy_ShiftPlayerSpawnflags( const SendProp *pProp, const void *pStruct
 		SendPropInt		(SENDINFO(m_iBonusProgress), 15 ),
 		SendPropInt		(SENDINFO(m_iBonusChallenge), 4 ),
 		SendPropFloat	(SENDINFO(m_flMaxspeed), 12, SPROP_ROUNDDOWN, 0.0f, 2048.0f ),  // CL
-		// Transmit suitless health overlay intensity (0..1)
-		SendPropFloat	(SENDINFO(m_flSuitlessHealthOverlay), 0, SPROP_NOSCALE ),
+		// HL2RPM: the client shows health as a share of the maximum (hl2rpm_vitals.cpp)
+		SendPropInt		(SENDINFO(m_iMaxHealth), -1, SPROP_VARINT | SPROP_UNSIGNED ),
 		SendPropInt		(SENDINFO(m_fFlags), PLAYER_FLAG_BITS, SPROP_UNSIGNED|SPROP_CHANGES_OFTEN, SendProxy_CropFlagsToPlayerFlagBitsLength ),
 		SendPropInt		(SENDINFO(m_iObserverMode), 3, SPROP_UNSIGNED ),
 		SendPropEHandle	(SENDINFO(m_hObserverTarget) ),

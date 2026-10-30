@@ -53,6 +53,7 @@ hl2rpm_lum_ps30.fxc
 hl2rpm_bloom_ps30.fxc
 hl2rpm_postfx_ps30.fxc
 hl2rpm_dof_ps30.fxc
+hl2rpm_lowhealth_ps30.fxc
 hl2rpm_taa_ps30.fxc
 hl2rpm_depthalpha_ps30.fxc
 weather_motes_vs30.fxc

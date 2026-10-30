@@ -852,6 +852,7 @@ if ERRORLEVEL 1 exit /b 1
     <ClInclude Include="..\..\game\shared\hl2\hl_gamemovement.h" />
     <ClInclude Include="hl2\hud_radar.h" />
     <ClInclude Include="hl2\hud_suitpower.h" />
+    <ClInclude Include="hl2rpm_vitals.h" />
     <ClInclude Include="..\..\game\shared\episodic\npc_advisor_shared.h" />
     <ClInclude Include="..\..\game\shared\hl2mp\weapon_slam.h" />
     <ClInclude Include="mapbase\c_func_fake_worldportal.h" />
@@ -1145,6 +1146,7 @@ if ERRORLEVEL 1 exit /b 1
     </ClCompile>
     <ClCompile Include="hl2rpm_crashhandler_client.cpp" />
     <ClCompile Include="hl2rpm_options_graphics.cpp" />
+    <ClCompile Include="hl2rpm_vitals.cpp" />
     <ClCompile Include="..\..\public\tier0\memoverride.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
@@ -1409,6 +1411,7 @@ if ERRORLEVEL 1 exit /b 1
     <ClCompile Include="hl2\hud_damageindicator.cpp" />
     <ClCompile Include="hl2\hud_flashlight.cpp" />
     <ClCompile Include="hl2\hud_health.cpp" />
+    <ClCompile Include="hl2\hud_vitals.cpp" />
     <ClCompile Include="hl2\hud_locator.cpp" />
     <ClCompile Include="hl2\hud_poisondamageindicator.cpp" />
     <ClCompile Include="hud_posture.cpp" />

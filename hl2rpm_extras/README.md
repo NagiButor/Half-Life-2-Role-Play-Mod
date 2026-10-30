@@ -21,6 +21,7 @@
 | `generate_weather_sounds.py <папка>` | синтезирует петли дождя/ветра для `sound\hl2rpm\weather\` |
 | `make_thunder.py` | режет записи грома из `E:\SourceModding\ProceduralWeatherAndSkyPromt\lighting sounds` (нужен ffmpeg) в `sound\hl2rpm\weather\thunder\close_*/mid_*/far_*.wav` |
 | `make_lightning_tex.py` | генерирует `materials\hl2rpm\weather\lightning_glow.vtf` + `lightning_bolt.vmt` (канал молнии) |
+| `make_vitals_assets.py [--seed N] [--preview]` | ассеты «раненого» взгляда без костюма (`hl2rpm_vitals.cpp`, `hl2rpm_lowhealth_ps30`): `materials\hl2rpm\effects\lowhealth_veins.vtf` (вены от краёв экрана: r — сосуды, g — порядок появления, b — пятна края красноты, a — ореол) и `sound\hl2rpm\player\heartbeat_once.wav` (один удар из зацикленного стокового `player/heartbeat1.wav`) |
 | `add_loc_tokens.py` | вписывает токены `#HL2RPM_*` в `resource\hl2rpm_<язык>.txt` мода (UTF-16LE с BOM, делает `.bak_`) — после запуска скопировать файлы в `resource/` здесь |
 | `fgdcheck.py <fgd>...` | упрощённая проверка FGD в порядке загрузки Hammer (скобки, неизвестные base-классы) |
 | `install_compilers.ps1 [-NoBuild]` | собирает компиляторы карт мода (форк vbsp/vvis/vrad Mapbase в `utils/`) и ставит их в `bin` SDK как `hl2rpm_vbsp/vvis/vrad.exe` (+ `hl2rpm_*_dll.dll`); их запускают Hammer++ и `compile_map.ps1` |
