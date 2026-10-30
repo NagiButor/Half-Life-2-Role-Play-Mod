@@ -62,7 +62,6 @@ public:
 	CInterpolatedVar< QAngle >	m_iv_vecPunchAngleVel;
 	bool					m_bDrawViewmodel;
 	bool					m_bWearingSuit;
-	int						m_iSuitType;		// HL2RPM: RPGSuitType_t (hl2rpm/rpg_shared.h)
 	bool					m_bPoisoned;
 	float					m_flStepSize;
 	bool					m_bAllowAutoMovement;

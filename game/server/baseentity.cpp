@@ -81,7 +81,6 @@
 #include "dialogsystem_server.h"
 // Dialog definitions (for checking whether an entity has a dialog)
 #include "dialog_definitions.h"
-#include "hl2rpm/rpg_dialog.h"
 
 extern bool g_bTestMoveTypeStepSimulation;
 extern ConVar sv_vehicle_autoaim_scale;
@@ -2849,7 +2848,8 @@ void CBaseEntity::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE u
 		const char *ename = GetEntityName().ToCStr();
 		if ( ename && ename[0] )
 		{
-			if ( RPGDialog::Has( ename ) || ( IsNPC() && RPGDialog::HasFor( this ) ) )	// HL2RPM: диалоги v2
+			const DialogDefinitions::DSDialog *dlg = DialogDefinitions::FindDialogForEntity( ename );
+			if ( dlg )
 			{
 				CBasePlayer *pPlayer = ToBasePlayer( pActivator );
 				if ( pPlayer )

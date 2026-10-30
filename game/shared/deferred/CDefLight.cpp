@@ -390,35 +390,18 @@ bool CDeferredLight::IsInTimeWindow( float hour ) const
 void CDeferredLight::UpdateEnabledFromTime()
 {
 	CEnvTimecycle *tc = GetTimecycle();
-	// HL2RPM: no env_timecycle on the map - the world clock (it keeps running across maps), and
-	// without any clock the light simply burns (it used to stay dark forever)
-	float flClockHours = 0.0f;
-	if ( !tc && WorldClock_GetHours( flClockHours ) )
-	{
-		const bool shouldEnable = IsInTimeWindow( flClockHours ) && m_bSwitchedOn;
-		const bool currentlyEnabled = ( m_iDefFlags & ( DEFLIGHT_ENABLED | DEFLIGHT_VOLUMETRICS_ENABLED | DEFLIGHT_SHADOW_ENABLED ) ) != 0;
-		if ( shouldEnable != m_bLastTimeEnabled || currentlyEnabled != shouldEnable )
-		{
-			m_bLastTimeEnabled = shouldEnable;
-			if ( shouldEnable )
-				m_iDefFlags = m_iDefFlagsBase | DEFLIGHT_ENABLED;
-			else
-				m_iDefFlags = m_iDefFlagsBase & ~DEFLIGHT_ENABLED;
-			NetworkStateChanged();
-		}
-		return;
-	}
 	if ( !tc )
 	{
-		const bool shouldEnable = m_bSwitchedOn;
+		const bool shouldEnable = false;
 		const bool currentlyEnabled = ( m_iDefFlags & ( DEFLIGHT_ENABLED | DEFLIGHT_VOLUMETRICS_ENABLED | DEFLIGHT_SHADOW_ENABLED ) ) != 0;
 		if ( shouldEnable != m_bLastTimeEnabled || currentlyEnabled != shouldEnable )
 		{
 			m_bLastTimeEnabled = shouldEnable;
-			if ( shouldEnable )
-				m_iDefFlags = m_iDefFlagsBase | DEFLIGHT_ENABLED;
-			else
-				m_iDefFlags = m_iDefFlagsBase & ~DEFLIGHT_ENABLED;
+			m_iDefFlags = m_iDefFlagsBase & ~DEFLIGHT_ENABLED;
+			if ( m_bTimeToggleShadows )
+				m_iDefFlags &= ~DEFLIGHT_SHADOW_ENABLED;
+			if ( m_bTimeToggleVolumetrics )
+				m_iDefFlags &= ~DEFLIGHT_VOLUMETRICS_ENABLED;
 			NetworkStateChanged();
 		}
 		return;

@@ -110,9 +110,6 @@ ConVar sv_bonus_challenge( "sv_bonus_challenge", "0", FCVAR_REPLICATED, "Set to 
 
 static ConVar sv_maxusrcmdprocessticks( "sv_maxusrcmdprocessticks", "24", FCVAR_NOTIFY, "Maximum number of client-issued usrcmd ticks that can be replayed in packet loss conditions, 0 to allow no restrictions" );
 
-#include "hl2rpm/rpg_law.h"
-#include "hl2rpm/rpg_dialog.h"
-
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -1278,10 +1275,6 @@ int CBasePlayer::OnTakeDamage( const CTakeDamageInfo &inputInfo )
 	}
 
 	if ( GetFlags() & FL_GODMODE )
-		return 0;
-
-	// HL2RPM: удар ГО, который уложил бы героя, - задержание (hl2rpm/rpg_law.cpp)
-	if ( RPG_Law_FilterPlayerDamage( this, info ) && info.GetDamage() <= 0.0f )
 		return 0;
 
 	if ( m_debugOverlays & OVERLAY_BUDDHA_MODE ) 
@@ -4050,7 +4043,7 @@ void CBasePlayer::PreThink(void)
 	// Quick-use dialog hook: if player pressed Use (E), attempt a short trace
 	// forward and start dialog if aimed at a named NPC. This is a safe fallback
 	// so designers don't need to modify every NPC Use implementation.
-	if ( m_afButtonPressed & IN_USE )
+	if ( (m_afButtonPressed & IN_USE) || (m_nButtons & IN_USE) )
 	{
 		DevMsg("Use pressed: player=%s m_afButtonPressed=0x%X m_nButtons=0x%X\n", GetPlayerName(), m_afButtonPressed, m_nButtons );
 		Vector vecSrc = EyePosition();
@@ -4073,12 +4066,17 @@ void CBasePlayer::PreThink(void)
 			DevMsg("Player %s traced ent classname=%s name=%s\n", GetPlayerName(), tr.m_pEnt->GetClassname(), tr.m_pEnt->GetEntityName().ToCStr());
 			if ( tr.m_pEnt->IsNPC() )
 			{
-				// HL2RPM: свой диалог, общий (rpg_dialog) или реплика фракции - иначе обычный +use
-				if ( RPGDialog::HasFor( tr.m_pEnt ) )
+				const char *ename = tr.m_pEnt->GetEntityName().ToCStr();
+				if ( ename && ename[0] != '\0' )
 				{
+					DevMsg("Starting dialog for entity '%s'\n", ename);
 					DialogSystemServer::StartDialogForEntity( this, tr.m_pEnt );
 					// consume the use press so we don't double-trigger other use logic
 					m_afButtonPressed &= ~IN_USE;
+				}
+				else
+				{
+					DevMsg("Traced NPC has no entity_name; skipping dialog\n");
 				}
 			}
 			else
@@ -9679,13 +9677,11 @@ bool CBasePlayer::IsFakeClient() const
 void CBasePlayer::EquipSuit( bool bPlayEffects )
 { 
 	m_Local.m_bWearingSuit = true; 
-	m_Local.m_iSuitType = 5;	// HL2RPM: RPG_SUIT_HEV (other suits set their own type after this)
 }
 
 void CBasePlayer::RemoveSuit( void )
 {
 	m_Local.m_bWearingSuit = false;
-	m_Local.m_iSuitType = 0;	// HL2RPM: RPG_SUIT_CITIZEN
 }
 
 //-----------------------------------------------------------------------------

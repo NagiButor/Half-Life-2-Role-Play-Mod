@@ -31,6 +31,8 @@ $backupDir = "E:\SourceModding\HL2RPMSOURCE\map_backups"
 if ($Vmf -eq "") {
     if ($Map -eq "") { throw "pass -Map <name> or -Vmf <path>" }
     $Vmf = Join-Path $mapsrc "$Map.vmf"
+    # test / developer maps live in mapsrc\test (and compile into hl2rpm\testmaps\maps)
+    if (-not (Test-Path $Vmf)) { $Vmf = Join-Path $mapsrc "test\$Map.vmf" }
 }
 if (-not (Test-Path $Vmf)) { throw "VMF not found: $Vmf" }
 $Vmf = (Resolve-Path $Vmf).Path
@@ -83,7 +85,16 @@ $secs = [int]((Get-Date) - $start).TotalSeconds
 Write-Host "compiled $name in $secs s -> $bspOut" -ForegroundColor Green
 
 if (-not $NoCopy) {
-    $dest = Join-Path $game "maps\$name.bsp"
+    # game maps -> hl2rpm\maps; test maps (VMF in mapsrc\test or BSP already in testmaps) -> hl2rpm\testmaps\maps
+    $isTest = ($Vmf -like (Join-Path $mapsrc "test\*")) -or (Test-Path (Join-Path $game "testmaps\maps\$name.bsp"))
+    if ($isTest) {
+        New-Item -ItemType Directory -Force (Join-Path $game "testmaps\maps") | Out-Null
+        $dest = Join-Path $game "testmaps\maps\$name.bsp"
+        $stale = Join-Path $game "maps\$name.bsp"
+        if (Test-Path $stale) { Write-Warning "a copy in hl2rpm\maps shadows the test map: $stale" }
+    } else {
+        $dest = Join-Path $game "maps\$name.bsp"
+    }
     if (Test-Path $dest) {
         New-Item -ItemType Directory -Force $backupDir | Out-Null
         $stamp = Get-Date -Format "yyyyMMdd_HHmmss"

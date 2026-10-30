@@ -276,7 +276,6 @@ public:
 	bool				ShouldKeepLockedAutoaimTarget( EHANDLE hLockedTarget );
 
 	void				SetLocatorTargetEntity( CBaseEntity *pEntity ) { m_hLocatorTargetEntity.Set( pEntity ); }
-	CBaseEntity			*GetLocatorTargetEntity() const { return m_hLocatorTargetEntity.Get(); }	// HL2RPM: метка квеста
 
 #ifdef MAPBASE
 	virtual bool		CanAutoSwitchToNextBestWeapon( CBaseCombatWeapon *pWeapon );

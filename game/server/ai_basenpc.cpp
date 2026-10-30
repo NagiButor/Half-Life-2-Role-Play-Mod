@@ -12658,14 +12658,6 @@ BEGIN_DATADESC( CAI_BaseNPC )
 	DEFINE_FIELD( m_iszPendingWeapon,		FIELD_STRING ),
 	DEFINE_KEYFIELD( m_iszLootItems,		FIELD_STRING, "loot_items" ),
 	DEFINE_KEYFIELD( m_iszLootDisplayName,	FIELD_STRING, "loot_displayname" ),
-	// HL2RPM: RPG keys (hl2rpm/rpg_character.cpp, rpg_entities.cpp)
-	DEFINE_KEYFIELD( m_iszRPGFaction,		FIELD_STRING, "rpg_faction" ),
-	DEFINE_KEYFIELD( m_iszRPGTrader,		FIELD_STRING, "rpg_trader" ),
-	DEFINE_KEYFIELD( m_iRPGDisposition,		FIELD_INTEGER, "rpg_disposition" ),
-	DEFINE_FIELD( m_iRPGAlarmPrevDisp,		FIELD_INTEGER ),
-	DEFINE_FIELD( m_iRPGAlarmPrevPriority,	FIELD_INTEGER ),
-	DEFINE_FIELD( m_iRPGAlarmPrevGpc,		FIELD_INTEGER ),
-	DEFINE_KEYFIELD( m_iszRPGDialog,		FIELD_STRING, "rpg_dialog" ),
 	DEFINE_KEYFIELD( m_bHatePlayerOnPlayerDamage, FIELD_BOOLEAN, "hate_on_dmg" ),
 	DEFINE_KEYFIELD( m_bSpoilDialogOnPlayerDamage, FIELD_BOOLEAN, "spoil_on_dmg" ),
 	DEFINE_KEYFIELD( m_bPropagateHateToFactionOnPlayerDamage, FIELD_BOOLEAN, "hate_f_on_dmg" ),
@@ -13716,13 +13708,6 @@ CAI_BaseNPC::CAI_BaseNPC(void)
 	m_bPropagateHateToFactionOnPlayerDamage = false;
 	m_bPropagateSpoilToFactionOnPlayerDamage = false;
 	m_iszFactionTag = NULL_STRING;
-	m_iszRPGFaction = NULL_STRING;
-	m_iszRPGTrader = NULL_STRING;
-	m_iRPGDisposition = 0;
-	m_iRPGAlarmPrevDisp = -1;
-	m_iRPGAlarmPrevPriority = 0;
-	m_iRPGAlarmPrevGpc = -1;
-	m_iszRPGDialog = NULL_STRING;
 	m_bHatePlayerTriggered = false;
 	m_bDialogSpoilTriggered = false;
 	m_bFactionReactionTriggered = false;

@@ -166,8 +166,7 @@ public:
 		// startup mode: load the map once the menu is up
 		if ( !m_bStartupDone && cl_weather_tour_map.GetString()[0] )
 		{
-			// (the main menu's background map counts as "in game" - it is still the menu)
-			if ( ( !engine->IsInGame() || engine->IsLevelMainMenuBackground() ) && gpGlobals->realtime > cl_weather_tour_delay.GetFloat() )
+			if ( !engine->IsInGame() && gpGlobals->realtime > cl_weather_tour_delay.GetFloat() )
 			{
 				m_bStartupDone = true;
 				m_bPendingStart = true;
@@ -176,7 +175,7 @@ public:
 			return;
 		}
 
-		if ( m_bPendingStart && engine->IsInGame() && !engine->IsLevelMainMenuBackground() && !engine->IsDrawingLoadingImage() )
+		if ( m_bPendingStart && engine->IsInGame() && !engine->IsDrawingLoadingImage() )
 		{
 			m_bPendingStart = false;
 			if ( cl_weather_tour_exec.GetString()[0] )

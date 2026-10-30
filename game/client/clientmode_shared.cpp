@@ -30,7 +30,6 @@
 #include "c_team.h"
 #include "c_rumble.h"
 #include "vgui_lootpanel.h"
-#include "hl2rpm/rpg_dialog_panel.h"
 #include "vgui_inventorypanel.h"
 #include "in_buttons.h"
 #include "vgui/KeyCode.h"
@@ -301,11 +300,6 @@ static CUtlString s_PendingLootSoundOpen;
 static CUtlString s_PendingLootSoundClose;
 static bool s_bIgnoreLootUpdate = false;
 
-// HL2RPM: пока открыт учётный браслет (hl2rpm/rpg_bracelet.cpp), инвентарь показывает он
-extern bool RPGBracelet_WantsInventory();
-extern void RPGBracelet_OnInventory( const CUtlVector<CUtlString> &items );
-extern void RPGBracelet_OnInventoryWeight( float flCur, float flMax, bool bOver );
-
 static void __MsgFunc_Inventory_Update( bf_read &msg )
 {
 	int msgType = msg.ReadByte();
@@ -332,10 +326,8 @@ static void __MsgFunc_Inventory_Update( bf_read &msg )
 		{
 			if ( !s_bIgnoreInventoryUpdate )
 			{
-				// браслет получает список всегда (вес и предметы видны и при следующем открытии)
-				RPGBracelet_OnInventory( s_PendingInventoryItems );
 				CVGuiInventoryPanel *panel = GetGlobalInventoryPanel();
-				if ( panel && !RPGBracelet_WantsInventory() )
+				if ( panel )
 					panel->SetItems( s_PendingInventoryItems );
 			}
 			s_PendingInventoryItems.RemoveAll();
@@ -347,7 +339,6 @@ static void __MsgFunc_Inventory_Update( bf_read &msg )
 			float curWeight = msg.ReadFloat();
 			float maxWeight = msg.ReadFloat();
 			bool over = (msg.ReadByte() != 0);
-			RPGBracelet_OnInventoryWeight( curWeight, maxWeight, over );
 			CVGuiInventoryPanel *panel = GetGlobalInventoryPanel();
 			if ( panel )
 				panel->SetWeight( curWeight, maxWeight, over );
@@ -600,7 +591,7 @@ bool ClientModeShared::CreateMove( float flInputSampleTime, CUserCmd *cmd )
 	bool bRet = pPlayer->CreateMove( flInputSampleTime, cmd );
 
 	CVGuiLootPanel *pLoot = GetGlobalLootPanel();
-	if ( cmd && ( ( pLoot && pLoot->IsVisible() ) || RPGDialogPanel_IsOpen() ) )	// HL2RPM: и в разговоре
+	if ( cmd && pLoot && pLoot->IsVisible() )
 	{
 		cmd->forwardmove = 0.0f;
 		cmd->sidemove = 0.0f;

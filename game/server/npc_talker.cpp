@@ -13,7 +13,6 @@
 // Dialog system API
 #include "dialogsystem_server.h"
 
-#include "hl2rpm/rpg_dialog.h"
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -940,9 +939,12 @@ void CNPCSimpleTalker::FollowerUse( CBaseEntity *pActivator, CBaseEntity *pCalle
 		CBasePlayer *pPlayer = ToBasePlayer( pCaller );
 		if ( pPlayer )
 		{
-			// Forward to dialog system. Implementation is in dialogsystem_server.cpp
-			if ( RPGDialog::HasFor( this ) )
-				DialogSystemServer::StartDialogForEntity( pPlayer, this );
+			const char *pszName = GetEntityName().ToCStr();
+			if ( pszName && pszName[0] != '\0' )
+			{
+					// Forward to dialog system. Implementation is in dialogsystem_server.cpp
+					DialogSystemServer::StartDialogForEntity( pPlayer, this );
+			}
 		}
 	}
 }

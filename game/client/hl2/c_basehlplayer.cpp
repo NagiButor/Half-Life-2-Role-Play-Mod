@@ -691,14 +691,9 @@ void C_BaseHLPlayer::PerformClientSideNPCSpeedModifiers( float flFrameTime, CUse
 //-----------------------------------------------------------------------------
 // Purpose: Input handling
 //-----------------------------------------------------------------------------
-// HL2RPM: проверка проходимости уровней (hl2rpm/rpg_autowalk.cpp, cheat)
-extern void RPG_AutoWalk_CreateMove( C_BasePlayer *pPlayer, CUserCmd *pCmd );
-
 bool C_BaseHLPlayer::CreateMove( float flInputSampleTime, CUserCmd *pCmd )
 {
 	bool bResult = BaseClass::CreateMove( flInputSampleTime, pCmd );
-
-	RPG_AutoWalk_CreateMove( this, pCmd );
 
 	if ( !IsInAVehicle() )
 	{

@@ -119,26 +119,6 @@ bool WorldClock_GetHours( float &flHours )
 	return s_WorldClock.bValid;
 }
 
-void WorldClock_SetHours( float flHours )
-{
-	if ( GetTimecycle() )
-	{
-		GetTimecycle()->SetTimeOfDayHours( flHours );
-		return;
-	}
-	s_WorldClock.flHours = flHours;
-	s_WorldClock.bValid = true;
-}
-
-float WorldClock_GetHoursPerSecond()
-{
-	if ( GetTimecycle() )
-		return GetTimecycle()->GetHoursPerSecond();
-	if ( !s_WorldClock.bValid || s_WorldClock.flDayLength <= 0.0f )
-		return 0.0f;
-	return ( 24.0f / s_WorldClock.flDayLength ) * s_WorldClock.flScale * TimecycleSpeedScale();
-}
-
 class CWorldClockSystem : public CAutoGameSystemPerFrame
 {
 public:

@@ -44,7 +44,6 @@ public:
 
 	bool NeedsTextUpdate() { return m_bTextNeedsUpdate; }
 	void UpdatedText() { m_bTextNeedsUpdate = false; }
-	void MarkTextDirty() { m_bTextNeedsUpdate = true; }		// HL2RPM: the game language changed
 
 private:
 	bool	m_bEnabled;
@@ -55,18 +54,6 @@ private:
 
 	bool	m_bTextNeedsUpdate;
 };
-
-// HL2RPM: a #token on a sign is localized when the label gets the text: after a language change
-// (hl2rpm/rpg_language.cpp) every sign sets it again
-void VGuiTextDisplay_RefreshAll()
-{
-	for ( C_BaseEntity *pEnt = ClientEntityList().FirstBaseEntity(); pEnt; pEnt = ClientEntityList().NextBaseEntity( pEnt ) )
-	{
-		C_VGuiTextDisplay *pDisplay = dynamic_cast< C_VGuiTextDisplay * >( pEnt );
-		if ( pDisplay )
-			pDisplay->MarkTextDirty();
-	}
-}
 
 IMPLEMENT_CLIENTCLASS_DT( C_VGuiTextDisplay, DT_VGuiTextDisplay, CVGuiTextDisplay )
 	RecvPropBool( RECVINFO( m_bEnabled ) ),

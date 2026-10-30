@@ -439,14 +439,8 @@ void CViewEffects::Shake( ScreenShake_t &data )
 //			*pbuf - 
 // Output : int
 //-----------------------------------------------------------------------------
-static ConVar cl_fade_debug( "cl_fade_debug", "0", 0, "Print the screen fades the client receives and the resulting fade color" );
-
 void CViewEffects::Fade( ScreenFade_t &data )
 {
-	if ( cl_fade_debug.GetBool() )
-		Msg( "[fade] %.2f new fade rgba %d %d %d %d, duration %.2f, hold %.2f, flags 0x%x\n", gpGlobals->curtime, data.r, data.g, data.b, data.a,
-			data.duration * ( 1.0f / (float)( 1 << SCREENFADE_FRACBITS ) ), data.holdTime * ( 1.0f / (float)( 1 << SCREENFADE_FRACBITS ) ), data.fadeFlags );
-
 	// Create a new fade and append it to the list
 	screenfade_t *pNewFade = new screenfade_t;
 	pNewFade->End	= data.duration * (1.0f/(float)(1<<SCREENFADE_FRACBITS));
@@ -575,17 +569,6 @@ void CViewEffects::FadeCalculate( void )
 		m_FadeColorRGBA[0] /= m_FadeList.Size();
 		m_FadeColorRGBA[1] /= m_FadeList.Size();
 		m_FadeColorRGBA[2] /= m_FadeList.Size();
-	}
-
-	if ( cl_fade_debug.GetBool() && m_FadeColorRGBA[3] > 0 )
-	{
-		static float s_flNext = 0.0f;
-		if ( gpGlobals->realtime >= s_flNext || gpGlobals->realtime < s_flNext - 5.0f )
-		{
-			s_flNext = gpGlobals->realtime + 0.5f;
-			Msg( "[fade] %.2f %d fades -> rgba %d %d %d %d%s\n", gpGlobals->curtime, m_FadeList.Size(), m_FadeColorRGBA[0], m_FadeColorRGBA[1],
-				m_FadeColorRGBA[2], m_FadeColorRGBA[3], m_bModulate ? " modulate" : "" );
-		}
 	}
 }
 

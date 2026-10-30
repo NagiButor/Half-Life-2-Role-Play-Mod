@@ -8,7 +8,6 @@
 #include "utlbuffer.h"
 #include "lzmaDecoder.h"
 #include "icommandline.h"
-#include "timecycle/env_timecycle.h"
 
 #include "tier0/memdbgon.h"
 
@@ -263,67 +262,6 @@ static void MergeSurfaceLights( const dworldlight_t *lights, int lightCount, CUt
 	}
 }
 
-// ---------------------------------------------------------------------------
-// HL2RPM: night lamps. The maps were lit for baked lighting, where a lamp burns at noon too.
-// Converted lamps that see the sky (street lamps, lamps by a window or under a canopy) burn from
-// dusk to dawn; lamps deep inside (no sky within reach of any ray) burn always.
-// ---------------------------------------------------------------------------
-static ConVar r_deferred_convert_night( "r_deferred_convert_night", "1", FCVAR_GAMEDLL, "HL2RPM: converted lamps that see the sky burn only from dusk to dawn (applied on map load)" );
-static ConVar r_deferred_convert_night_dist( "r_deferred_convert_night_dist", "1600", FCVAR_GAMEDLL, "HL2RPM: how far a converted lamp looks for the sky through doors and windows" );
-static ConVar r_deferred_convert_night_on( "r_deferred_convert_night_on", "0.1", FCVAR_GAMEDLL, "HL2RPM: night lamps switch on this many hours after sunset (+ up to 0.5 h per lamp)" );
-static ConVar r_deferred_convert_night_off( "r_deferred_convert_night_off", "0.1", FCVAR_GAMEDLL, "HL2RPM: night lamps switch off this many hours after sunrise (+ up to 0.4 h per lamp)" );
-
-static int s_nNightLamps = 0, s_nAlwaysLamps = 0;
-
-// 2 - under the open sky, 1 - the sky is seen through a door/window/opening, 0 - deep inside
-static int LampDaylightClass( const Vector &pos )
-{
-	trace_t tr;
-	// CONTENTS_SOLID: rays pass windows and grates, only walls stop them
-	UTIL_TraceLine( pos, pos + Vector( 0, 0, 16384 ), CONTENTS_SOLID, NULL, COLLISION_GROUP_NONE, &tr );
-	if ( !tr.startsolid && tr.fraction < 1.0f && ( tr.surface.flags & SURF_SKY ) )
-		return 2;
-	const float flDist = r_deferred_convert_night_dist.GetFloat();
-	for ( int e = 0; e < 3; ++e )
-	{
-		float se, ce;
-		SinCos( DEG2RAD( e * 25.0f ), &se, &ce );
-		for ( int a = 0; a < 16; ++a )
-		{
-			float sa, ca;
-			SinCos( a * ( 2.0f * M_PI_F / 16.0f ) + e * 0.2f, &sa, &ca );
-			const Vector dir( ce * ca, ce * sa, se );
-			UTIL_TraceLine( pos, pos + dir * flDist, CONTENTS_SOLID, NULL, COLLISION_GROUP_NONE, &tr );
-			if ( !tr.startsolid && tr.fraction < 1.0f && ( tr.surface.flags & SURF_SKY ) )
-				return 1;
-		}
-	}
-	return 0;
-}
-
-static void ApplyNightGate( CBaseEntity *pLight, const Vector &pos )
-{
-	if ( !r_deferred_convert_night.GetBool() || !pLight )
-		return;
-	if ( LampDaylightClass( pos ) == 0 )
-	{
-		++s_nAlwaysLamps;
-		return;
-	}
-	float flRise = 6.0f, flSet = 18.0f;
-	if ( CEnvTimecycle *tc = GetTimecycle() )
-	{
-		flRise = tc->GetSunriseHour();
-		flSet = tc->GetSunsetHour();
-	}
-	// a stable per-lamp offset: the street does not light up all in one frame
-	const unsigned int h = (unsigned int)( (int)pos.x * 73856093 ) ^ (unsigned int)( (int)pos.y * 19349663 ) ^ (unsigned int)( (int)pos.z * 83492791 );
-	const float frac = ( h % 1000 ) / 1000.0f;
-	pLight->KeyValue( "enable_from_hour", UTIL_VarArgs( "%.3f", flSet + r_deferred_convert_night_on.GetFloat() + frac * 0.5f ) );
-	pLight->KeyValue( "enable_to_hour", UTIL_VarArgs( "%.3f", flRise + r_deferred_convert_night_off.GetFloat() + frac * 0.4f ) );
-	++s_nNightLamps;
-}
-
 static void ConvertWorldLights( const dworldlight_t *lights, int lightCount, const CUtlVector<Vector> &skipPositions )
 {
 	if ( !r_deferred_convert_worldlights.GetBool() || !lights || lightCount <= 0 )
@@ -481,7 +419,6 @@ static void ConvertWorldLights( const dworldlight_t *lights, int lightCount, con
 		}
 		lightEntity->KeyValue( "spawnflags", UTIL_VarArgs( "%d", iFlags ) );
 		lightEntity->KeyValue( "autoshadow", "0" );	// shadows chosen above (CDeferredLight::GetInitialDefFlags)
-		ApplyNightGate( lightEntity, pos );
 
 		DispatchSpawn( lightEntity );
 
@@ -919,9 +856,6 @@ void CDeferredManagerServer::LevelInitPreEntity()
 
 		if ( KeyValues* parent = entity->FindKey( "parentname" ) )
 			lightEntity->KeyValue( "parentname", parent->GetString() );
-		// lamps on moving things (trains) are not gated: they go through tunnels and stations
-		else
-			ApplyNightGate( lightEntity, pos );
 
 		if ( DeferredVerboseLevel() >= 1 )
 		{
@@ -943,10 +877,6 @@ void CDeferredManagerServer::LevelInitPreEntity()
 	// (lights.rad: fluorescent panels, lamps' bulbs...) never had one: they only exist in
 	// the world lights lump. Convert those too, or the deferred interiors stay dark.
 	ConvertWorldLights( lights, (int)lightCount, convertedPositions );
-
-	if ( r_deferred_convert_night.GetBool() )
-		Msg( "[deferred] night lamps: %d see the sky (dusk to dawn), %d deep inside (always on)\n", s_nNightLamps, s_nAlwaysLamps );
-	s_nNightLamps = s_nAlwaysLamps = 0;
 
 	/*
 	const int numUnspawnedLights = unspawnedLights.Count();

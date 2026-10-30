@@ -7,7 +7,6 @@
 #include "util.h"
 #include "igameevents.h"
 #include "quest_system.h"
-#include "hl2rpm/rpg_dialog.h"
 
 namespace DialogSystemServer
 {
@@ -26,10 +25,26 @@ namespace DialogSystemServer
 
         DIALOG_DEVMSG("DialogSystem: StartDialogForEntity player=%s ent=%s entindex=%d\n", pPlayer->GetPlayerName(), pNPC->GetEntityName().ToCStr(), pNPC->entindex());
 
-        // HL2RPM: только диалоги v2 (rpg_dialog.cpp): свой по targetname, общий по rpg_dialog или
-        // реплика фракции. Старое окно диалога (и пустое окно для NPC без диалога) больше не открывается.
-        if (RPGDialog::HasFor(pNPC))
-            RPGDialog::Start(pPlayer, pNPC);
+        const char *ename = GetEntityNameString(pNPC);
+        if (!ename || !ename[0])
+        {
+            return;
+        }
+
+        // Find dialog for this entity and send the dialog payload to the player
+        const DialogDefinitions::DSDialog *dlg = DialogDefinitions::FindDialogForEntity(ename);
+        if (dlg)
+        {
+            DialogDefinitions::SendDialogToPlayer(pPlayer, dlg, pNPC->entindex());
+        }
+        else
+        {
+            // fallback: send begin/end so client shows empty dialog panel
+            char cmd[256];
+            Q_snprintf(cmd, sizeof(cmd), "dialog_open_begin \"%s\"", ename);
+            engine->ClientCommand(pPlayer->edict(), cmd);
+            engine->ClientCommand(pPlayer->edict(), "dialog_open_end");
+        }
     }
 
     void HandleDialogChoice(CBasePlayer *pPlayer, int nodeId, int optionIndex, const char *entityName)

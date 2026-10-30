@@ -27,7 +27,6 @@ using namespace vgui;
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-static ConVar hud_damage_debug( "hud_damage_debug", "0", 0, "Print the damage messages and the fullscreen damage indicator alpha" );
 
 //-----------------------------------------------------------------------------
 // Purpose: HDU Damage indication
@@ -315,16 +314,6 @@ void CHudDamageIndicator::DrawFullscreenDamageIndicator()
 //-----------------------------------------------------------------------------
 void CHudDamageIndicator::Paint()
 {
-	if ( hud_damage_debug.GetBool() )
-	{
-		static float s_flNext = 0.0f;
-		if ( gpGlobals->realtime >= s_flNext || gpGlobals->realtime < s_flNext - 5.0f )
-		{
-			s_flNext = gpGlobals->realtime + 0.5f;
-			Msg( "[dmgind] %.2f fullscreen a=%d high L/R %d/%d\n", gpGlobals->curtime, m_DmgFullscreenColor[3], m_DmgHighColorLeft[3], m_DmgHighColorRight[3] );
-		}
-	}
-
 	// draw fullscreen damage indicators
 	DrawFullscreenDamageIndicator();
 
@@ -351,10 +340,6 @@ void CHudDamageIndicator::MsgFunc_Damage( bf_read &msg )
 	C_BasePlayer *pPlayer = C_BasePlayer::GetLocalPlayer();
 	if ( !pPlayer )
 		return;
-
-	if ( hud_damage_debug.GetBool() )
-		Msg( "[dmgind] %.2f Damage msg: take %d save %d bits 0x%lx health %d from (%.0f %.0f %.0f)\n", gpGlobals->curtime, damageTaken, armor, bitsDamage,
-			pPlayer->GetHealth(), vecFrom.x, vecFrom.y, vecFrom.z );
 
 	// player has just died, just run the dead damage animation
 	if ( pPlayer->GetHealth() <= 0 )

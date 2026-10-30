@@ -65,9 +65,6 @@ CEnvTimecycle *GetTimecycle();
 #ifdef GAME_DLL
 // HL2RPM: time of day of the world, also on maps without an env_timecycle
 bool WorldClock_GetHours( float &flHours );
-// HL2RPM: RPG sleep / suspicion decay - set the clock on maps without a timecycle, game hours per real second
-void WorldClock_SetHours( float flHours );
-float WorldClock_GetHoursPerSecond();
 #endif
 
 #endif

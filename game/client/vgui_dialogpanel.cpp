@@ -1179,8 +1179,7 @@ static ConCommand dialog_set_option_delay("dialog_set_option_delay", __Cmd_Dialo
 
 // HL2RPM: whether a dialog with an NPC is on screen (the depth of field focuses on the NPC
 // then: deferred_postfx.cpp)
-#include "hl2rpm/rpg_dialog_panel.h"
 bool HL2RPM_IsDialogOpen()
 {
-    return ( s_pDialogPanel != nullptr && s_pDialogPanel->IsVisible() ) || RPGDialogPanel_IsOpen();
+    return s_pDialogPanel != nullptr && s_pDialogPanel->IsVisible();
 }

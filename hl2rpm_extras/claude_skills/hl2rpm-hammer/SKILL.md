@@ -14,14 +14,14 @@ Hammer++ is only launched to show a result to the user.
 
 | What | Path |
 |---|---|
-| Map sources (`.vmf`; `.vmx` = Hammer's autosave copy, never edit it) | `E:\XBLAH's modding tool\content\Mapbase\hl2rpm\mapsrc` |
-| Compiled maps the game loads | `E:\Steam\steamapps\sourcemods\hl2rpm\maps` |
+| Map sources (`.vmf`; `.vmx` = Hammer's autosave copy, never edit it) | `E:\XBLAH's modding tool\content\Mapbase\hl2rpm\mapsrc` (game maps), `mapsrc\test\` (test/dev maps) |
+| Compiled maps the game loads | `E:\Steam\steamapps\sourcemods\hl2rpm\maps` (game maps), `hl2rpm\testmaps\maps` (test maps: separate search path below the mod root, not shipped) |
 | Compile tools (stock SDK 2013 SP) | `E:\Steam\steamapps\common\Source SDK Base 2013 Singleplayer\bin\{vbsp,vvis,vrad}.exe` |
 | Hammer++ | `...\Source SDK Base 2013 Singleplayer\bin\hammerplusplus.exe` (config `bin\hammerplusplus\hammerplusplus_gameconfig.txt`) |
 | FGDs (entity definitions, custom keys) | `E:\XBLAH's modding tool\tools\FGDs\Mapbase\` — `base_vizzys.fgd` (BaseNPC with dialog/loot/faction keys), `halflife2_vizzys.fgd`, `hl2rpm.fgd`, `deferred.fgd` |
 | BSP backups made by compile_map.ps1 | `E:\SourceModding\HL2RPMSOURCE\map_backups` |
 
-Test maps with full permission to change: `test_deferred`, `demo_map`, `map_v11`.
+Test maps with full permission to change: `test_deferred`, `demo_map`, `map_v11` (all in `mapsrc\test`). `compile_map.ps1 -Map <name>` also finds VMFs in `mapsrc\test` and copies their BSP to `hl2rpm\testmaps\maps`.
 Any other map: ask before changing it.
 
 ## Rules

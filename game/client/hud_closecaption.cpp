@@ -22,7 +22,6 @@
 #include "filesystem.h"
 #include "datacache/idatacache.h"
 #include "SoundEmitterSystem/isoundemittersystembase.h"
-#include "hl2rpm/rpg_screen.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -905,10 +904,6 @@ void CHudCloseCaption::TogglePaintDebug()
 //-----------------------------------------------------------------------------
 void CHudCloseCaption::Paint( void )
 {
-	// HL2RPM: a full-screen RPG screen (trade, bracelet, citizen card) covers the world - the captions of
-	// whatever plays behind it (Breencasts) would show through its semi-transparent window
-	if ( RPGScreen_AnyOpen() )
-		return;
 	int w, h;
 	GetSize( w, h );
 
@@ -2573,15 +2568,8 @@ bool CHudCloseCaption::ProcessCaption( const char *tokenname, float duration, bo
 	return AddAsyncWork( tokenname, false, duration, fromplayer, direct );
 }
 
-// HL2RPM: the Breencasts on the screens are the city's background (they play on every square and in the menu
-// background): their captions kept popping up at the bottom of the screen like a conversation nobody had.
-// The voice stays; the text only with cl_hl2rpm_breencast_captions 1.
-static ConVar cl_hl2rpm_breencast_captions( "cl_hl2rpm_breencast_captions", "0", FCVAR_ARCHIVE, "Show the subtitles of the Breencasts on the city screens" );
-
 void CHudCloseCaption::_ProcessCaption( const wchar_t *caption, const char *tokenname, float duration, bool fromplayer, bool direct )
 {
-	if ( tokenname && !cl_hl2rpm_breencast_captions.GetBool() && !Q_strnicmp( tokenname, "breencast.", 10 ) )
-		return;
 	// Get the string for the token
 	float interval = 0.0f;
 	bool hasnorepeat = GetNoRepeatValue( caption, interval );
@@ -2641,14 +2629,12 @@ void CHudCloseCaption::MsgFunc_CloseCaption(bf_read &msg)
 	bool bIsMale = flagbyte & CLOSE_CAPTION_GENDER_MALE ? true : false;
 	bool bIsFemale = flagbyte & CLOSE_CAPTION_GENDER_FEMALE ? true : false;
 
-	// HL2RPM: cc_captiontrace 1 - «в консоль разработчика»: звук движения платформы (огни за окнами
-	// поезда в сне SP-00 - func_train, у каждого угла пути новый звук) давал тысячи строк за сессию
-	if ( warnonmissing && cc_captiontrace.GetInt() && !IsX360() )
+	if ( warnonmissing && !IsX360() )
 	{
 		wchar_t *pcheck = g_pVGuiLocalize->Find( tokenname );
 		if ( !pcheck )
 		{
-			DevWarning( "No caption found for '%s'\n", tokenname );
+			Warning( "No caption found for '%s'\n", tokenname );
 		}
 	}
 

@@ -34,15 +34,6 @@
 | `pom/` | исследование рельефа (POM) из текстур без карт нормалей: `vtf.py` (чтение VTF, DXT1/3/5 → numpy), `relief_proto.py` (знак рельефа по яркости против высоты из настоящих карт нормалей на 174 стоковых материалах), `relief_proto4.py`/`relief_proto7.py` (детектор светлой сетки швов по связности), `relief_sheet.py` (листы «текстура + высота» материалов без нормалей), `relief_dump.py <материал> [inv]` (высота, освещённый рельеф и нормали одной текстуры). Путь к распакованным VPK — `R` в `relief_proto.py` |
 | `make_water_test.py <out.vmf>` | генерирует тестовую карту `water_test`: ряд бассейнов из стоковых материалов воды (мутная, прозрачная, морская, канализация, дешёвая...) со ступенями глубины 16/64/128/256 ед.; солнце карты совпадает с солнцем deferred в 13:00 - для сравнения с `-nodeferred`; бассейны 10-14 — типы воды мода (`materials/hl2rpm/water`), 15 — стоковая токсичная слизь |
 | `hd_textures.py <карта.bsp, материал или список.txt>` / `--textures <список> [--inplace]` | HD-версии текстур (Real-ESRGAN + перенос деталей, свой DXT/VTF): мира — в `materials/hd` (`$hdtexture`), лиц и оружия — поверх стоковых путей в моде (`materials/hd_inplace.txt`), декалей — в `materials/hd/decals` |
-| `build_content.py` | собирает контент из `content/` (диалоги, квесты, строки RU+EN, `characters.txt`) в `scripts/` и `resource/` мода и сценарии озвучки `Дизайн-документ/Озвучка`; встроенный валидатор (0 ошибок / предупреждений перед коммитом) |
-| `add_scheme_fonts.py` | регистрирует шрифты интерфейса RPG (`HL2RPM.*`, TTF в `resource/`) в `clientscheme.res` мода |
-| `prep_rp_c17_01_trainstation.py`, `prep_rp_c17_02_plaza.py`, `prep_rp_c17_03_block7.py` | карты среза из BSPSource-декомпиляции ретейловых `d1_trainstation_01..03`: вырезан сюжет Гордона и запечённые подделки, переходы, NPC; затем RPG-слой `phaseb_rp_c17_0X.py`; помощники — `slice_kit.py` |
-| `make_opora.py` (+ `opora_kit.py`, `phaseb_rp_c17_08.py`) | участок ГО «Опора» (C17-08) целиком из скрипта: архитектура, свет, NPC, RPG-слой GO-01 |
-| `make_oldtown.py` (+ `phaseb_rp_c17_04.py`) | Старый город (C17-04) из скрипта на `opora_kit`: улица, мастерская Лукича с подвалом, баня, канал с мостом, «Шлюз-3»; RPG-слой LM-01 и SM-01 |
-| `make_background_c17.py` | фон главного меню `background_c17` из площади (камера, сумерки, без игровых триггеров) |
-| `make_stream_test.py` | тестовая карта `stream_test` для подгрузки «жизни» (2600 энтити `rpg_stream 1`) |
-| `make_showcase.py`, `make_pbr_gallery.py` | витрины графики `gfx_showcase` и `pbr_gallery` |
-| `../art/src/make_menu_assets.py`, `../art/src/make_steam_assets.py` | логотип меню, картинка главы, фон экрана загрузки; капсулы и арт Steam EN/RU из игровых кадров |
 
 Собранные DLL/PDB, шейдеры `.vcs` мода, карты и прочие ресурсы в git не кладутся —
 они публикуются архивами в GitHub Releases.
