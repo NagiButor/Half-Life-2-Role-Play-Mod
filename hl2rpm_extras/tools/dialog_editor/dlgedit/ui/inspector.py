@@ -1,16 +1,18 @@
-"""Right panel: properties of the selected NPC / line / reply / returning visit / quest."""
+"""Right panel: properties of the selected NPC (dialog, actor, routine) / line / reply /
+returning visit / quest / placed object / faction."""
 import os
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QGroupBox,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QRadioButton,
                                QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
-                               QInputDialog, QMessageBox, QHeaderView, QAbstractItemView)
+                               QInputDialog, QMessageBox, QHeaderView, QAbstractItemView, QTabWidget)
 
 from ..model import (LANGUAGE_NAMES, QUEST_STATES, QUEST_STATE_NAMES, TARGETNAME_RE, Option, Quest, Stage, short_lang,
                      text_for)
 from .widgets import LangTexts, NodeCombo, QuestCombo, AutoText, completer_line, hint
 from . import theme
+from . import world_pages
 
 COMMON_SEQUENCES = ["g_fist", "g_point", "g_shrug", "g_answer", "g_explain", "g_nod", "g_headshake", "g_plead",
                     "gesture_agitated_1", "g_present", "g_frustrated", "g_despair", "g_question"]
@@ -40,6 +42,8 @@ class Inspector(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setMinimumWidth(400)
         self.target = None
+        self.npc_tab = 0          # Диалог / Персонаж / Распорядок
+        self.pkg_sel = 0          # selected AI package on the routine tab
         self.show_target(None)
 
     # --- helpers ------------------------------------------------------------------------
@@ -66,10 +70,19 @@ class Inspector(QScrollArea):
         # take the old page out first: setWidget() would delete it at once, possibly
         # from inside a signal of one of its own buttons
         old = self.takeWidget()
+        layer = getattr(self.ctx, "layer", None)
         if p is None:
             w, lay = self._page("Нет проекта", "Файл → Новый проект или Открыть.")
         elif target and target[0] == "quest":
             w, lay = self.quest_page(target[1])
+        elif target and target[0] in ("ref", "pathpt") and layer is not None and layer.ref(target[1]) is not None:
+            w, lay = world_pages.ref_page(self, layer, layer.ref(target[1]))
+        elif target and target[0] == "hammer" and getattr(self.ctx, "scene", None) is not None:
+            w, lay = world_pages.hammer_page(self, self.ctx.scene, target[1])
+        elif target and target[0] == "nav" and layer is not None:
+            w, lay = world_pages.nav_page(self, layer, target[1])
+        elif target and target[0] == "faction" and p.faction(target[1]) is not None:
+            w, lay = world_pages.faction_page(self, p.faction(target[1]))
         elif npc is None:
             w, lay = self._page("Нет NPC", "Слева «+ NPC» — создать, или Файл → Импорт диалогов игры.")
         elif not target or target[0] in ("npc", "multi"):
@@ -103,10 +116,28 @@ class Inspector(QScrollArea):
 
     # --- NPC --------------------------------------------------------------------------------
     def npc_page(self, npc):
+        w, lay = self._page("NPC  %s" % npc.targetname)
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+        dw = QWidget()
+        dl = QVBoxLayout(dw)
+        dl.setContentsMargins(0, 6, 0, 0)
+        dl.setSpacing(10)
+        self.npc_dialog_tab(npc, dl)
+        dl.addStretch(1)
+        tabs.addTab(dw, "Диалог")
+        tabs.addTab(world_pages.actor_tab(self, npc), "Персонаж")
+        tabs.addTab(world_pages.routine_tab(self, npc), "Распорядок (%d)" % len(npc.actor.packages))
+        tabs.setCurrentIndex(self.npc_tab if 0 <= self.npc_tab < 3 else 0)
+        tabs.currentChanged.connect(lambda i: setattr(self, "npc_tab", i))
+        lay.addWidget(tabs)
+        return w, lay
+
+    def npc_dialog_tab(self, npc, lay):
         p = self.ctx.project
-        w, lay = self._page("NPC  %s" % npc.targetname,
-                            "targetname — имя NPC в Hammer: по нему игра находит этот диалог. "
-                            "Отображаемое имя — в окне диалога и при обыске трупа.")
+        w = lay.parentWidget()
+        lay.addWidget(hint("targetname — имя NPC в Hammer: по нему игра находит этот диалог. "
+                           "Отображаемое имя — в окне диалога и при обыске трупа."))
         f = _form()
         tn = QLineEdit(npc.targetname)
         tn.setToolTip("Должен совпадать с targetname NPC на карте (латиница, цифры, _)")
@@ -214,7 +245,6 @@ class Inspector(QScrollArea):
         note.edited.connect(set_note)
         gl.addWidget(note)
         lay.addWidget(g)
-        return w, lay
 
     # --- node ----------------------------------------------------------------------------------
     def node_page(self, npc, n):

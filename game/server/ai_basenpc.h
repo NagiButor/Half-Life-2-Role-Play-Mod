@@ -979,6 +979,12 @@ public:
 	void				SetSleepState( AI_SleepState_t sleepState )	{ m_SleepState = sleepState; }
 	const char			*GetLootItems() const { return STRING( m_iszLootItems ); }
 	const char			*GetLootDisplayName() const;
+	// HL2RPM: faction tag (ftag) and flags of the Creation Kit NPC definitions (hl2rpm_world.cpp)
+	const char			*GetFactionTag() const { return STRING( m_iszFactionTag ); }
+	void				SetRPMEssential( bool bEssential ) { m_bRPMEssential = bEssential; }
+	bool				IsRPMEssential() const { return m_bRPMEssential; }
+	bool				HasRPMPlayerRelation() const { return m_bRPMPlayerRelation; }
+	void				SetRPMPlayerRelation() { m_bRPMPlayerRelation = true; }
 	void				AddSleepFlags( int flags ) { m_SleepFlags |= flags; }
 	void				RemoveSleepFlags( int flags ) { m_SleepFlags &= ~flags; }
 	bool				HasSleepFlags( int flags ) { return (m_SleepFlags & flags) == flags; }
@@ -1097,6 +1103,8 @@ private:
 	bool				m_bGpcOffFactionOnPlayerDamage;
 	bool				m_bGpcOffTriggered;
 	bool				m_bGpcOffFactionTriggered;
+	bool				m_bRPMEssential;		// can't die (HL2RPM NPC definition "essential")
+	bool				m_bRPMPlayerRelation;	// the definition's relation to the player was applied once
 
 	CNetworkVar(int, m_iDeathPose );
 	CNetworkVar(int, m_iDeathFrame );

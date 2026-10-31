@@ -7,6 +7,7 @@
 #include "util.h"
 #include "igameevents.h"
 #include "quest_system.h"
+#include "hl2rpm_world.h"
 
 namespace DialogSystemServer
 {
@@ -24,6 +25,8 @@ namespace DialogSystemServer
         if (!pPlayer || !pNPC) return;
 
         DIALOG_DEVMSG("DialogSystem: StartDialogForEntity player=%s ent=%s entindex=%d\n", pPlayer->GetPlayerName(), pNPC->GetEntityName().ToCStr(), pNPC->entindex());
+        // HL2RPM: the NPC's daily routine waits while the player talks to it
+        RPMWorld::NoteDialogActivity(pNPC);
 
         const char *ename = GetEntityNameString(pNPC);
         if (!ename || !ename[0])
@@ -55,6 +58,8 @@ namespace DialogSystemServer
         // Find dialog for this entity and locate the option to determine next actions
         if (!entityName || !entityName[0])
             return;
+
+        RPMWorld::NoteDialogActivity(gEntList.FindEntityByName(NULL, entityName));
 
         const DialogDefinitions::DSDialog *dlg = DialogDefinitions::FindDialogForEntity(entityName);
         if (!dlg) return;
@@ -182,6 +187,8 @@ namespace DialogSystemServer
     {
         if (!pPlayer || !entityName || !entityName[0])
             return;
+
+        RPMWorld::NoteDialogActivity(gEntList.FindEntityByName(NULL, entityName));
 
         const DialogDefinitions::DSDialog *dlg = DialogDefinitions::FindDialogForEntity(entityName);
         if (!dlg)

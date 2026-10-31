@@ -61,20 +61,19 @@ static CRagdollProp *AsLootRagdoll(CBaseEntity *pEnt)
 	return NULL;
 }
 
-static CFuncLootContainer *AsLootContainer(CBaseEntity *pEnt)
+// HL2RPM: func_loot_container and prop_loot_container
+static ILootContainer *AsLootContainer(CBaseEntity *pEnt)
 {
 	if (!pEnt)
 		return NULL;
-	if (FClassnameIs(pEnt, "func_loot_container"))
-		return static_cast<CFuncLootContainer*>(pEnt);
-	return NULL;
+	return dynamic_cast<ILootContainer*>(pEnt);
 }
 
 static const char *LootTarget_GetLootItems(CBaseEntity *pEnt)
 {
 	if (CRagdollProp *pRag = AsLootRagdoll(pEnt))
 		return pRag->GetLootItems();
-	if (CFuncLootContainer *pBox = AsLootContainer(pEnt))
+	if (ILootContainer *pBox = AsLootContainer(pEnt))
 		return pBox->GetLootItems();
 	return NULL;
 }
@@ -86,7 +85,7 @@ static void LootTarget_SetLootItems(CBaseEntity *pEnt, const char *items)
 		pRag->SetLootItems(items);
 		return;
 	}
-	if (CFuncLootContainer *pBox = AsLootContainer(pEnt))
+	if (ILootContainer *pBox = AsLootContainer(pEnt))
 	{
 		pBox->SetLootItems(items);
 		return;
@@ -97,21 +96,21 @@ static const char *LootTarget_GetDisplayName(CBaseEntity *pEnt)
 {
 	if (CRagdollProp *pRag = AsLootRagdoll(pEnt))
 		return pRag->GetLootDisplayName();
-	if (CFuncLootContainer *pBox = AsLootContainer(pEnt))
+	if (ILootContainer *pBox = AsLootContainer(pEnt))
 		return pBox->GetLootDisplayName();
 	return NULL;
 }
 
 static const char *LootTarget_GetSoundOpen(CBaseEntity *pEnt)
 {
-	if (CFuncLootContainer *pBox = AsLootContainer(pEnt))
+	if (ILootContainer *pBox = AsLootContainer(pEnt))
 		return pBox->GetLootSoundOpen();
 	return NULL;
 }
 
 static const char *LootTarget_GetSoundClose(CBaseEntity *pEnt)
 {
-	if (CFuncLootContainer *pBox = AsLootContainer(pEnt))
+	if (ILootContainer *pBox = AsLootContainer(pEnt))
 		return pBox->GetLootSoundClose();
 	return NULL;
 }

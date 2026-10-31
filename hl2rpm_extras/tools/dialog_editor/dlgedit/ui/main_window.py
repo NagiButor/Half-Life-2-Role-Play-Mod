@@ -1,4 +1,4 @@
-"""Main window of the HL2RPM dialog editor."""
+"""Main window of the HL2RPM Creation Kit (dialogs, NPCs, AI packages, world layer)."""
 import glob
 import json
 import os
@@ -24,9 +24,10 @@ from .graph import GraphScene, GraphView, NodeItem
 from .inspector import Inspector
 from .settings_dialog import SettingsDialog
 from .simulator import SimulatorDialog
+from .world_ctrl import WorldMixin
 
-APP_NAME = "HL2RPM Dialog Editor"
-FILE_FILTER = "Проект диалогов HL2RPM (*.hl2dlg)"
+APP_NAME = "HL2RPM Creation Kit"
+FILE_FILTER = "Проект HL2RPM (*.hl2dlg)"
 DEFAULT_MAPSRC = r"E:\XBLAH's modding tool\content\Mapbase\hl2rpm\mapsrc"
 HL2_ITEMS = ["item_healthkit", "item_healthvial", "item_battery", "item_suit", "item_ammo_pistol", "item_ammo_smg1",
              "item_ammo_smg1_grenade", "item_ammo_ar2", "item_ammo_ar2_altfire", "item_box_buckshot", "item_ammo_357",
@@ -52,7 +53,7 @@ def app_icon():
     return QIcon(pm)
 
 
-class MainWindow(QMainWindow):
+class MainWindow(WorldMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowIcon(app_icon())
@@ -79,17 +80,23 @@ class MainWindow(QMainWindow):
         self.validate_timer.setInterval(900)
         self.validate_timer.timeout.connect(lambda: self.run_validation(False))
 
-        self.scene = GraphScene()
-        self.view = GraphView(self.scene)
+        self.gscene = GraphScene()
+        self.view = GraphView(self.gscene)
         self.view.filesDropped = self.files_dropped
-        self.setCentralWidget(self.view)
-        self.scene.selectedItem.connect(self.on_select)
-        self.scene.itemsMoved.connect(lambda: self.model_changed(False, moved=True))
-        self.scene.connectRequested.connect(self.on_connect)
-        self.scene.createRequested.connect(self.on_create)
-        self.scene.contextRequested.connect(self.on_context)
-        self.scene.editRequested.connect(self.on_edit)
-        self.scene.deleteRequested.connect(self.delete_selected)
+        self._build_world_ui()
+        self.central_tabs = QTabWidget()
+        self.central_tabs.setDocumentMode(True)
+        self.central_tabs.addTab(self.map_panel, "Карта")
+        self.central_tabs.addTab(self.view, "Диалог")
+        self.central_tabs.currentChanged.connect(self._central_changed)
+        self.setCentralWidget(self.central_tabs)
+        self.gscene.selectedItem.connect(self.on_select)
+        self.gscene.itemsMoved.connect(lambda: self.model_changed(False, moved=True))
+        self.gscene.connectRequested.connect(self.on_connect)
+        self.gscene.createRequested.connect(self.on_create)
+        self.gscene.contextRequested.connect(self.on_context)
+        self.gscene.editRequested.connect(self.on_edit)
+        self.gscene.deleteRequested.connect(self.delete_selected)
         self.view.zoomChanged.connect(self._zoom_label)
 
         self._build_docks()
@@ -140,6 +147,8 @@ class MainWindow(QMainWindow):
         bl.addWidget(b)
         l.addLayout(bl)
         left.addTab(w, "NPC")
+        left.addTab(self._build_palette(), "Объекты")
+        left.addTab(self._build_cell_view(), "На карте")
 
         w = QWidget()
         l = QVBoxLayout(w)
@@ -154,6 +163,8 @@ class MainWindow(QMainWindow):
         bl.addStretch(1)
         l.addLayout(bl)
         left.addTab(w, "Квесты")
+        self.quest_tab = w
+        left.addTab(self._build_factions(), "Фракции")
         self.left_tabs = left
         d = QDockWidget("Проект", self)
         d.setObjectName("dock_project")
@@ -212,9 +223,12 @@ class MainWindow(QMainWindow):
         self.a_save = self._act("Сохранить", self.save, "Ctrl+S", "Сохранить проект и разложить диалоги, озвучку и сцены по папкам игры")
         self.a_saveas = self._act("Сохранить как…", self.save_as, "Ctrl+Shift+S")
         self.a_import = self._act("Импорт диалогов игры…", self.import_dialogs, None, "Загрузить scripts/dialogs/*.txt в проект")
+        self.a_import_world = self._act("Импорт мира из игры", self.import_world, None,
+                                        "Загрузить scripts/npcs, scripts/world (слои карт, навигация) и фракции из папки игры")
         fm.addActions([self.a_new, self.a_open, self.a_save, self.a_saveas])
         fm.addSeparator()
         fm.addAction(self.a_import)
+        fm.addAction(self.a_import_world)
         self.recent_menu = fm.addMenu("Недавние")
         fm.addSeparator()
         fm.addAction(self._act("Выход", self.close))
@@ -224,8 +238,8 @@ class MainWindow(QMainWindow):
         self.a_redo = self._act("Повторить", self.redo, "Ctrl+Y")
         em.addActions([self.a_undo, self.a_redo])
         em.addSeparator()
-        self.a_newnode = self._act("Новая реплика", lambda: self.on_create(None, self.view.mapToScene(self.view.viewport().rect().center())), "N")
-        self.a_dup = self._act("Дублировать реплику", self.duplicate_selected, "Ctrl+D")
+        self.a_newnode = self._act("Новая реплика", lambda: self._in_dialog() and self.on_create(None, self.view.mapToScene(self.view.viewport().rect().center())), "N")
+        self.a_dup = self._act("Дублировать", self.duplicate_selected, "Ctrl+D")
         self.a_del = self._act("Удалить выделенное", self.delete_selected)
         em.addActions([self.a_newnode, self.a_dup, self.a_del])
         em.addSeparator()
@@ -233,7 +247,10 @@ class MainWindow(QMainWindow):
         em.addAction(self.a_find)
 
         vm = mb.addMenu("&Вид")
-        self.a_fit = self._act("Вписать всё", self.view.fit_all, "F")
+        vm.addAction(self._act("Карта", lambda: self.central_tabs.setCurrentWidget(self.map_panel), "Ctrl+1"))
+        vm.addAction(self._act("Диалог", lambda: self.central_tabs.setCurrentWidget(self.view), "Ctrl+2"))
+        vm.addSeparator()
+        self.a_fit = self._act("Вписать всё / к выделенному", self._fit, "F")
         self.a_zin = self._act("Приблизить", lambda: self.view.set_zoom(self.view.zoom() * 1.25), "Ctrl+=")
         self.a_zout = self._act("Отдалить", lambda: self.view.set_zoom(self.view.zoom() / 1.25), "Ctrl+-")
         self.a_z100 = self._act("Масштаб 100%", lambda: self.view.set_zoom(1.0), "Ctrl+0")
@@ -253,8 +270,8 @@ class MainWindow(QMainWindow):
 
         gm = mb.addMenu("&Игра")
         self.a_sim = self._act("Проверить диалог (в редакторе)", self.simulate, "F5", "Пройти диалог прямо в редакторе: озвучка, квесты, условия")
-        self.a_run = self._act("Запустить в игре", self.run_game, "F6", "Сохранить и запустить карту с этим NPC")
-        self.a_reload = self._act("Обновить диалоги в запущенной игре", self.reload_in_game, "F8")
+        self.a_run = self._act("Запустить в игре", self.run_game, "F6", "Сохранить и запустить карту: с окна карты — с места камеры, из диалога — карту с этим NPC")
+        self.a_reload = self._act("Обновить диалоги и мир в запущенной игре", self.reload_in_game, "F8")
         gm.addActions([self.a_sim, self.a_run, self.a_reload])
 
         hm = mb.addMenu("Справка")
@@ -343,6 +360,7 @@ class MainWindow(QMainWindow):
         self.update_title()
         self.update_status()
         self.run_validation(False)
+        self.init_world()
         if project.path:
             self._add_recent(project.path)
 
@@ -415,6 +433,8 @@ class MainWindow(QMainWindow):
         self.snap_timer.stop()
         p = self.project
         self._store_view()
+        if self.layer is not None:
+            self.layer.camera = self.worldview.camera_state()
         prog = QProgressDialog("Сохранение…", None, 0, 100, self)
         prog.setWindowTitle("Сохранение")
         prog.setWindowModality(Qt.WindowModal)
@@ -456,7 +476,7 @@ class MainWindow(QMainWindow):
         for x in rep.warnings:
             self.logln("  " + x)
         self.statusBar().showMessage("Сохранено: " + rep.summary(), 8000)
-        self.scene.refresh_all()
+        self.gscene.refresh_all()
         self.inspector.show_target(self.inspector.target)
         self.run_validation(False)
         if rep.errors:
@@ -565,9 +585,14 @@ class MainWindow(QMainWindow):
         npc = p.npc(cur) or (p.npcs[0] if p.npcs else None)
         self.npc = npc
         self.rebuild_scene()
+        self.layer = p.layer(self.cur_map, create=True) if self.cur_map else None
+        self.worldview.set_layer(self.layer)
+        self.refresh_palette()
+        self.refresh_faction_list()
+        self.refresh_cell_view()
         self.inspector.show_target(sel)
         if sel and sel[0] in ("node", "option", "returning", "start"):
-            self.scene.select_target(sel)
+            self.gscene.select_target(sel)
         self.restoring = False
         self.dirty = True
         self.update_title()
@@ -596,24 +621,24 @@ class MainWindow(QMainWindow):
         if moved:
             return
         if structural:
-            self.scene.refresh_all()
+            self.gscene.refresh_all()
             self.refresh_quest_list()
         else:
-            for it in self.scene.node_items.values():
+            for it in self.gscene.node_items.values():
                 it.refresh()
-            for e in self.scene.entries.values():
+            for e in self.gscene.entries.values():
                 e.update()
         self.refresh_npc_list(keep=True)
         self.validate_timer.start()
 
     def rebuild_scene(self):
-        self.scene.build(self.project, self.npc, self.display_lang)
+        self.gscene.build(self.project, self.npc, self.display_lang)
 
     def _lang_changed(self):
         lg = self.lang_combo.currentData()
         if lg:
             self.display_lang = lg
-            self.scene.set_lang(lg)
+            self.gscene.set_lang(lg)
             self.refresh_npc_list(keep=True)
             self.refresh_quest_list()
 
@@ -634,8 +659,10 @@ class MainWindow(QMainWindow):
             name, _ = text_for(n.display_name, self.display_lang, self.project.base_language)
             if flt and flt not in n.targetname.lower() and flt not in (name or "").lower():
                 continue
-            onmap = "" if not self.mapindex.maps else (" · " + ", ".join(sorted({e.map for e in self.mapindex.find(n.targetname)})) if self.mapindex.find(n.targetname) else " · нет на картах")
-            it = QListWidgetItem("%s\n   %s · %d реплик%s" % (n.targetname, name or "(без имени)", len(n.nodes), onmap))
+            maps = sorted({e.map for e in self.mapindex.find(n.targetname)} | {m for m, _ in self.project.placements(n.targetname)})
+            onmap = (" · " + ", ".join(maps)) if maps else " · нет на картах"
+            pk = " · пакетов %d" % len(n.actor.packages) if n.actor.packages else ""
+            it = QListWidgetItem("%s\n   %s · %d реплик%s%s" % (n.targetname, name or "(без имени)", len(n.nodes), pk, onmap))
             it.setData(Qt.UserRole, n.targetname)
             self.npc_list.addItem(it)
             if n is self.npc:
@@ -653,6 +680,8 @@ class MainWindow(QMainWindow):
         if self.npc is not None:
             self._store_view()
         self.npc = npc
+        self.worldview.focus_npc = npc.targetname if npc is not None else ""
+        self.worldview.invalidate_overlay()
         self.rebuild_scene()
         if npc is not None:
             st = self.project.view.get(npc.targetname)
@@ -808,7 +837,7 @@ class MainWindow(QMainWindow):
         if assign:
             setattr(assign[0], assign[1], qid)
         self.model_changed(True)
-        self.left_tabs.setCurrentIndex(1)
+        self.left_tabs.setCurrentWidget(self.quest_tab)
         self.inspector.show_target(("quest", qid))
 
     def rename_quest(self, q, new):
@@ -861,7 +890,9 @@ class MainWindow(QMainWindow):
         if target[0] == "quest":
             self.inspector.show_target(target)
             return
-        self.scene.select_target(target, self.view)
+        if target[0] in ("node", "option", "returning", "start") and not self._in_dialog():
+            self.central_tabs.setCurrentWidget(self.view)
+        self.gscene.select_target(target, self.view)
         self.inspector.show_target(target)
 
     def goto(self, targetname, target):
@@ -984,7 +1015,7 @@ class MainWindow(QMainWindow):
             m.addAction("Озвучка (%s)…" % LANGUAGE_NAMES.get(self.display_lang, self.display_lang),
                         lambda: self._attach_voice_dialog(("node", nid)))
             m.addSeparator()
-            m.addAction("Удалить", lambda: self.delete_nodes(self.scene.selected_node_ids() or [nid]))
+            m.addAction("Удалить", lambda: self.delete_nodes(self.gscene.selected_node_ids() or [nid]))
         elif target[0] == "option":
             nid, oi = target[1], target[2]
             n = npc.node(nid)
@@ -1032,11 +1063,11 @@ class MainWindow(QMainWindow):
         self.navigate(("option", n.id, len(n.options) - 1))
 
     def delete_selected(self):
-        ids = self.scene.selected_node_ids()
+        ids = self.gscene.selected_node_ids()
         if ids:
             self.delete_nodes(ids)
             return
-        sel = self.scene.selectedItems()
+        sel = self.gscene.selectedItems()
         for s in sel:
             from .graph import EdgeItem
             if isinstance(s, EdgeItem):
@@ -1061,7 +1092,10 @@ class MainWindow(QMainWindow):
         self.inspector.show_target(("npc",))
 
     def duplicate_selected(self):
-        self.duplicate_nodes(self.scene.selected_node_ids())
+        if not self._in_dialog():
+            self.duplicate_world_selected()
+            return
+        self.duplicate_nodes(self.gscene.selected_node_ids())
 
     def duplicate_nodes(self, ids):
         npc = self.npc
@@ -1227,6 +1261,10 @@ class MainWindow(QMainWindow):
                 where = "#%d вариант %d" % (w[1], w[2] + 1)
             elif w[0] == "quest":
                 where = "квест %s" % w[1]
+            elif w[0] == "package":
+                where = "распорядок, пакет %d" % (w[1] + 1)
+            elif w[0] == "ref":
+                where = "карта %s, #%d" % (w[1], w[2])
             it = QTreeWidgetItem(["", pr.npc, where, pr.message])
             sym, col = icons[pr.severity]
             it.setText(0, sym)
@@ -1242,8 +1280,15 @@ class MainWindow(QMainWindow):
     def _problem_clicked(self, it):
         npc_name, w = it.data(0, Qt.UserRole)
         if w[0] == "quest":
-            self.left_tabs.setCurrentIndex(1)
+            self.left_tabs.setCurrentWidget(self.quest_tab)
             self.inspector.show_target(("quest", w[1]))
+            return
+        if w[0] == "ref":
+            self.focus_ref(w[1], w[2])
+            return
+        if w[0] == "package":
+            self.inspector.pkg_sel = w[1]
+            self.open_npc(npc_name, tab=2)
             return
         npc = self.project.npc(npc_name)
         if npc and npc is not self.npc:
@@ -1263,7 +1308,7 @@ class MainWindow(QMainWindow):
                 blob = " ".join(list(n.line.values()) + [t for o in n.options for t in o.text.values()] + [n.note, str(n.id)]).lower()
                 if text in blob or text == "#%d" % n.id:
                     self.search_hits.append(n.id)
-        self.scene.highlight(set(self.search_hits))
+        self.gscene.highlight(set(self.search_hits))
         if text:
             self.statusBar().showMessage("Найдено реплик: %d" % len(self.search_hits), 3000)
 
@@ -1313,15 +1358,18 @@ class MainWindow(QMainWindow):
         if self.sim is not None:
             self.sim.close()
         self.sim = SimulatorDialog(self, self.npc)
-        self.sim.nodeShown.connect(lambda nid: (self.scene.highlight({nid} if nid >= 0 else set(), "sim_hit"),
-                                                nid >= 0 and nid in self.scene.node_items and
-                                                self.view.centerOn(self.scene.node_items[nid])))
+        self.sim.nodeShown.connect(lambda nid: (self.gscene.highlight({nid} if nid >= 0 else set(), "sim_hit"),
+                                                nid >= 0 and nid in self.gscene.node_items and
+                                                self.view.centerOn(self.gscene.node_items[nid])))
         self.sim.show()
 
     def _maps_for(self, npc):
         return sorted({e.map for e in self.mapindex.find(npc.targetname)})
 
     def run_game(self):
+        if not self._in_dialog() and self.cur_map:
+            self.run_game_here()
+            return
         if not self.project or not self.npc:
             return
         s = self.project.settings
@@ -1356,9 +1404,10 @@ class MainWindow(QMainWindow):
         s = self.project.settings
         if not os.path.isfile(s.hl2_exe):
             return
-        args = [s.hl2_exe, "-hijack", "-game", s.mod_dir, "+dialog_language", self.display_lang, "+dialog_reload"]
+        args = [s.hl2_exe, "-hijack", "-game", s.mod_dir, "+dialog_language", self.display_lang, "+dialog_reload",
+                "+rpm_world_reload", "1"]
         subprocess.Popen(args, cwd=os.path.dirname(s.hl2_exe))
-        self.logln("В игру отправлено: dialog_language %s; dialog_reload" % self.display_lang)
+        self.logln("В игру отправлено: dialog_language %s; dialog_reload; rpm_world_reload 1 (объекты слоя карты созданы заново)" % self.display_lang)
 
     # ======================================================================== misc
     def logln(self, s):
@@ -1370,6 +1419,14 @@ class MainWindow(QMainWindow):
 
     def show_help(self):
         QMessageBox.information(self, "Управление", (
+            "<b>Карта</b> (как в GECK)<br>"
+            "Правая кнопка + WASD — полёт (Q/E — вниз/вверх, Shift — быстрее, колесо при зажатой правой — скорость) · "
+            "колесо — вперёд/назад · средняя кнопка — сдвиг · F — к выделенному<br>"
+            "Левая кнопка — выделить, тащить — двигать по поверхностям (Ctrl — по сетке 16), Alt+тащить — повернуть, "
+            "[ ] — поворот на 15°, Delete — удалить, Ctrl+D — копия<br>"
+            "Слева «Объекты» — двойной клик и клик на карте: NPC, маркеры (кровать, стул, стена…), предметы, контейнеры, пропы, маршруты; "
+            "правая кнопка на карте — поставить сюда. «На карте» — всё, что стоит на открытой карте.<br>"
+            "Распорядок NPC — вкладка «Распорядок» в свойствах NPC; ползунок «Время» над картой показывает, где кто в этот час.<br><br>"
             "<b>Холст</b><br>"
             "Колесо — масштаб к курсору · средняя/правая кнопка или Пробел+ЛКМ — двигать холст · F — вписать всё<br>"
             "Двойной клик по пустому месту — новая реплика · N — новая реплика в центре<br>"
@@ -1381,7 +1438,24 @@ class MainWindow(QMainWindow):
             "серая — нет озвучки, красная — файл не найден; красные буквы — нет перевода текста.<br><br>"
             "<b>Ctrl+S</b> — сохранить проект и разложить всё по папкам игры: scripts/dialogs, sound/dialogs, scenes/dialogs "
             "(WAV конвертируется, липсинк создаётся для изменённых реплик).<br>"
-            "<b>F5</b> — пройти диалог в редакторе · <b>F6</b> — запустить карту в игре · <b>F8</b> — обновить диалоги в запущенной игре"))
+            "<b>F5</b> — пройти диалог в редакторе · <b>F6</b> — запустить карту в игре (с окна карты — с места камеры) · "
+            "<b>F8</b> — обновить диалоги и мир в запущенной игре"))
+
+    # ======================================================================== tabs
+    def _in_dialog(self):
+        return self.central_tabs.currentWidget() is self.view
+
+    def _central_changed(self, i):
+        if self.central_tabs.widget(i) is self.view:
+            self.view.setFocus()
+        else:
+            self.worldview.setFocus()
+
+    def _fit(self):
+        if self._in_dialog():
+            self.view.fit_all()
+        else:
+            self.worldview.focus_selected()
 
     # ======================================================================== screenshots (docs/reports)
     def grab_to(self, path):

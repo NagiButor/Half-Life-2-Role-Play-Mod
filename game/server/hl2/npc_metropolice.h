@@ -20,6 +20,7 @@
 #include "ai_behavior_assault.h"
 #include "ai_behavior_functank.h"
 #include "ai_behavior_actbusy.h"
+#include "ai_behavior_rpmroutine.h"
 #include "ai_behavior_rappel.h"
 #include "ai_behavior_police.h"
 #include "ai_behavior_follow.h"
@@ -538,6 +539,7 @@ private:
 	CHandle<CPhysicsProp>	m_hBlockingProp;
 
 	CAI_ActBusyBehavior		m_ActBusyBehavior;
+	CAI_RPMRoutineBehavior		m_RPMRoutineBehavior;	// HL2RPM: daily routine (Creation Kit)
 #ifdef MAPBASE
 	CMetroPoliceStandoffBehavior	m_StandoffBehavior;
 #else

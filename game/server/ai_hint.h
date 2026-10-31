@@ -310,6 +310,7 @@ public:
 	Hint_e				HintType( void ) const			{ return (Hint_e)m_NodeData.nHintType;  };
 	void				SetHintType( int hintType, bool force = false );
 	string_t			HintActivityName( void ) const	{ return m_NodeData.iszActivityName; }
+	void				SetHintActivityName( string_t isz )	{ m_NodeData.iszActivityName = isz; }	// HL2RPM: routine packages move their own hint
 	int					GetTargetNode( void ) const		{ return m_nTargetNodeID; }
 #ifdef MAPBASE
 	// HACKHACK: This is for when target nodes need to be accessed before being sorted into engine IDs

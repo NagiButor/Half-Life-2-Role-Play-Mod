@@ -146,6 +146,9 @@ public:
 	bool	IsActive( void );
 	// Returns true if the current NPC is actually acting busy (i.e. inside an act busy anim)
 	bool	IsInsideActBusy( void ) { return m_bBusy; }
+	// HL2RPM: whether the NPC's model has the busy animation of an actbusy.txt entry
+	// (an activity or a sequence name) - routine packages check it before forcing
+	bool	CanPlayActBusy( const char *pszActBusyName );
 
 	// Combat act busy stuff
 	bool	IsCombatActBusy();

@@ -515,6 +515,8 @@ bool CNPC_Combine::CreateBehaviors()
 #ifdef MAPBASE
 	AddBehavior( &m_PolicingBehavior );
 #endif
+	// HL2RPM: the daily routine runs when nothing above wants the NPC (actbusy plays its marker animations)
+	AddBehavior( &m_RPMRoutineBehavior );
 
 	return BaseClass::CreateBehaviors();
 }

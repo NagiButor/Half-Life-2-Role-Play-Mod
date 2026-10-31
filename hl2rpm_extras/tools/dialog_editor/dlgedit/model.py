@@ -1,11 +1,13 @@
-"""Project data model of the HL2RPM dialog editor.
+"""Project data model of the HL2RPM Creation Kit (formerly the dialog editor).
 
-A project (.hl2dlg, JSON) holds every NPC dialog and quest of the mod (or of a
-part of it) in all languages. Saving writes the game files:
+A project (.hl2dlg, JSON) holds every NPC (dialog in all languages, actor data and
+AI packages), quest, faction and what is placed on each map. Saving writes the
+game files:
 
     <game_dir>/scripts/dialogs/<targetname>.txt
     <game_dir>/sound/dialogs/<targetname>/<language>/<key>.wav
     <game_dir>/scenes/dialogs/<targetname>/<language>/<key>.vcd
+    <game_dir>/scripts/npcs/<targetname>.txt, scripts/world/<map>.txt (see worlddata.py)
 
 where <key> is the node id, "returning" or "<node>_<option>_after".
 Texts are dicts language -> text; the project's base language is written to
@@ -16,8 +18,10 @@ import json
 import os
 import re
 
+from .worlddata import Actor, Faction, MapLayer
+
 FORMAT = "hl2rpm-dialog-project"
-VERSION = 1
+VERSION = 2
 
 # Source engine language names (cl_language / Steam API) and how to show them
 KNOWN_LANGUAGES = [
@@ -333,6 +337,7 @@ class NPC:
         self.nodes = []
         self.note = ""
         self.start_pos = [0.0, 0.0]
+        self.actor = Actor()
 
     def node(self, nid):
         for n in self.nodes:
@@ -366,6 +371,7 @@ class NPC:
             "start_pos": [round(self.start_pos[0], 1), round(self.start_pos[1], 1)],
             "note": self.note,
             "nodes": [n.to_dict() for n in self.nodes],
+            "actor": self.actor.to_dict(),
         }
 
     @staticmethod
@@ -379,7 +385,12 @@ class NPC:
         n.start_pos = [float(p[0]), float(p[1])]
         n.note = d.get("note", "")
         n.nodes = [Node.from_dict(x) for x in d.get("nodes", [])]
+        n.actor = Actor.from_dict(d.get("actor"))
         return n
+
+    def has_dialog(self):
+        """An NPC made only for the world (no line written) gets no dialog file."""
+        return len(self.nodes) > 1 or any(any(n.line.values()) or n.options for n in self.nodes) or self.returning.enabled()
 
     def returning_target(self):
         """Node whose options the returning visit shows (game logic: from the
@@ -504,6 +515,7 @@ class Settings:
         self.hl2_exe = r"E:\Steam\steamapps\common\Source SDK Base 2013 Singleplayer\hl2.exe"
         self.ffmpeg = ""
         self.test_map = ""
+        self.nav_spacing = 128
 
     def to_dict(self):
         return dict(self.__dict__)
@@ -527,6 +539,8 @@ class Project:
         self.quests = []
         self.managed_files = []   # game-relative paths written by the editor (cleanup of renamed/deleted)
         self.view = {}            # per NPC: canvas zoom/center (editor state)
+        self.factions = []
+        self.maps = {}            # map name -> MapLayer
 
     # --- lookup ----------------------------------------------------------
     def npc(self, targetname):
@@ -545,6 +559,27 @@ class Project:
     def quest_ids(self):
         return [q.id for q in self.quests]
 
+    def faction(self, fid):
+        for f in self.factions:
+            if f.id == fid:
+                return f
+        return None
+
+    def layer(self, name, create=False):
+        m = self.maps.get(name)
+        if m is None and create:
+            m = self.maps[name] = MapLayer(name)
+        return m
+
+    def placements(self, targetname):
+        """[(map, Ref)] of an NPC on all maps."""
+        out = []
+        for mname, layer in sorted(self.maps.items()):
+            for r in layer.refs:
+                if r.type == "npc" and r.npc.lower() == targetname.lower():
+                    out.append((mname, r))
+        return out
+
     @property
     def languages(self):
         return self.settings.languages
@@ -560,6 +595,8 @@ class Project:
             "settings": self.settings.to_dict(),
             "npcs": [n.to_dict() for n in self.npcs],
             "quests": [q.to_dict() for q in self.quests],
+            "factions": [f.to_dict() for f in self.factions],
+            "maps": {k: v.to_dict() for k, v in sorted(self.maps.items())},
             "managed_files": sorted(set(self.managed_files)),
             "view": self.view,
         }
@@ -572,6 +609,8 @@ class Project:
         p.settings = Settings.from_dict(d.get("settings"))
         p.npcs = [NPC.from_dict(x) for x in d.get("npcs", [])]
         p.quests = [Quest.from_dict(x) for x in d.get("quests", [])]
+        p.factions = [Faction.from_dict(x) for x in d.get("factions", [])]
+        p.maps = {k: MapLayer.from_dict(v) for k, v in (d.get("maps") or {}).items()}
         p.managed_files = list(d.get("managed_files", []))
         p.view = d.get("view", {})
         return p

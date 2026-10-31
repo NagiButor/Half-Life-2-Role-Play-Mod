@@ -118,6 +118,7 @@ extern ConVar sk_healthkit;
 #include "utlbuffer.h"
 #include "gamestats.h"
 #include "dialog_definitions.h"
+#include "hl2rpm_world.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -1346,6 +1347,10 @@ int CAI_BaseNPC::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 
 	if ( !BaseClass::OnTakeDamage_Alive( info ) )
 		return 0;
+
+	// HL2RPM: an essential NPC (Creation Kit) is hurt but never dies
+	if ( m_bRPMEssential && m_iHealth < 1 )
+		m_iHealth = 1;
 
 	if ( GetSleepState() == AISS_WAITING_FOR_THREAT )
 #ifdef MAPBASE
@@ -12670,6 +12675,8 @@ BEGIN_DATADESC( CAI_BaseNPC )
 	DEFINE_FIELD( m_bHatePlayerTriggered, FIELD_BOOLEAN ),
 	DEFINE_FIELD( m_bDialogSpoilTriggered, FIELD_BOOLEAN ),
 	DEFINE_FIELD( m_bFactionReactionTriggered, FIELD_BOOLEAN ),
+	DEFINE_FIELD( m_bRPMEssential, FIELD_BOOLEAN ),
+	DEFINE_FIELD( m_bRPMPlayerRelation, FIELD_BOOLEAN ),
 	DEFINE_FIELD( m_bGpcOffTriggered, FIELD_BOOLEAN ),
 	DEFINE_FIELD( m_bGpcOffFactionTriggered, FIELD_BOOLEAN ),
 	DEFINE_KEYFIELD( m_bIgnoreUnseenEnemies, FIELD_BOOLEAN , "ignoreunseenenemies"),
@@ -13663,6 +13670,10 @@ const char *CAI_BaseNPC::GetLootDisplayName() const
 		const char *pszName = DialogDefinitions::GetDisplayNameForEntity( STRING( iszTargetname ) );
 		if ( pszName && pszName[0] )
 			return pszName;
+		// HL2RPM: an NPC of the Creation Kit without a dialog - the name of its definition
+		pszName = RPMWorld::GetNPCDisplayName( STRING( iszTargetname ) );
+		if ( pszName && pszName[0] )
+			return pszName;
 	}
 	return STRING( m_iszLootDisplayName );
 }
@@ -13729,6 +13740,8 @@ CAI_BaseNPC::CAI_BaseNPC(void)
 	m_bHatePlayerTriggered = false;
 	m_bDialogSpoilTriggered = false;
 	m_bFactionReactionTriggered = false;
+	m_bRPMEssential = false;
+	m_bRPMPlayerRelation = false;
 	m_iGordonPrecriminalOverride = 0;
 	m_bGpcOffOnPlayerDamage = false;
 	m_bGpcOffFactionOnPlayerDamage = false;

@@ -1730,6 +1730,14 @@ bool CAI_ActBusyBehavior::HasAnimForActBusy( int iActBusy, busyanimparts_t AnimP
 	return false;
 }
 
+bool CAI_ActBusyBehavior::CanPlayActBusy( const char *pszActBusyName )
+{
+	if ( !pszActBusyName || !pszActBusyName[0] )
+		return false;
+	Activity iActivity = (Activity)CAI_BaseNPC::GetActivityID( pszActBusyName );
+	return HasAnimForActBusy( g_ActBusyAnimDataSystem.FindBusyAnim( iActivity, pszActBusyName ), BA_BUSY );
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: Play the sound associated with the specified part of the current actbusy, if any
 //-----------------------------------------------------------------------------

@@ -15,6 +15,7 @@
 #include "ai_blended_movement.h"
 #include "soundenvelope.h"
 #include "ai_behavior_actbusy.h"
+#include "ai_behavior_rpmroutine.h"
 
 #define ZOM_ATTN_FOOTSTEP ATTN_IDLE
 
@@ -253,6 +254,7 @@ public:
 
 public:
 	CAI_ActBusyBehavior		m_ActBusyBehavior;
+	CAI_RPMRoutineBehavior		m_RPMRoutineBehavior;	// HL2RPM: daily routine (Creation Kit)
 
 
 

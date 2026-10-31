@@ -354,6 +354,7 @@ if ERRORLEVEL 1 exit /b 1
     <ClInclude Include="..\..\common\language.h" />
     <ClInclude Include="inventory_system.h" />
     <ClInclude Include="quest_system.h" />
+    <ClInclude Include="hl2rpm_world.h" />
     <ClInclude Include="item_combine_soldier_suit.h" />
     <ClInclude Include="logicrelay.h" />
     <ClInclude Include="..\..\public\map_utils.h" />
@@ -741,6 +742,7 @@ if ERRORLEVEL 1 exit /b 1
     <ClInclude Include="..\..\game\shared\weapon_proficiency.h" />
     <ClInclude Include="world.h" />
     <ClInclude Include="hl2\ai_behavior_actbusy.h" />
+    <ClInclude Include="hl2\ai_behavior_rpmroutine.h" />
     <ClInclude Include="episodic\ai_behavior_alyx_injured.h" />
     <ClInclude Include="hl2\ai_behavior_functank.h" />
     <ClInclude Include="hl2\ai_behavior_holster.h" />
@@ -1106,6 +1108,7 @@ if ERRORLEVEL 1 exit /b 1
     <ClCompile Include="inventory_entity_listener.cpp" />
     <ClCompile Include="inventory_system.cpp" />
     <ClCompile Include="quest_system.cpp" />
+    <ClCompile Include="hl2rpm_world.cpp" />
     <ClCompile Include="item_combine_soldier_suit.cpp" />
     <ClCompile Include="item_world.cpp" />
     <ClCompile Include="..\..\public\keyframe\keyframe.cpp">
@@ -1330,6 +1333,7 @@ if ERRORLEVEL 1 exit /b 1
     <ClCompile Include="..\..\game\shared\episodic\achievements_epx.cpp" />
     <ClCompile Include="hl2\ai_allymanager.cpp" />
     <ClCompile Include="hl2\ai_behavior_actbusy.cpp" />
+    <ClCompile Include="hl2\ai_behavior_rpmroutine.cpp" />
     <ClCompile Include="episodic\ai_behavior_alyx_injured.cpp" />
     <ClCompile Include="hl2\ai_behavior_functank.cpp" />
     <ClCompile Include="hl2\ai_behavior_holster.cpp" />

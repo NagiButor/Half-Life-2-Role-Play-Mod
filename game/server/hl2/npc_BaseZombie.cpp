@@ -1863,6 +1863,8 @@ void CNPC_BaseZombie::StartTouch( CBaseEntity *pOther )
 bool CNPC_BaseZombie::CreateBehaviors()
 {
 	AddBehavior( &m_ActBusyBehavior );
+	// HL2RPM: the daily routine runs when nothing above wants the NPC (actbusy plays its marker animations)
+	AddBehavior( &m_RPMRoutineBehavior );
 
 	return BaseClass::CreateBehaviors();
 }

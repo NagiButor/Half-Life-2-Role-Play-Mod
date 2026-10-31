@@ -15,6 +15,7 @@
 #include "ai_behavior_assault.h"
 #include "ai_behavior_lead.h"
 #include "ai_behavior_actbusy.h"
+#include "ai_behavior_rpmroutine.h"
 #include "ai_behavior_fear.h"
 
 #ifdef HL2_EPISODIC
@@ -433,6 +434,7 @@ protected:
 	CAI_StandoffBehavior			m_StandoffBehavior;
 	CAI_LeadBehavior				m_LeadBehavior;
 	CAI_ActBusyBehavior				m_ActBusyBehavior;
+	CAI_RPMRoutineBehavior		m_RPMRoutineBehavior;	// HL2RPM: daily routine (Creation Kit)
 #ifdef HL2_EPISODIC
 	CAI_OperatorBehavior			m_OperatorBehavior;
 	CAI_PassengerBehaviorCompanion	m_PassengerBehavior;

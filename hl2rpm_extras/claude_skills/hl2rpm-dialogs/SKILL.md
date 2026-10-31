@@ -1,6 +1,6 @@
 ---
 name: hl2rpm-dialogs
-description: Work with the HL2RPM RPG systems - NPC dialogs (scripts/dialogs/*.txt), quests, reputation, factions, loot (NPC corpses, func_loot_container), inventory and their Hammer entities/keys (trigger_dialog_start, ftag, spoil_on_dmg, loot_items...). Use to write or fix a dialog or quest, place a talking NPC on a map, validate dialog files, or debug why a dialog/quest/loot does not work.
+description: Work with the HL2RPM RPG systems - NPC dialogs (scripts/dialogs/*.txt), quests, reputation, factions, loot (NPC corpses, func_loot_container, prop_loot_container), inventory, the HL2RPM Creation Kit world layer (scripts/npcs, scripts/world - NPCs placed without Hammer, markers, AI packages / daily routine, nav nodes) and their Hammer entities/keys (trigger_dialog_start, ftag, spoil_on_dmg, loot_items...). Use to write or fix a dialog, quest or NPC routine, place a talking NPC on a map, validate dialog files, or debug why a dialog/quest/loot/routine does not work.
 ---
 
 # HL2RPM dialogs, quests, loot
@@ -13,22 +13,54 @@ client UI: `game/client/vgui_dialogpanel.cpp`, `vgui_lootpanel.cpp`,
 BaseNPC block, `hl2rpm.fgd`). Placing entities: `hl2rpm-hammer` skill.
 Testing in game: `hl2rpm-playtest` skill.
 
-## The dialog editor (preferred way for the user)
+## The HL2RPM Creation Kit (preferred way for the user; formerly "Dialog Editor")
 
-`E:\SourceModding\HL2RPMSOURCE\HL2RPM Dialog Editor\HL2RPM Dialog Editor.exe`
-(sources + build: `hl2rpm_extras/tools/dialog_editor`, `build_editor.ps1`; README there).
+`E:\SourceModding\HL2RPMSOURCE\HL2RPM Creation Kit\HL2RPM Creation Kit.exe`
+(sources + build: `hl2rpm_extras/tools/dialog_editor`, entry `hl2rpm_creation_kit.py`,
+`build_editor.ps1`; README there). Besides dialogs it has a 3D map window (GECK-like: place
+NPCs, markers, items, containers, props, patrol paths on compiled maps), NPC actor data and
+AI packages, factions and nav nodes - see "World layer" below.
 A project (`*.hl2dlg`, JSON) holds NPCs, nodes, quests, voices of all languages and
 canvas positions. Saving writes `scripts/dialogs/<npc>.txt`, converts/copies voices to
 `sound/dialogs/<npc>/<language>/<key>.wav` and generates lip sync scenes
 `scenes/dialogs/<npc>/<language>/<key>.vcd` (`<key>` = node id, `returning`,
-`<node>_<option>_after`) into the project's game folder. Lip sync = the mod's
+`<node>_<option>_after`) into the project's game folder, plus `scripts/npcs/<npc>.txt`,
+`scripts/world/<map>.txt`, `scripts/world/<map>_nav.txt`, `scripts/world/factions.txt`. Lip sync = the mod's
 generator (`dlgedit/lipsync_gen/vcd_english.py`, `vcd_russian.py`), regenerated only
 for changed text/audio. Files written by the editor carry the header
-`// HL2RPM Dialog Editor: generated` — **edit those NPCs in the editor, not by hand**
+`// HL2RPM Creation Kit: generated` (older: `HL2RPM Dialog Editor: generated`) — **edit those in the program, not by hand**
 (hand edits are overwritten on the next save; import them back with Файл → Импорт).
 The user's test project: `E:\SourceModding\HL2RPMSOURCE\dialogsrc\test_dialogs.hl2dlg`
-(game folder = `hl2rpm\testmaps`). Screenshot mode for reports:
-`"HL2RPM Dialog Editor.exe" <project> --shot out.png --npc demo_npc_1 --lang russian --zoom 0.85 --select node:1|option:1:2|returning|quest:<id> [--sim --sim-steps c,0]`.
+(game folder = `hl2rpm\testmaps`). Screenshot mode for reports (captures the screen - window grab() misses the 3D labels):
+`"HL2RPM Creation Kit.exe" <project> --shot out.png --npc demo_npc_1 --lang russian --zoom 0.85 --select node:1|option:1:2|returning|quest:<id>|ref:<id>|hammer:<entity index>|faction:<id> [--sim --sim-steps c,0] [--tab map --map ck_test --cam x,y,z,pitch,yaw --hour 23 --npc-tab 0|1|2 --left N]`.
+
+## World layer and NPC routines (Creation Kit)
+
+Server: `game/server/hl2rpm_world.cpp` (+ `.h`), behavior `hl2/ai_behavior_rpmroutine.cpp`.
+Test map: `ck_test` (house with bed/table/chairs, yard, no info_node; `hl2rpm_extras/tools/make_ck_test.py`),
+its content in `testmaps/scripts/world/ck_test*.txt`, `testmaps/scripts/npcs/ck_*.txt`.
+
+- `scripts/npcs/<targetname>.txt` `"NPC"`: `classname`, `model`, `skin`, `weapon`, `squad`, `faction` (= ftag),
+  `player_relation` friend|neutral|enemy, `health`, `essential` 1 (never dies), `commandable` 1 (may join the
+  player's squad - otherwise citizens are made SF_CITIZEN_NOT_COMMANDABLE), `display_name[_<lang>]`,
+  `keyvalues { ... }` (citizentype, hate_on_dmg, loot_items, loot_displayname...), `packages { "0" {...} }`.
+  Applies to a layer-spawned NPC and to a Hammer NPC with the same targetname (routine, faction, flags).
+- Package keys: `name`, `type` (sleep eat sandbox patrol wander travel guard use_marker wait follow talk),
+  `start` (hour), `duration` (hours, 24 = always), `location` self|ref|point|player|current, `ref`, `point "x y z"`,
+  `yaw`, `radius`, `run`, `anim` (actbusy name), `markers "sit;lean"`, `path`, `path_mode` loop|pingpong|once,
+  `target` (follow), `once` (talk), `min_use`/`max_use` (sandbox), `require_quest_state "q:active"`,
+  `require_quest_stage "q:1"`. The first matching package runs (GECK order).
+- `scripts/world/<map>.txt` `"World" { "refs" { "<id>" { "type" ... "origin" "x y z" "angles" "p y r" } } }`:
+  `npc` (`npc` = targetname of a definition), `marker` (`name`, `kind` sleep|sit|eat|lean|ground|work|guard|idle,
+  `anim`, `owner`), `item` (`classname`), `container` (`model`, `loot_items`, `loot_displayname[_<lang>]`),
+  `prop` (`model`, `physics`), `path` (`name`, `points { "0" { "origin" "wait" "yaw" "anim" } }`), `entity`
+  (`classname`, `keyvalues`). Spawned once on a new map (never on a loaded save / revisited level).
+- `scripts/world/factions.txt` `"Factions" { "<id>" { "player" "friend" "relations" { "<other>" "enemy" } } }`.
+  Without faction relations metrocops/soldiers kill citizens on sight (HL2 class relations).
+- Nav: `rpm_nav_generate [spacing] [max] [file]` writes AI nodes; `scripts/world/<map>_nav.txt` ("x y z" lines)
+  is added to the node graph, a changed file rebuilds the `.ain`.
+- Console: `rpm_world_reload [1]` (1 = respawn the layer), `rpm_world_dump`, `rpm_ai_debug 1|2`,
+  `sv_timecycle_set_time <h>` to jump in time. Test: `run_game.ps1 -Map ck_test -Steps "shot|sv_timecycle_set_time 23; rpm_ai_debug 1"`.
 
 ## Languages
 

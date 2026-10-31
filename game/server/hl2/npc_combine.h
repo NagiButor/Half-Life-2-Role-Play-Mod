@@ -19,6 +19,7 @@
 #include "ai_behavior_functank.h"
 #include "ai_behavior_rappel.h"
 #include "ai_behavior_actbusy.h"
+#include "ai_behavior_rpmroutine.h"
 #include "ai_sentence.h"
 #include "ai_baseactor.h"
 #ifdef MAPBASE
@@ -366,6 +367,7 @@ private:
 	CAI_FuncTankBehavior		m_FuncTankBehavior;
 	CAI_RappelBehavior			m_RappelBehavior;
 	CAI_ActBusyBehavior			m_ActBusyBehavior;
+	CAI_RPMRoutineBehavior		m_RPMRoutineBehavior;	// HL2RPM: daily routine (Creation Kit)
 #ifdef MAPBASE
 	CAI_PolicingBehavior		m_PolicingBehavior;
 #endif

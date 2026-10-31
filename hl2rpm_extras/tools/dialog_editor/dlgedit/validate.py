@@ -3,7 +3,8 @@ notice (broken links, missing translations/voice, unreachable lines...).
 
 Each problem: (severity, npc targetname or "", where, message) where
 `where` is ("npc",) / ("node", id) / ("option", id, index) / ("returning",) /
-("quest", id) and severity is "error" | "warning" | "info".
+("quest", id) / ("package", index) / ("ref", map, id) and severity is
+"error" | "warning" | "info".
 """
 import glob
 import os
@@ -53,6 +54,10 @@ def validate(project, mapindex=None, check_files=True):
         for lg, s in npc.display_name.items():
             if any(c in s for c in BAD_CHARS):
                 add("error", npc, ("npc",), "имя (%s) содержит | ; ~ — это разделители передачи диалога" % _lname(lg))
+        validate_actor(p, npc, add)
+        if not npc.has_dialog():
+            # an NPC of the world without lines: no dialog file, nothing to check
+            continue
         if not npc.nodes:
             add("error", npc, ("npc",), "нет ни одной реплики")
             continue
@@ -62,7 +67,7 @@ def validate(project, mapindex=None, check_files=True):
 
         # map presence
         if mapindex is not None and mapindex.maps:
-            if not mapindex.find(t):
+            if not mapindex.find(t) and not p.placements(t):
                 add("info", npc, ("npc",), "NPC «%s» не найден ни на одной карте из папок карт" % t)
 
         # reachability
@@ -201,6 +206,8 @@ def validate(project, mapindex=None, check_files=True):
             if not item or int(amount) <= 0:
                 out.append(Problem("warning", q.owner, w, "квест «%s»: пустая награда" % q.id))
 
+    out += validate_world(p)
+
     # other dialog files of the game that define the same NPCs
     if check_files:
         mine = {n.targetname.lower() for n in p.npcs}
@@ -217,4 +224,77 @@ def validate(project, mapindex=None, check_files=True):
                     out.append(Problem("warning", name, ("npc",), "в игре есть ещё файл %s с этим NPC — загрузится какой-то один" % f))
     order = {"error": 0, "warning": 1, "info": 2}
     out.sort(key=lambda x: (order[x.severity], x.npc))
+    return out
+
+
+def validate_actor(p, npc, add):
+    """AI packages and placements of an NPC (world part of the Creation Kit)."""
+    from .worlddata import NPC_HAS_ROUTINE, PACKAGE_NAMES
+    a = npc.actor
+    places = p.placements(npc.targetname)
+    if a.packages and not NPC_HAS_ROUTINE.get(a.classname, True):
+        add("warning", npc, ("npc",), "у класса %s нет распорядка в игре — пакеты не будут работать" % a.classname)
+    if a.faction and not p.faction(a.faction):
+        add("info", npc, ("npc",), "фракция «%s» не описана (отношения по классу NPC)" % a.faction)
+    maps = [m for m, _ in places]
+    names = set()
+    paths = set()
+    for m in maps or list(p.maps):
+        layer = p.layer(m)
+        if layer:
+            names.update(r.name for r in layer.refs if r.name)
+            paths.update(layer.path_names())
+    for i, pk in enumerate(a.packages):
+        w = ("package", i)
+        label = "пакет %d «%s»" % (i + 1, pk.name)
+        if pk.type == "patrol":
+            if not pk.path:
+                add("error", npc, w, "%s: не выбран маршрут" % label)
+            elif pk.path not in paths:
+                add("warning", npc, w, "%s: маршрута «%s» нет на картах NPC" % (label, pk.path))
+        if (pk.location == "ref" or pk.type == "use_marker") and pk.ref and pk.ref not in names:
+            add("warning", npc, w, "%s: «%s» нет на картах NPC (в игре — только если стоит в Hammer)" % (label, pk.ref))
+        if pk.location == "ref" and not pk.ref and pk.type != "use_marker":
+            add("error", npc, w, "%s: место «маркер или объект», но имя не выбрано" % label)
+        if pk.location == "point" and not any(pk.point):
+            add("warning", npc, w, "%s: точка 0 0 0 — укажите её на карте" % label)
+        if pk.type in ("sleep", "eat") and maps:
+            kind = "sleep" if pk.type == "sleep" else "eat"
+            have = any(r.type == "marker" and r.kind in (kind, "sit") and (not r.owner or r.owner.lower() == npc.targetname.lower())
+                       for m in maps for r in p.layer(m).refs)
+            if not have:
+                add("info", npc, w, "%s: на картах NPC нет маркера «%s» — %s" % (
+                    label, "кровать" if kind == "sleep" else "стол", "уснёт на земле" if kind == "sleep" else "будет стоять"))
+        if not pk.always() and pk.duration <= 0:
+            add("error", npc, w, "%s: пустое время" % label)
+    if a.packages:
+        covered = sum(1 for k in range(96) if a.package_at((k + 0.5) / 4.0))
+        if covered < 96:
+            add("info", npc, ("npc",), "распорядок покрывает %d из 24 ч — в остальное время NPC стоит как обычно" % (covered // 4))
+        if not places and not npc.nodes:
+            add("info", npc, ("npc",), "есть распорядок, но NPC не поставлен на карту из программы")
+
+
+def validate_world(p):
+    """Placed objects: markers, owners, names, NPC references."""
+    out = []
+    from .worlddata import MARKER_NAMES
+    seen = {}
+    for m, layer in sorted(p.maps.items()):
+        for r in layer.refs:
+            w = ("ref", m, r.id)
+            if r.type == "npc" and not p.npc(r.npc):
+                out.append(Problem("error", "", w, "%s: объект NPC «%s» — такого NPC нет в проекте" % (m, r.npc)))
+            if r.type == "marker":
+                if r.owner and not p.npc(r.owner):
+                    out.append(Problem("warning", "", w, "%s: маркер «%s» — владелец «%s» не найден" % (m, r.name or r.id, r.owner)))
+            if r.type == "path" and len(r.points) < 2:
+                out.append(Problem("warning", "", w, "%s: маршрут «%s» — меньше двух точек" % (m, r.name)))
+            if r.type == "container" and not r.model:
+                out.append(Problem("error", "", w, "%s: контейнер #%d без модели" % (m, r.id)))
+            if r.name:
+                key = (m, r.name.lower())
+                if key in seen:
+                    out.append(Problem("error", "", w, "%s: имя «%s» повторяется (маркеры/маршруты ищутся по имени)" % (m, r.name)))
+                seen[key] = r
     return out

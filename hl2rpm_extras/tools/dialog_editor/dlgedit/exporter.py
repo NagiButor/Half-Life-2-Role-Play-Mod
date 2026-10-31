@@ -3,6 +3,9 @@
     scripts/dialogs/<npc>.txt                    dialog + its quests, all languages
     sound/dialogs/<npc>/<lang>/<key>.wav         voice (converted for Source if needed)
     scenes/dialogs/<npc>/<lang>/<key>.vcd        scene with lip sync
+    scripts/npcs/<npc>.txt                       actor and AI packages (world_export.py)
+    scripts/world/<map>.txt, <map>_nav.txt       what is placed on a map, AI nodes
+    scripts/world/factions.txt                   faction relations
 
 Plain keys carry the base language, "<key>_<lang>" the others; the game picks by
 its language (dialog_language / cl_language). Only files the editor wrote
@@ -15,11 +18,19 @@ import shutil
 from . import audio
 from . import kv
 from . import lipsync
+from . import world_export
 from .model import canonical_vcd, canonical_wav, media_key_after, media_key_node
 
-HEADER = ("HL2RPM Dialog Editor: generated from %s\n"
-          "Edit this NPC in the editor - manual changes are overwritten on save.")
-HEADER_MARK = "HL2RPM Dialog Editor: generated"
+HEADER = ("HL2RPM Creation Kit: generated from %s\n"
+          "Edit this in the Creation Kit - manual changes are overwritten on save.")
+HEADER_MARK = "HL2RPM Creation Kit: generated"
+# files of the earlier name of the program are ours too
+HEADER_MARKS = (HEADER_MARK, "HL2RPM Dialog Editor: generated")
+
+
+def is_ours(data):
+    head = data[:400]
+    return any(m.encode() in head for m in HEADER_MARKS)
 
 
 class ExportReport:
@@ -33,9 +44,12 @@ class ExportReport:
         self.backups = []
         self.errors = []
         self.warnings = []
+        self.world = []           # NPC / map / faction files written
 
     def summary(self):
         parts = ["диалогов записано: %d (без изменений: %d)" % (len([w for w in self.written if w.endswith(".txt")]), self.unchanged)]
+        if self.world:
+            parts.append("мир (NPC, карты, фракции): %d" % len(self.world))
         if self.copied:
             parts.append("озвучка/сцены разложены: %d" % len(self.copied))
         if self.converted:
@@ -63,7 +77,7 @@ def _write_if_changed(path, text, report, project_name, count=True):
             if count:
                 report.unchanged += 1
             return False
-        if HEADER_MARK.encode() not in old[:400]:
+        if not is_ours(old):
             stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             bak = path + ".bak_" + stamp
             shutil.copyfile(path, bak)
@@ -333,20 +347,46 @@ class Exporter:
             return self.report
         npcs = [n for n in p.npcs if self.only_npcs is None or n.targetname in self.only_npcs]
         total = max(1, len(npcs))
+        header = HEADER % os.path.basename(p.path or "project")
         for i, npc in enumerate(npcs):
-            self.progress(i / total, "NPC %s" % npc.targetname)
-            root = self.build_npc_kv(npc, with_media=True)
-            text = kv.dumps(root, header=HEADER % os.path.basename(p.path or "project"))
-            rel = "scripts/dialogs/%s.txt" % npc.targetname
-            _write_if_changed(os.path.normpath(os.path.join(gd, rel)), text, self.report, p.path)
-            self.managed.add(rel)
+            self.progress(i / total * 0.9, "NPC %s" % npc.targetname)
+            if npc.has_dialog():
+                root = self.build_npc_kv(npc, with_media=True)
+                text = kv.dumps(root, header=header)
+                rel = "scripts/dialogs/%s.txt" % npc.targetname
+                _write_if_changed(os.path.normpath(os.path.join(gd, rel)), text, self.report, p.path)
+                self.managed.add(rel)
+            if world_export.needs_npc_file(npc) or p.placements(npc.targetname):
+                rel = "scripts/npcs/%s.txt" % npc.targetname
+                text = kv.dumps(world_export.npc_kv(p, npc), header=header)
+                if _write_if_changed(os.path.normpath(os.path.join(gd, rel)), text, self.report, p.path, count=False):
+                    self.report.world.append(rel)
+                self.managed.add(rel)
         if self.only_npcs is None:
+            self.progress(0.92, "Карты и фракции")
+            self._world(header)
             self._cleanup()
             p.managed_files = sorted(self.managed)
         else:
             p.managed_files = sorted(set(p.managed_files) | self.managed)
         self.progress(1.0, "Готово")
         return self.report
+
+    def _world(self, header):
+        p = self.p
+        gd = p.settings.game_dir
+
+        def put(rel, text):
+            if _write_if_changed(os.path.normpath(os.path.join(gd, rel)), text, self.report, p.path, count=False):
+                self.report.world.append(rel)
+            self.managed.add(rel)
+        for name, layer in sorted(p.maps.items()):
+            if layer.refs:
+                put("scripts/world/%s.txt" % name, kv.dumps(world_export.layer_kv(p, layer), header=header))
+            if layer.nav:
+                put("scripts/world/%s_nav.txt" % name, world_export.nav_text(layer, header))
+        if p.factions:
+            put("scripts/world/factions.txt", kv.dumps(world_export.factions_kv(p), header=header))
 
     def _cleanup(self):
         gd = self.p.settings.game_dir
@@ -355,9 +395,9 @@ class Exporter:
             if not os.path.exists(path):
                 continue
             low = rel.replace("\\", "/").lower()
-            if low.startswith("scripts/dialogs/"):
+            if low.startswith("scripts/dialogs/") or low.startswith("scripts/npcs/") or low.startswith("scripts/world/"):
                 with open(path, "rb") as f:
-                    if HEADER_MARK.encode() not in f.read(400):
+                    if not is_ours(f.read(400)):
                         continue
             elif not (low.startswith("sound/dialogs/") or low.startswith("scenes/dialogs/")):
                 continue
