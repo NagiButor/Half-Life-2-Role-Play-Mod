@@ -1151,6 +1151,10 @@ int CHLClient::Init( CreateInterfaceFn appSystemFactory, CreateInterfaceFn physi
 
 	vgui::VGui_InitMatSysInterfacesList( "ClientDLL", &appSystemFactory, 1 );
 
+	// HL2RPM: the language of the settings, before GameUI builds its menus
+	extern void RPMLanguage_LoadAtStart();
+	RPMLanguage_LoadAtStart();
+
 	// Add the client systems.	
 	
 	// Client Leaf System has to be initialized first, since DetailObjectSystem uses it
@@ -1306,6 +1310,10 @@ void CHLClient::PostInit()
 
 	g_ClientVirtualReality.StartupComplete();
 
+	// HL2RPM: our main / pause menu over GameUI's (hl2rpm_mainmenu.cpp)
+	extern void RPMMainMenu_Create();
+	RPMMainMenu_Create();
+
 #ifdef HL1MP_CLIENT_DLL
 	if ( s_cl_load_hl1_content.GetBool() && steamapicontext && steamapicontext->SteamApps() )
 	{
@@ -1366,8 +1374,10 @@ void CHLClient::Shutdown( void )
 	UncacheAllMaterials();
 
 	IGameSystem::ShutdownAllSystems();
-	
+
 	gHUD.Shutdown();
+	extern void RPMMainMenu_Destroy();
+	RPMMainMenu_Destroy();
 	VGui_Shutdown();
 	
 	ParticleMgr()->Term();

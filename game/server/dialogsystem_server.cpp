@@ -1,4 +1,6 @@
 #include "cbase.h"
+#include "hl2rpm_char.h"
+#include "hl2rpm_rpgdefs.h"
 #include "dialogsystem_server.h"
 #include "dialog_definitions.h"
 #include "dialog_debug.h"
@@ -8,6 +10,9 @@
 #include "igameevents.h"
 #include "quest_system.h"
 #include "hl2rpm_world.h"
+#include "hl2rpm_rpg.h"
+#include "hl2rpm_logic.h"
+#include "tier1/fmtstr.h"
 
 namespace DialogSystemServer
 {
@@ -38,6 +43,9 @@ namespace DialogSystemServer
         const DialogDefinitions::DSDialog *dlg = DialogDefinitions::FindDialogForEntity(ename);
         if (dlg)
         {
+            // HL2RPM: "talk" objectives and events first - a stage they advance may change the options
+            if (!DialogDefinitions::IsEntitySpoiled(dlg->entityName.Get()))
+                RPMLogic::NoteTalk(pPlayer, pNPC);
             DialogDefinitions::SendDialogToPlayer(pPlayer, dlg, pNPC->entindex());
         }
         else
@@ -99,6 +107,38 @@ namespace DialogSystemServer
                 return;
         }
 
+        // HL2RPM (Creation Kit): conditions, the skill check, the actions of the option
+        RPMLogic::Ctx_t lctx;
+        lctx.pPlayer = pPlayer;
+        lctx.pSelf = gEntList.FindEntityByName(NULL, entityName);
+        if (opt.pConds && !RPMLogic::Check(opt.pConds, lctx))
+            return;     // a greyed option, or the state changed since it was shown
+        if (opt.pCheck)
+        {
+            bool bPass = RPMLogic::CheckPasses(opt.pCheck, pPlayer, NULL, 0);
+            // HL2RPM: experience for a passed check (once per option)
+            CFmtStr xpKey("%s.%d.%d", dlg->entityName.Get(), nodeId, optionIndex);
+            if (bPass && !RPMState::Section("checks_xp")->GetInt(xpKey, 0))
+            {
+                RPMState::Section("checks_xp")->SetInt(xpKey, 1);
+                RPMChar::AddXP(pPlayer, (int)RPMRPG::Rule("xp_check"));
+            }
+            if (opt.checkOnce)
+                RPMState::Section("checks")->SetInt(CFmtStr("%s.%d.%d", dlg->entityName.Get(), nodeId, optionIndex), 1);
+            if (!bPass)
+            {
+                RPMLogic::Run(opt.pFailActions, lctx);
+                if (opt.failNextId != -1)
+                    DialogDefinitions::SendDialogNodeToPlayer(pPlayer, dlg, opt.failNextId, lctx.pSelf ? lctx.pSelf->entindex() : -1);
+                else
+                {
+                    DialogDefinitions::MarkEntitySpoken(entityName);
+                    engine->ClientCommand(pPlayer->edict(), "dialog_open_end\n");
+                }
+                return;
+            }
+        }
+
         if (opt.grantQuestId[0])
         {
             if (!QuestSystem().GrantQuest(pPlayer, opt.grantQuestId))
@@ -120,6 +160,8 @@ namespace DialogSystemServer
                 engine->ClientCommand(pPlayer->edict(), "ui_toast \"quest\" \"SetQuestStage failed\" \"\"\n");
         }
 
+        RPMLogic::Run(opt.pActions, lctx);
+
         if (opt.serverSequenceName[0])
         {
             DevMsg("DialogSystem: option requests server sequence '%s'\n", opt.serverSequenceName);
@@ -134,6 +176,15 @@ namespace DialogSystemServer
             {
                 DevMsg("DialogSystem: option server sequence '%s' not found\n", opt.serverSequenceName);
             }
+        }
+
+        // HL2RPM: trade - the dialog closes, the NPC's trade window opens
+        if (opt.trade)
+        {
+            DialogDefinitions::MarkEntitySpoken(entityName);
+            engine->ClientCommand(pPlayer->edict(), "dialog_open_end\n");
+            RPMTrade::Open(pPlayer, gEntList.FindEntityByName(NULL, entityName));
+            return;
         }
 
         if (opt.nextId != -1)
@@ -208,6 +259,14 @@ namespace DialogSystemServer
 
         int effectiveAutoNextId = (overrideAutoNextId != INT_MIN) ? overrideAutoNextId : pNode->autoNextId;
         bool effectiveAutoClose = (overrideAutoClose >= 0) ? (overrideAutoClose != 0) : pNode->autoClose;
+        int lastNext, lastClose;
+        if (overrideAutoNextId == INT_MIN && DialogDefinitions::GetLastScreenTransition(entityName, nodeId, lastNext, lastClose))
+        {
+            // the screen on the client is the one we sent last: continue the way it was told to,
+            // not with the node's own keys (a returning line shows node 0 with node 2's options next)
+            effectiveAutoNextId = lastNext;
+            effectiveAutoClose = lastClose != 0;
+        }
 
         if (effectiveAutoNextId != -1)
         {

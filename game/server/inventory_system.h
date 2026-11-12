@@ -36,6 +36,9 @@ namespace InventorySystem
     // Returns remaining bullets stored in that removed item if it was an ammo item,
     // or 0 for non-ammo items, or -1 if nothing was removed.
     int RemoveItemFromPlayer(CBasePlayer *pPlayer, const char *itemName);
+    // HL2RPM: how many of an item the player has (stackables: the stack count) / take that many
+    int CountItem(CBasePlayer *pPlayer, const char *itemName);
+    int TakeItems(CBasePlayer *pPlayer, const char *itemName, int count);
 
     // Send the player's inventory to their client (opens the panel)
     void SendInventoryToPlayer(CBasePlayer *pPlayer);

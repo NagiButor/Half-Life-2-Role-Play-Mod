@@ -24,6 +24,7 @@ class CBaseEntity;
 class CBasePlayer;
 class CAI_BaseNPC;
 class CAI_Hint;
+class CBaseAnimating;
 
 // AI package types (GECK-like)
 enum RPMPackageType_t
@@ -84,6 +85,7 @@ struct RPMPackage_t
 	int			reqQuestState;
 	CUtlString	reqQuestStageId;
 	int			reqQuestStage;
+	KeyValues	*pConds;		// "conditions" of the Creation Kit (RPMLogic, owned by POOL_WORLD)
 };
 
 struct RPMNPCDef_t
@@ -99,8 +101,29 @@ struct RPMNPCDef_t
 	int			health;
 	bool		essential;
 	bool		commandable;	// citizens: may join the player's squad (HL2 autosquad / USE)
+	// variation (templates of the Creation Kit): a random pick per spawned NPC
+	CUtlStringList models;		// "models" "a.mdl;b.mdl"
+	CUtlStringList weapons;		// "weapons" "weapon_pistol;weapon_smg1;" (empty entry = no weapon)
+	KeyValues	*pNameList;		// "names" { "0" { "english" ".." "russian" ".." } ... }
+	int			skinMax;		// random skin skin..skinMax (0 = fixed)
+	int			proficiency;	// -1 default, else WEAPON_PROFICIENCY_POOR..PERFECT (0..4)
+	int			aggression;		// -1 by class / faction; 0 never attacks first, 1 attacks enemies, 2 all but friends, 3 frenzied
+	int			confidence;		// -1 by class; 0 cowardly (flees at once), 1 cautious (< 50 % health), 2 average (< 25 %), 3 brave
+	int			xp;				// experience for killing it (the RPG system)
+	// behaviour (-1 = the rule of scripts/rpg/rpg.txt / by class): moves out of the player's way (0 / 1),
+	// picks weapons up from the floor (0 never / 1 HL2 / 2 only in the player's squad), weapon ban
+	// (0 not concerned / 1 civilian: may not carry weapons / 2 enforcer: warns, then attacks / 3 enforcer: attacks)
+	int			yield;
+	int			pickupWeapons;
+	int			weaponLaw;
 	KeyValues	*pKeys;			// extra keyvalues for the spawn (loot_items, citizentype...)
 	KeyValues	*pNames;		// display_name, display_name_<language> (loot window of NPCs without a dialog)
+	KeyValues	*pVendor;		// "vendor" { list money markup pays restock_hours currency } or NULL (RPMTrade)
+	// sound (hl2rpm_audio.cpp): HL2 lines -1 default (kit NPCs: combat only) / 0 all / 1 combat / 2 none,
+	// barks of the NPC (RPMLogic::POOL_WORLD) and the shared sets of scripts/rpg/barks.txt it uses
+	int			stockSpeech;
+	KeyValues	*pBarks;
+	CUtlString	barkSets;
 	CUtlVector<RPMPackage_t> packages;
 };
 
@@ -110,6 +133,7 @@ struct RPMMarker_t
 	CUtlString	kind;			// sleep sit eat lean work guard idle
 	CUtlString	anim;
 	CUtlString	owner;			// targetname of the NPC it belongs to, empty - anyone
+	float		seatH;			// height of the seat / bed under it (pose parameter rpm_seat_h), -1 - not set
 };
 
 struct RPMPathPoint_t
@@ -134,19 +158,47 @@ namespace RPMWorld
 	const RPMPath_t		*FindPath( const char *pszName );
 	// "<key>_<language>" (the game's dialog language) or "<key>" of an NPC definition / a layer reference
 	const char	*GetNPCDisplayName( const char *pszTargetname );
+	// the name of this NPC (a random name of a template if one was picked at spawn)
+	const char	*GetNPCDisplayNameFor( CBaseEntity *pEnt );
+	// spawn an NPC of a definition (spawn points, events); NULL if there is no such definition
+	CBaseEntity	*SpawnNPC( const char *pszDef, const Vector &origin, const QAngle &angles, const char *pszTag );
 	const char	*GetRefString( CBaseEntity *pLayerEntity, const char *pszKey );
+	// the localized name of a faction of scripts/world/factions.txt (its id if none)
+	const char	*FactionName( const char *pszFaction );
 	// bumped on every reload of the definitions
 	int		Generation();
+
+	// transitions between maps (layer refs "transition"): spawned during a level change before the
+	// engine looks for the landmark; the player arriving through one faces its arrival direction
+	void	SpawnTransitionsEarly();
+	void	NoteArrival( const char *pszLandmark );
 
 	// world clock (env_timecycle or the world clock of maps without it)
 	float	GetHours();
 	bool	IsPackageTime( const RPMPackage_t &pkg, float flHours );
-	bool	PackageConditionsMet( const RPMPackage_t &pkg );
+	bool	PackageConditionsMet( const RPMPackage_t &pkg, CBaseEntity *pNPC = NULL );
+
+	// zones of the layer (refs "zone": a named box, rotated by its yaw) - events, quest objectives
+	int		ZoneCount();
+	const char *ZoneName( int i );
+	int		FindZone( const char *pszName );		// -1 if none
+	Vector	ZoneCenter( int i );
+	Vector	ZoneSize( int i );
+	bool	IsInZone( int i, const Vector &pos );
+	KeyValues *ZoneKeys( int i );		// the zone's block of the layer file (location: display_name, music, soundscape...)
 
 	// a free marker of one of the kinds ("sleep", "sit;lean") near the point;
 	// owned markers are only for their owner, the NPC's own come first
 	CAI_Hint *FindFreeMarker( CAI_BaseNPC *pNPC, const char *pszKinds, const Vector &center, float flRadius, bool bRandom );
 	bool	MarkerMatchesKinds( const RPMMarker_t *pMarker, const char *pszKinds );
+
+	// behaviour of NPCs (definition, else the rules of rpg.txt): moves out of the player's way, picks up
+	// weapons, the weapon ban (RPMWeaponLaw: 0 not concerned, 1 civilian, 2 enforcer warns, 3 enforcer attacks)
+	// a marker's pose for the animation library: the seat height (pose parameter rpm_seat_h)
+	void	ApplyMarkerPose( CBaseAnimating *pAnim, const char *pszMarker );
+	bool	NPCYieldsToPlayer( CAI_BaseNPC *pNPC );
+	bool	NPCMayPickupWeapons( CAI_BaseNPC *pNPC );
+	int		NPCWeaponLaw( CAI_BaseNPC *pNPC );
 
 	// dialog activity: NPCs stand still while the player talks to them
 	void	NoteDialogActivity( CBaseEntity *pNPC );

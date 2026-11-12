@@ -53,7 +53,54 @@ uniform vec3 uHighlight;
 uniform vec3 uCam;
 uniform float uFog;
 uniform int uUnlit;
+uniform vec3 uFogCol;
+// lighting preview (M7): the sun of the hour, ambient, up to 32 lamps, cube shadows of 4
+uniform int uLightMode;
+uniform vec3 uSunDir;
+uniform vec3 uSunCol;
+uniform vec3 uAmbUp;
+uniform vec3 uAmbDown;
+uniform int uNumLights;
+uniform vec4 uLPos[32];
+uniform vec4 uLCol[32];
+uniform vec4 uLSpot[32];
+uniform float uLInner[32];
+uniform int uLShadow[32];
+uniform samplerCube uShadow0;
+uniform samplerCube uShadow1;
+uniform samplerCube uShadow2;
+uniform samplerCube uShadow3;
 out vec4 frag;
+float shadowAt(int s, vec3 d) {
+    float r;
+    if (s == 0) r = texture(uShadow0, d).r;
+    else if (s == 1) r = texture(uShadow1, d).r;
+    else if (s == 2) r = texture(uShadow2, d).r;
+    else r = texture(uShadow3, d).r;
+    float dist = length(d);
+    return (dist - 1.5 - dist * 0.012 > r) ? 0.0 : 1.0;
+}
+vec3 lighting(vec3 n, vec3 w) {
+    vec3 acc = mix(uAmbDown, uAmbUp, 0.5 + 0.5 * n.z);
+    acc += uSunCol * max(dot(n, uSunDir), 0.0);
+    for (int i = 0; i < uNumLights; i++) {
+        vec3 d = uLPos[i].xyz - w;
+        float dist = length(d);
+        if (dist > uLPos[i].w)
+            continue;
+        vec3 l = d / max(dist, 0.001);
+        float nl = max(dot(n, l), 0.0);
+        if (nl <= 0.0)
+            continue;
+        float att = pow(clamp(1.0 - dist / uLPos[i].w, 0.0, 1.0), uLCol[i].w);
+        if (uLSpot[i].w > -1.5)
+            att *= smoothstep(uLSpot[i].w, uLInner[i], dot(-l, uLSpot[i].xyz));
+        if (uLShadow[i] >= 0 && att > 0.0)
+            att *= shadowAt(uLShadow[i], -d);
+        acc += uLCol[i].rgb * att * nl;
+    }
+    return acc;
+}
 void main() {
     vec4 c = (uHasTex == 1) ? texture(uTex, vUV) : vec4(0.62, 0.62, 0.62, 1.0);
     if (uBlend == 1) {
@@ -63,16 +110,20 @@ void main() {
     if (uAlphaTest == 1 && c.a < 0.5)
         discard;
     vec3 n = normalize(vN);
-    if (!gl_FrontFacing)
+    // seen from behind (double sided): towards the viewer. Not gl_FrontFacing - the winding of
+    // Source faces is the opposite of GL's
+    if (dot(n, uCam - vW) < 0.0)
         n = -n;
     vec3 L = normalize(vec3(0.45, 0.3, 0.85));
     float d = max(dot(n, L), 0.0);
     float sky = 0.5 + 0.5 * n.z;
     vec3 lit = (uUnlit == 1) ? c.rgb * uTint.rgb : c.rgb * uTint.rgb * (0.46 + 0.26 * sky + 0.55 * d);
+    if (uLightMode == 1 && uUnlit == 0)
+        lit = c.rgb * uTint.rgb * lighting(n, vW);
     lit += uHighlight;
     float dist = length(vW - uCam);
     float f = clamp((dist - uFog * 0.4) / uFog, 0.0, 0.55);
-    lit = mix(lit, vec3(0.56, 0.63, 0.71), f);
+    lit = mix(lit, uFogCol, f);
     frag = vec4(lit, c.a * uTint.a);
 }
 """
@@ -94,6 +145,21 @@ FS_LINE = """#version 330 core
 in vec4 vC;
 out vec4 frag;
 void main() { frag = vC; }
+"""
+
+# distance to a lamp into a cube map face (shadows of the lighting preview)
+VS_DIST = """#version 330 core
+layout(location=0) in vec3 aPos;
+uniform mat4 uVP;
+out vec3 vW;
+void main() { vW = aPos; gl_Position = uVP * vec4(aPos, 1.0); }
+"""
+
+FS_DIST = """#version 330 core
+in vec3 vW;
+uniform vec3 uLight;
+out float frag;
+void main() { frag = length(vW - uLight); }
 """
 
 DXT_FORMATS = {"dxt1": 0x83F0, "dxt1a": 0x83F1, "dxt3": 0x83F2, "dxt5": 0x83F3}
@@ -293,6 +359,9 @@ class ModelMesh:
         self.ibo = GL.glGenBuffers(1)
         v = np.ascontiguousarray(np.concatenate(verts))
         i = np.ascontiguousarray(np.concatenate(inds))
+        # the element buffer binding belongs to the bound VAO: a model met while drawing another one
+        # would hand its indices to that model's VAO (its triangles then join random vertices)
+        GL.glBindVertexArray(0)
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo)
         GL.glBufferData(GL.GL_ARRAY_BUFFER, v.nbytes, v, GL.GL_STATIC_DRAW)
         GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, self.ibo)
@@ -321,6 +390,116 @@ class ModelMesh:
     def delete(self):
         GL.glDeleteBuffers(2, [self.vbo, self.ibo])
         GL.glDeleteVertexArrays(1, [self.single_vao])
+
+
+class ShadowCube:
+    """A cube map of distances from a lamp to the world (R32F + its own depth buffer)."""
+    FACES = (((1, 0, 0), (0, -1, 0)), ((-1, 0, 0), (0, -1, 0)), ((0, 1, 0), (0, 0, 1)),
+             ((0, -1, 0), (0, 0, -1)), ((0, 0, 1), (0, -1, 0)), ((0, 0, -1), (0, -1, 0)))
+
+    def __init__(self, size=512):
+        self.size = size
+        self.key = None
+        self.tex = GL.glGenTextures(1)
+        GL.glBindTexture(GL.GL_TEXTURE_CUBE_MAP, self.tex)
+        for i in range(6):
+            GL.glTexImage2D(GL.GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL.GL_R32F, size, size, 0, GL.GL_RED, GL.GL_FLOAT, None)
+        for p, v in ((GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST), (GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST),
+                     (GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE), (GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE),
+                     (GL.GL_TEXTURE_WRAP_R, GL.GL_CLAMP_TO_EDGE)):
+            GL.glTexParameteri(GL.GL_TEXTURE_CUBE_MAP, p, v)
+        self.fbo = GL.glGenFramebuffers(1)
+        self.depth = GL.glGenRenderbuffers(1)
+        GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, self.depth)
+        GL.glRenderbufferStorage(GL.GL_RENDERBUFFER, GL.GL_DEPTH_COMPONENT24, size, size)
+
+    @staticmethod
+    def _look(eye, f, up):
+        f = np.asarray(f, float)
+        up = np.asarray(up, float)
+        s = np.cross(f, up)
+        u = np.cross(s, f)
+        m = np.eye(4, dtype=np.float32)
+        m[0, :3], m[1, :3], m[2, :3] = s, u, -f
+        m[0, 3], m[1, 3], m[2, 3] = -s @ eye, -u @ eye, f @ eye
+        return m
+
+    def render(self, prog, light_pos, radius, draw_fn):
+        """draw_fn(): draws the world (positions at location 0) with prog bound."""
+        n, far = 1.0, max(radius, 8.0)
+        proj = np.zeros((4, 4), dtype=np.float32)
+        proj[0, 0] = proj[1, 1] = 1.0
+        proj[2, 2] = -(far + n) / (far - n)
+        proj[2, 3] = -2 * far * n / (far - n)
+        proj[3, 2] = -1.0
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, self.fbo)
+        GL.glFramebufferRenderbuffer(GL.GL_FRAMEBUFFER, GL.GL_DEPTH_ATTACHMENT, GL.GL_RENDERBUFFER, self.depth)
+        GL.glViewport(0, 0, self.size, self.size)
+        # the labels' QPainter of the previous frame leaves its state (depth writes off, scissor, stencil)
+        GL.glDisable(GL.GL_SCISSOR_TEST)
+        GL.glDisable(GL.GL_STENCIL_TEST)
+        GL.glDisable(GL.GL_BLEND)
+        GL.glColorMask(True, True, True, True)
+        GL.glDepthMask(True)
+        GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glDepthFunc(GL.GL_LESS)
+        prog.use()
+        prog.v3("uLight", light_pos)
+        eye = np.asarray(light_pos, float)
+        for i, (f, up) in enumerate(self.FACES):
+            GL.glFramebufferTexture2D(GL.GL_FRAMEBUFFER, GL.GL_COLOR_ATTACHMENT0, GL.GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, self.tex, 0)
+            GL.glClearColor(1e9, 1e9, 1e9, 1.0)
+            GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+            prog.mat4("uVP", proj @ self._look(eye, f, up))
+            draw_fn()
+
+    def delete(self):
+        GL.glDeleteTextures([self.tex])
+        GL.glDeleteFramebuffers(1, [self.fbo])
+        GL.glDeleteRenderbuffers(1, [self.depth])
+
+
+class SkinnedMesh:
+    """An animated copy of a model mesh: its own dynamic vertex buffer (skinned positions and
+    normals written every frame), the index buffer and parts of the static ModelMesh."""
+
+    def __init__(self, mesh):
+        self.mesh = mesh
+        self.model = mesh.model
+        self.parts = mesh.parts
+        m = mesh.model
+        self.uv = np.ascontiguousarray(np.concatenate([x.uv for x in m.meshes]), dtype=np.float32)
+        self.pos = np.ascontiguousarray(np.concatenate([x.pos for x in m.meshes]), dtype=np.float32)
+        self.nrm = np.ascontiguousarray(np.concatenate([x.nrm for x in m.meshes]), dtype=np.float32)
+        bw = [x.bw if x.bw is not None else np.tile([1.0, 0, 0], (len(x.pos), 1)) for x in m.meshes]
+        bb = [x.bb if x.bb is not None else np.zeros((len(x.pos), 3), np.int32) for x in m.meshes]
+        self.bw = np.ascontiguousarray(np.concatenate(bw), dtype=np.float32)
+        self.bb = np.ascontiguousarray(np.concatenate(bb), dtype=np.int32)
+        n = len(self.uv)
+        self.vbo = GL.glGenBuffers(1)
+        GL.glBindVertexArray(0)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, n * 32, None, GL.GL_DYNAMIC_DRAW)
+        self.vao = GL.glGenVertexArrays(1)
+        GL.glBindVertexArray(self.vao)
+        for loc, size, off in ((0, 3, 0), (1, 3, 12), (2, 2, 24)):
+            GL.glEnableVertexAttribArray(loc)
+            GL.glVertexAttribPointer(loc, size, GL.GL_FLOAT, False, 32, ctypes.c_void_p(off))
+        GL.glDisableVertexAttribArray(3)
+        GL.glVertexAttrib1f(3, 1.0)
+        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, mesh.ibo)
+        GL.glBindVertexArray(0)
+        self.single_vao = self.vao          # drawn like a ModelMesh
+        self.update(self.pos, self.nrm)
+
+    def update(self, pos, nrm):
+        data = np.ascontiguousarray(np.hstack([pos, nrm, self.uv]), dtype=np.float32)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo)
+        GL.glBufferSubData(GL.GL_ARRAY_BUFFER, 0, data.nbytes, data)
+
+    def delete(self):
+        GL.glDeleteBuffers(1, [self.vbo])
+        GL.glDeleteVertexArrays(1, [self.vao])
 
 
 class InstanceGroup:

@@ -15,6 +15,7 @@
 #include "filesystem.h"
 #include "eventqueue.h"
 #include "ai_playerally.h"
+#include "hl2rpm_world.h"
 #include "SoundEmitterSystem/isoundemittersystembase.h"
 #include "entityblocker.h"
 #include "npcevent.h"
@@ -119,6 +120,27 @@ protected:
 };
 
 CActBusyAnimData g_ActBusyAnimDataSystem;
+
+// HL2RPM: the entry / busy / exit animations of a busy anim (by name or by its busy activity) - the player
+// sitting on the markers of the Creation Kit (hl2rpm_seat.cpp)
+bool ActBusy_GetAnimParts( const char *pszName, Activity *pActs, string_t *pSeqs )
+{
+	if ( !pszName || !pszName[0] )
+		return false;
+	Activity act = (Activity)ActivityList_IndexForName( pszName );
+	if ( act < 0 )
+		act = ACT_INVALID;
+	int i = g_ActBusyAnimDataSystem.FindBusyAnim( act, act == ACT_INVALID ? pszName : NULL );
+	if ( i < 0 )
+		return false;
+	busyanim_t *p = g_ActBusyAnimDataSystem.GetBusyAnim( i );
+	for ( int k = 0; k < BA_MAX_ANIMS; k++ )
+	{
+		pActs[k] = p->iActivities[k];
+		pSeqs[k] = p->iszSequences[k];
+	}
+	return true;
+}
 
 #ifdef MAPBASE
 void ParseCustomActbusyFile( const char *file )
@@ -284,6 +306,44 @@ CAI_ActBusyBehavior::CAI_ActBusyBehavior()
 	m_bEnabled = false;
 	m_bUseRenderBoundsForCollision = false;
 	m_flDeferUntil = 0;
+	m_flRPMSnapStart = -1.0f;
+	m_flRPMSnapYaw = 0.0f;
+	m_vecRPMSnapFrom.Init();
+}
+
+//-----------------------------------------------------------------------------
+// HL2RPM: markers of the Creation Kit - the seat height for the animation library and
+// a slide onto the exact spot (pathing stops within a few units of the hint)
+//-----------------------------------------------------------------------------
+void CAI_ActBusyBehavior::RPMStartSnap()
+{
+	m_flRPMSnapStart = -1.0f;
+	CAI_Hint *pHint = GetHintNode();
+	if ( !pHint || !RPMWorld::FindMarker( STRING( pHint->GetEntityName() ) ) )
+		return;
+	RPMWorld::ApplyMarkerPose( GetOuter(), STRING( pHint->GetEntityName() ) );
+	m_vecRPMSnapFrom = GetAbsOrigin();
+	m_flRPMSnapYaw = GetOuter()->GetAbsAngles().y;
+	m_flRPMSnapStart = gpGlobals->curtime;
+}
+
+void CAI_ActBusyBehavior::RPMRunSnap()
+{
+	CAI_Hint *pHint = GetHintNode();
+	if ( m_flRPMSnapStart < 0.0f || !pHint )
+		return;
+	float f = ( gpGlobals->curtime - m_flRPMSnapStart ) / 0.45f;
+	if ( f >= 1.0f )
+	{
+		f = 1.0f;
+		m_flRPMSnapStart = -1.0f;
+	}
+	f = SimpleSpline( f );
+	Vector to = pHint->GetAbsOrigin();
+	GetOuter()->SetAbsOrigin( m_vecRPMSnapFrom + ( to - m_vecRPMSnapFrom ) * f );
+	float yaw = m_flRPMSnapYaw + UTIL_AngleDiff( pHint->GetAbsAngles().y, m_flRPMSnapYaw ) * f;
+	GetOuter()->SetAbsAngles( QAngle( 0, yaw, 0 ) );
+	GetOuter()->GetMotor()->SetIdealYaw( yaw );
 }
 
 
@@ -1833,6 +1893,10 @@ void CAI_ActBusyBehavior::StartTask( const Task_t *pTask )
 			// when a character is still interpolating to their busy pose.
 			m_bNeedToSetBounds = true;
 
+			// HL2RPM: busy without an entry (teleported, or no entry animation): the seat height too
+			if ( GetHintNode() )
+				RPMWorld::ApplyMarkerPose( GetOuter(), STRING( GetHintNode()->GetEntityName() ) );
+
 			// Get the busyanim for the specified activity
 			busyanim_t *pBusyAnim = g_ActBusyAnimDataSystem.GetBusyAnim( m_iCurrentBusyAnim );
 
@@ -1957,13 +2021,19 @@ void CAI_ActBusyBehavior::StartTask( const Task_t *pTask )
 			}
 
 			// Fail if we're not on the node & facing the correct way
-			if ( UTIL_DistApprox( GetHintNode()->GetAbsOrigin(), GetAbsOrigin() ) > 16 || !GetOuter()->FacingIdeal() )
+			// HL2RPM: markers of the Creation Kit are often inside furniture (a chair at a table) - the path
+			// stops short of them or the NPC steps onto the seat; within 40 units it slides onto the spot
+			// (RPMStartSnap / RPMRunSnap), and the slide turns it too
+			bool bRPMMarker = RPMWorld::FindMarker( STRING( GetHintNode()->GetEntityName() ) ) != NULL;
+			if ( bRPMMarker ? ( GetHintNode()->GetAbsOrigin() - GetAbsOrigin() ).Length2D() > 40.0f
+							: ( UTIL_DistApprox( GetHintNode()->GetAbsOrigin(), GetAbsOrigin() ) > 16 || !GetOuter()->FacingIdeal() ) )
 			{
 				m_bBusy = false;
 				TaskFail( "Not correctly on hintnode" );
 				return;
 			}
 
+			RPMStartSnap();
 			PlaySoundForActBusy( BA_ENTRY );
 
 			// Play the entry animation. If it fails, we don't have an entry anim, so complete immediately.
@@ -2061,7 +2131,42 @@ void CAI_ActBusyBehavior::StartTask( const Task_t *pTask )
 
 	case TASK_ACTBUSY_GET_PATH_TO_ACTBUSY:
 		{
-			ChainStartTask( TASK_GET_PATH_TO_HINTNODE );
+			// HL2RPM: a marker of the Creation Kit stands right at its furniture / wall (a lean marker leaves the
+			// hull 1 unit from the wall): the walk ends a little in front of it - away from what is behind - and
+			// the entry slides the rest (RPMStartSnap). Walking onto the spot itself failed again and again for
+			// NPCs the player didn't see (their efficient movement couldn't settle against the wall).
+			bool bRPMPath = false;
+			if ( GetHintNode() && RPMWorld::FindMarker( STRING( GetHintNode()->GetEntityName() ) ) != NULL )
+			{
+				Vector vHintPos;
+				GetHintNode()->GetPosition( GetOuter(), &vHintPos );
+				Vector vDir = GetHintNode()->GetDirection();
+				vDir.z = 0.0f;
+				if ( VectorNormalize( vDir ) > 0.1f )
+				{
+					// in front of the marker (a seat, a bed, a wall are behind it), else behind it (a work marker faces
+					// its crate / bench), else the stock path to the marker itself: the first spot the hull fits in
+					for ( int k = 0; k < 2 && !bRPMPath; k++ )
+					{
+						Vector vGoal = vHintPos + vDir * ( k == 0 ? 8.0f : -8.0f );
+						trace_t tr;
+						AI_TraceHull( vGoal + Vector( 0, 0, 4 ), vGoal + Vector( 0, 0, 4 ), GetOuter()->GetHullMins(), GetOuter()->GetHullMaxs(),
+									  MASK_NPCSOLID, GetOuter(), COLLISION_GROUP_NONE, &tr );
+						if ( tr.startsolid || tr.allsolid )
+							continue;
+						// no task fail / complete from the navigator: on failure the next spot is tried
+						AI_NavGoal_t goal( vGoal, ACT_RUN );
+						if ( GetNavigator()->SetGoal( goal, AIN_NO_PATH_TASK_FAIL ) )
+						{
+							GetNavigator()->SetArrivalDirection( GetHintNode()->GetDirection() );
+							bRPMPath = true;
+							TaskComplete();
+						}
+					}
+				}
+			}
+			if ( !bRPMPath )
+				ChainStartTask( TASK_GET_PATH_TO_HINTNODE );
 
 			if ( !HasCondition(COND_TASK_FAILED) )
 			{
@@ -2205,6 +2310,7 @@ void CAI_ActBusyBehavior::RunTask( const Task_t *pTask )
 
 	case TASK_ACTBUSY_PLAY_ENTRY:
 		{
+			RPMRunSnap();
 			GetOuter()->AutoMovement();
 			if ( !ActBusyNodeStillActive() || GetOuter()->IsSequenceFinished() )
 			{

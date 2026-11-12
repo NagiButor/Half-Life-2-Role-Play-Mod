@@ -2,14 +2,16 @@
 the object window (what can be placed), the cell view (what is on the map),
 factions, placing / moving / deleting, AI nodes, running the game at the camera."""
 import glob
+import json
 import math
 import os
+import shutil
 import subprocess
 import time
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QInputDialog,
+from PySide6.QtCore import QMimeData, QProcess, Qt, QTimer
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QInputDialog,
                                QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QProgressDialog,
                                QPushButton, QSlider, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
@@ -20,7 +22,18 @@ from ..world import mdl as mdlmod
 from ..world.gamefs import GameFS
 from ..world.materials import MaterialSystem
 from ..world.scene import MapScene, is_npc_class
-from .worldview import WorldView
+from ..world.vmfdoc import VMFDoc, find_vmf
+from ..world.thumbs import Thumbnailer
+from .models_browser import PLACE_MIME, ModelBrowser, ModelGrid
+from .worldview import LIGHT_CLASSES, WorldView
+
+SDK_BIN = r"E:\Steam\steamapps\common\Source SDK Base 2013 Singleplayer\bin"
+MAP_BACKUPS = r"E:\SourceModding\HL2RPMSOURCE\map_backups"
+# new lights / props put into the VMF
+NEW_LIGHT_KEYS = {"spawnflags": "1", "diffuse": "255 228 196 255", "ambient": "0 0 0 255", "radius": "384",
+                  "power": "2", "spot_cone_inner": "30", "spot_cone_outer": "45", "vis_dist": "2048", "vis_range": "512",
+                  "shadow_dist": "1536", "shadow_range": "512", "autoshadow": "1", "style_seed": "-1",
+                  "enable_from_hour": "-1", "enable_to_hour": "-1"}
 
 HUMAN_MODELS = (["models/humans/group01/male_%02d.mdl" % i for i in range(1, 10)] +
                 ["models/humans/group01/female_%02d.mdl" % i for i in (1, 2, 3, 4, 6, 7)] +
@@ -31,42 +44,19 @@ HUMAN_MODELS = (["models/humans/group01/male_%02d.mdl" % i for i in range(1, 10)
                 ["models/humans/group03m/male_%02d.mdl" % i for i in range(1, 10)])
 
 
-class ModelBrowser(QDialog):
-    def __init__(self, parent, names, current):
-        super().__init__(parent)
-        self.setWindowTitle("Модель из игры")
-        self.resize(620, 640)
-        lay = QVBoxLayout(self)
-        self.flt = QLineEdit()
-        self.flt.setPlaceholderText("поиск: часть пути, например furniture или humans/group02")
-        lay.addWidget(self.flt)
-        self.lst = QListWidget()
-        lay.addWidget(self.lst, 1)
-        self.names = names
-        self.flt.textChanged.connect(self.fill)
-        self.lst.itemDoubleClicked.connect(lambda _: self.accept())
-        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        bb.accepted.connect(self.accept)
-        bb.rejected.connect(self.reject)
-        lay.addWidget(bb)
-        self.flt.setText(os.path.dirname(current).replace("models/", "") if current else "")
-        self.fill()
+class PaletteTree(QTreeWidget):
+    """The object window: items can be dragged onto the map window."""
 
-    def fill(self):
-        t = self.flt.text().strip().lower()
-        self.lst.clear()
-        n = 0
-        for m in self.names:
-            if t and t not in m:
-                continue
-            self.lst.addItem(m)
-            n += 1
-            if n >= 3000:
-                break
+    def mimeData(self, items):
+        md = QMimeData()
+        d = items[0].data(0, Qt.UserRole) if items else None
+        # only what can be placed without a question (a concrete model / kind)
+        if d and d[0] in ("npc", "marker", "item", "container", "prop", "terminal", "vmf") and None not in d and (d[0] != "vmf" or d[1]):
+            md.setData(PLACE_MIME, json.dumps(list(d)).encode("utf-8"))
+        return md
 
-    def value(self):
-        it = self.lst.currentItem()
-        return it.text() if it else ""
+    def mimeTypes(self):
+        return [PLACE_MIME]
 
 
 class MapPanel(QWidget):
@@ -78,8 +68,14 @@ class MapPanel(QWidget):
         lay.setSpacing(0)
         bar = QWidget()
         bar.setObjectName("mapbar")
-        bl = QHBoxLayout(bar)
-        bl.setContentsMargins(6, 4, 6, 4)
+        rows = QVBoxLayout(bar)
+        rows.setContentsMargins(6, 3, 6, 3)
+        rows.setSpacing(3)
+        bl = QHBoxLayout()
+        tl = QHBoxLayout()
+        rows.addLayout(bl)
+        rows.addLayout(tl)
+        # row 1: map, time, what to show, navigation, game, build
         bl.addWidget(QLabel("Карта:"))
         self.maps = QComboBox()
         self.maps.setMinimumContentsLength(24)
@@ -100,24 +96,63 @@ class MapPanel(QWidget):
         self.hour_lbl = QLabel("12:00")
         self.hour_lbl.setMinimumWidth(40)
         bl.addWidget(self.hour_lbl)
-        bl.addSpacing(12)
+        bl.addSpacing(8)
+        self.show_btn = QToolButton(text="Показать ▾")
+        self.show_btn.setPopupMode(QToolButton.InstantPopup)
+        sm = QMenu(self.show_btn)
         self.toggles = {}
-        for key, text, tip in (("labels", "Подписи", "Имена над объектами"), ("hammer", "Hammer", "NPC и старт игрока из самой карты"),
-                               ("nav", "Навигация", "Узлы, по которым ходят NPC"), ("packages", "Распорядок", "Линии к местам пакетов выбранного NPC"),
-                               ("props", "Пропы", "Статические пропы карты")):
-            cb = QCheckBox(text)
-            cb.setToolTip(tip)
-            cb.setChecked(True)
-            bl.addWidget(cb)
-            self.toggles[key] = cb
-        bl.addSpacing(12)
+        for key, text, tip in (("labels", "Подписи", "Имена над объектами"), ("props", "Пропы карты", "Статические, динамические, физические пропы"),
+                               ("hammer", "NPC, свет и сущности Hammer", "Что поставлено в Hammer, кроме пропов"),
+                               ("nav", "Узлы навигации", "Точки, по которым ходят NPC"), ("packages", "Распорядок выбранного NPC", "Линии к местам его пакетов"),
+                               ("mannequins", "Манекены на маркерах", "Как в GECK: на каждом маркере стоит фигура и играет его анимацию "
+                                                                     "(лежит на кровати, сидит на стуле) — видно, как это будет в игре"),
+                               ("anims", "Анимации NPC (распорядок часа)", "NPC проекта играют то, что делают в выбранный час: на маркере — "
+                                                                         "его анимацию (сидят, лежат, работают), иначе стоят"),
+                               ("light", "Освещение: лампы и солнце часа", "Превью света: лампы карты (light_deferred, прожекторы, классические), "
+                                                                          "у 4 ближайших — тени; солнце и небо по ползунку времени"),
+                               ("night", "Ночь (только лампы)", "Без солнца и неба: видно, что освещают лампы")):
+            act = sm.addAction(text)
+            act.setCheckable(True)
+            act.setChecked(key not in ("anims", "light", "night"))      # mannequins on by default, like GECK
+            act.setToolTip(tip)
+            self.toggles[key] = act
+        self.show_btn.setMenu(sm)
+        bl.addWidget(self.show_btn)
         self.nav_btn = QToolButton(text="Навигация ▾")
         self.nav_btn.setPopupMode(QToolButton.InstantPopup)
         bl.addWidget(self.nav_btn)
+        self.hammer_btn = QToolButton(text="Hammer++ ▾")
+        self.hammer_btn.setPopupMode(QToolButton.InstantPopup)
+        self.hammer_btn.setToolTip("Hammer++: открыть карту, видеть его сохранения без компиляции (геометрия из VMF), задачи для Claude")
+        bl.addWidget(self.hammer_btn)
+        bl.addStretch(1)
+        self.build = QPushButton("⚙ Собрать карту")
+        self.build.setToolTip("Записать правки объектов Hammer в VMF и пересобрать карту (F9). Только сущности — секунды, пропы — полная сборка")
+        bl.addWidget(self.build)
         self.play = QPushButton("▶ Игра отсюда")
         self.play.setToolTip("Сохранить и запустить карту: игрок появится там, где камера (F6)")
         bl.addWidget(self.play)
-        bl.addStretch(1)
+        # row 2: tools for the selection
+        self.giz_move = QToolButton(text="✥ Двигать")
+        self.giz_move.setCheckable(True)
+        self.giz_move.setChecked(True)
+        self.giz_move.setToolTip("Гизмо: стрелки — по оси, квадраты — в плоскости (Ctrl — по сетке 16). Щелчок ПКМ по выделенному или Пробел — переключить")
+        self.giz_rot = QToolButton(text="⟳ Вращать")
+        self.giz_rot.setCheckable(True)
+        self.giz_rot.setToolTip("Гизмо: кольца поворота (Ctrl — шаг 15°). Щелчок ПКМ по выделенному или Пробел — переключить")
+        tl.addWidget(self.giz_move)
+        tl.addWidget(self.giz_rot)
+        self.land = QToolButton(text="⤓ Приземлить")
+        self.land.setToolTip("Поставить выделенное на то, что под ним: модель касается земли самой нижней точкой (End)")
+        tl.addWidget(self.land)
+        self.align = QCheckBox("по наклону поверхности")
+        self.align.setToolTip("Приземлять пропы с наклоном по поверхности (склоны, лестницы)")
+        tl.addWidget(self.align)
+        tl.addSpacing(16)
+        keys = QLabel("Z — полёт · Ctrl+C / Ctrl+V — копировать / вставить (и на другую карту) · Ctrl+D — копия · Delete · F — к выделенному")
+        keys.setObjectName("hint")
+        tl.addWidget(keys)
+        tl.addStretch(1)
         lay.addWidget(bar)
         self.view = WorldView(ctx)
         lay.addWidget(self.view, 1)
@@ -133,6 +168,9 @@ class WorldMixin:
         self.cur_map = ""
         self._seq_cache = {}
         self._model_names = None
+        self.vmfdocs = {}            # map name -> VMFDoc (kept while the program runs: unsaved edits survive a map switch)
+        self._build_proc = None
+        self._clip = None
         self.map_panel = MapPanel(self)
         self.worldview = self.map_panel.view
         mp = self.map_panel
@@ -146,8 +184,34 @@ class WorldMixin:
         m.addAction("Править узлы (клик — добавить, Delete — удалить)", self.nav_edit_mode)
         m.addAction("Удалить все узлы этой карты", self.nav_clear)
         mp.nav_btn.setMenu(m)
+        hm = QMenu(mp)
+        hm.addAction("Открыть карту в Hammer++", self.open_in_hammer)
+        self.act_vmf_geom = hm.addAction("Геометрия из VMF (без компиляции)")
+        self.act_vmf_geom.setCheckable(True)
+        self.act_vmf_geom.setToolTip("Браши, дисплейсменты и метки задач строятся прямо из VMF: сохранил в Hammer++ — "
+                                     "окно обновилось само, компилировать не нужно")
+        self.act_vmf_geom.toggled.connect(self._geometry_toggled)
+        hm.addAction("Открыть VMF (набросок без BSP)…", self.open_vmf_file)
+        hm.addSeparator()
+        hm.addAction("Задачи для Claude на этой карте…", self.show_claude_tasks)
+        hm.addAction("Снимки карты для Claude (сверху, спереди, сбоку, 3D)", self.vmf_shots)
+        mp.hammer_btn.setMenu(hm)
+        self._vmf_watch = QTimer(self)
+        self._vmf_watch.setInterval(1500)
+        self._vmf_watch.timeout.connect(self._watch_vmf)
+        self._vmf_watch.start()
         mp.play.clicked.connect(self.run_game_here)
+        mp.build.clicked.connect(self.build_map)
+        mp.land.clicked.connect(lambda: self.worldview.land_selected())
+        mp.align.toggled.connect(lambda v: self.worldview.opts.__setitem__("align", bool(v)))
+        mp.giz_move.clicked.connect(lambda: self.worldview.set_gizmo_mode("move"))
+        mp.giz_rot.clicked.connect(lambda: self.worldview.set_gizmo_mode("rotate"))
+        QShortcut(QKeySequence("F9"), self, activated=self.build_map)
         wv = self.worldview
+        wv.gizmoModeChanged.connect(self._gizmo_mode_changed)
+        wv.copyRequested.connect(self.copy_world_selected)
+        wv.dropped.connect(self.on_world_drop)
+        wv.pasteRequested.connect(self.paste_world)
         wv.selected.connect(self.on_world_selected)
         wv.edited.connect(self.on_world_edited)
         wv.placeRequested.connect(self.on_place)
@@ -166,12 +230,15 @@ class WorldMixin:
         w = QWidget()
         l = QVBoxLayout(w)
         l.setContentsMargins(4, 4, 4, 4)
-        self.palette = QTreeWidget()
+        self.palette = PaletteTree()
         self.palette.setHeaderHidden(True)
+        self.palette.setDragEnabled(True)
         self.palette.itemDoubleClicked.connect(lambda it, _: self._palette_place(it))
+        self.palette.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.palette.customContextMenuRequested.connect(self._palette_menu)
         l.addWidget(self.palette, 1)
         b = QPushButton("Поставить на карту")
-        b.setToolTip("Или двойной клик по объекту, затем клик в окне карты (Shift — поставить несколько)")
+        b.setToolTip("Или двойной клик по объекту, затем клик в окне карты (Shift — поставить несколько), или перетащите его на карту")
         b.clicked.connect(lambda: self._palette_place(self.palette.currentItem()))
         l.addWidget(b)
         return w
@@ -244,16 +311,143 @@ class WorldMixin:
                 out.setdefault(os.path.splitext(os.path.basename(f))[0], f)
         return out
 
+    def vmf_sketches(self):
+        """Maps that exist only as a VMF in the source folders (never compiled): name -> VMF path"""
+        have = self.map_files()
+        out = {}
+        for d in self._vmf_dirs() if self.project else []:
+            for f in sorted(glob.glob(os.path.join(d, "*.vmf"))):
+                n = os.path.splitext(os.path.basename(f))[0]
+                if n not in have:
+                    out.setdefault(n, f)
+        return out
+
+    # ------------------------------------------------------------------ Hammer++
+    def _hammer_exe(self):
+        s = self.project.settings if self.project else None
+        base = os.path.dirname(s.hl2_exe) if s else r"E:\Steam\steamapps\common\Source SDK Base 2013 Singleplayer"
+        for p in (os.path.join(base, "bin", "hammerplusplus.exe"), os.path.join(base, "bin", "hammerplusplus", "hammerplusplus.exe")):
+            if os.path.isfile(p):
+                return p
+        return ""
+
+    def open_in_hammer(self):
+        doc = self._vmf_doc(self.cur_map) if self.cur_map else None
+        exe = self._hammer_exe()
+        if not exe:
+            QMessageBox.warning(self, "Hammer++", "Не найден hammerplusplus.exe рядом с hl2.exe (Проект → Настройки).")
+            return
+        args = [exe] + ([doc.path] if doc is not None else [])
+        subprocess.Popen(args, cwd=os.path.dirname(exe))
+        self.logln("Hammer++: " + (doc.path if doc is not None else "без карты") +
+                   ("  — включите «Геометрия из VMF», чтобы видеть его сохранения здесь без компиляции" if not self.act_vmf_geom.isChecked() else ""))
+
+    def _geometry_toggled(self, on):
+        if self.project:
+            self.project.view["_geometry"] = "vmf" if on else "bsp"
+        if self.cur_map:
+            self.open_map(self.cur_map, force=True)
+
+    def _watch_vmf(self):
+        """Hammer++ saved the map: rebuild the VMF geometry (camera kept)"""
+        sc = self.scene
+        if sc is None or sc.geometry != "vmf" or sc.vmf is None or getattr(self, "_loading_map", False):
+            return
+        doc = sc.vmf
+        if doc.changed_on_disk() and not doc.dirty:
+            self.logln("Hammer++ сохранил %s — карта перестроена из VMF" % os.path.basename(doc.path))
+            self.open_map(self.cur_map, force=True)
+
+    def open_vmf_file(self):
+        start = (self._vmf_dirs() or [""])[0]
+        path, _ = QFileDialog.getOpenFileName(self, "VMF (набросок)", start, "Hammer map (*.vmf)")
+        if not path:
+            return
+        name = os.path.splitext(os.path.basename(path))[0]
+        if name not in self.vmfdocs:
+            try:
+                self.vmfdocs[name] = VMFDoc(path)
+            except Exception as e:
+                QMessageBox.critical(self, "VMF", "%s:\n%s" % (path, e))
+                return
+        if not self.act_vmf_geom.isChecked():
+            self.act_vmf_geom.blockSignals(True)
+            self.act_vmf_geom.setChecked(True)
+            self.act_vmf_geom.blockSignals(False)
+        self.open_map(name, force=True)
+
+    def show_claude_tasks(self):
+        sc = self.scene
+        tasks = getattr(sc.bsp, "tasks", None) if sc is not None else None
+        if tasks is None:
+            QMessageBox.information(self, "Задачи для Claude", "Задачи видны в режиме «Геометрия из VMF» (меню Hammer++).")
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Задачи для Claude — %s" % self.cur_map)
+        lay = QVBoxLayout(dlg)
+        lst = QListWidget()
+        st = {"todo": "сделать", "doing": "в работе", "question": "вопрос", "done": "готово"}
+        for t in sorted(tasks, key=lambda t: (t.get("status") == "done", t.get("priority", "2"))):
+            it = QListWidgetItem("[%s] %s — %s%s" % (st.get(t.get("status"), t.get("status")), t.get("name") or "(без имени)",
+                                                     t.get("task") or "", ("\n   ответ: " + t["reply"]) if t.get("reply") else ""))
+            it.setData(Qt.UserRole, [(t["mins"][i] + t["maxs"][i]) / 2 for i in range(3)])
+            lst.addItem(it)
+        lst.itemDoubleClicked.connect(lambda it: self.worldview.focus_on(it.data(Qt.UserRole), 900))
+        lay.addWidget(QLabel("Метки rpm_claude_task / func_rpm_claude_area из Hammer++. Двойной щелчок — показать на карте."))
+        lay.addWidget(lst)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        dlg.resize(760, 420)
+        dlg.show()
+        self._tasks_dlg = dlg
+
+    def vmf_shots(self):
+        doc = self._vmf_doc(self.cur_map) if self.cur_map else None
+        if doc is None:
+            QMessageBox.information(self, "Снимки", "У карты нет VMF в папках исходников.")
+            return
+        from ..world import vmfshot
+        out = os.path.join(os.path.dirname(doc.path), "_claude_shots", self.cur_map)
+        files = vmfshot.render_all(doc.path, out, materials=self.matsys)
+        self.logln("Снимки карты: " + out + "  (" + ", ".join(os.path.basename(f) for f in files) + ")")
+        subprocess.Popen(["explorer", out])
+
+    def _map_label(self, name):
+        layer = self.project.layer(name) if self.project else None
+        n = len(layer.refs) if layer else 0
+        sketch = name not in (getattr(self, "_bsp_names", None) or ())
+        return "%s%s%s" % (name, ("  · объектов %d" % n) if n else "", "  · набросок (VMF)" if sketch else "")
+
     def refresh_map_list(self):
         mp = self.map_panel
-        files = self.map_files()
+        if self.project is not None and getattr(self, "_geom_project", None) is not self.project:
+            # the "geometry from VMF" choice is the project's
+            self._geom_project = self.project
+            v = self.project.view if isinstance(self.project.view, dict) else {}
+            self.act_vmf_geom.blockSignals(True)
+            self.act_vmf_geom.setChecked(v.get("_geometry") == "vmf")
+            self.act_vmf_geom.blockSignals(False)
+        files = dict(self.map_files())
+        self._bsp_names = set(files)
+        for n, f in self.vmf_sketches().items():
+            files.setdefault(n, f)
+        names = sorted(files, key=lambda n: (not (self.project and self.project.layer(n) and self.project.layer(n).refs), n.lower()))
+        have = [mp.maps.itemData(i) for i in range(1, mp.maps.count())]
+        if sorted(have) == sorted(names) and mp.maps.count():
+            # same maps: only the object counts change (clear() would close an open list)
+            for i in range(1, mp.maps.count()):
+                t = self._map_label(mp.maps.itemData(i))
+                if mp.maps.itemText(i) != t:
+                    mp.maps.setItemText(i, t)
+            return
+        if mp.maps.view().isVisible():
+            return
         mp.maps.blockSignals(True)
         mp.maps.clear()
         mp.maps.addItem("— выберите карту —", "")
-        for name in sorted(files, key=lambda n: (not (self.project and self.project.layer(n) and self.project.layer(n).refs), n.lower())):
-            layer = self.project.layer(name) if self.project else None
-            n = len(layer.refs) if layer else 0
-            mp.maps.addItem("%s%s" % (name, ("  · объектов %d" % n) if n else ""), name)
+        for name in names:
+            mp.maps.addItem(self._map_label(name), name)
         mp.maps.setCurrentIndex(max(0, mp.maps.findData(self.cur_map)))
         mp.maps.blockSignals(False)
 
@@ -268,9 +462,14 @@ class WorldMixin:
             return
         files = self.map_files()
         path = files.get(name)
+        geometry = "vmf" if self.act_vmf_geom.isChecked() else "bsp"
         if not path:
-            QMessageBox.warning(self, "Карта", "Не найден %s.bsp в папках maps игры и мода." % name)
-            return
+            # a sketch that exists only as a VMF (never compiled): geometry from the VMF
+            vdoc = self._vmf_doc(name)
+            if vdoc is None:
+                QMessageBox.warning(self, "Карта", "Не найден %s.bsp в папках maps игры и мода (и VMF в папках исходников)." % name)
+                return
+            path, geometry = vdoc.path, "vmf"
         if self.fs is None:
             QMessageBox.warning(self, "Карта", "Не удалось прочитать файлы игры (Проект → Настройки: папка мода и hl2.exe).")
             return
@@ -286,10 +485,11 @@ class WorldMixin:
             prog.setLabelText(msg)
             QApplication.processEvents()
         t0 = time.time()
+        doc = self._vmf_doc(name)
         # the progress dialog runs the event loop: no second load from a click or a timer meanwhile
         self._loading_map = True
         try:
-            scene = MapScene(path, self.fs, self.matsys, progress)
+            scene = MapScene(path, self.fs, self.matsys, progress, vmf=doc, geometry=geometry)
         except Exception as e:
             prog.close()
             QMessageBox.critical(self, "Карта", "Не удалось открыть %s:\n%s" % (path, e))
@@ -297,17 +497,54 @@ class WorldMixin:
         finally:
             self._loading_map = False
         prog.close()
+        keep_cam = force and name == self.cur_map
         self.scene = scene
         self.cur_map = name
         self.layer = self.project.layer(name, create=True)
         self.project.view["_last_map"] = name
-        self.worldview.set_map(scene, self.layer, self.matsys)
+        self.worldview.set_map(scene, self.layer, self.matsys, keep_camera=keep_cam)
         self.map_panel.maps.setCurrentIndex(max(0, self.map_panel.maps.findData(name)))
         self.refresh_cell_view()
-        self.logln("Карта %s: %d треугольников, %d пропов, объектов проекта %d, узлов навигации %d (%.1f с)" % (
-            name, scene.ray.n, len(scene.props), len(self.layer.refs), len(self.layer.nav), time.time() - t0))
+        nprops = sum(1 for ob in scene.objects if ob.draw_model() and not ob.is_npc())
+        self.logln("Карта %s: %d треугольников, объектов Hammer %d (пропов %d), объектов проекта %d, узлов навигации %d (%.1f с)" % (
+            name, scene.ray.n, len(scene.objects), nprops, len(self.layer.refs), len(self.layer.nav), time.time() - t0))
+        if scene.geometry == "vmf":
+            g = scene.bsp
+            self.logln("  Геометрия из VMF (без компиляции): брашей %d, граней %d, дисплейсментов %d, задач для Claude %d — "
+                       "сохранения Hammer++ подхватываются сами" % (g.solid_count, g.side_count, g.disp_count, len(g.tasks)))
+        if doc is not None:
+            self.logln("  VMF: %s — объекты Hammer можно двигать и править, F9 — собрать карту" % doc.path)
+        else:
+            self.logln("  VMF карты не найден в папках исходников (Проект → Настройки) — объекты Hammer только для просмотра")
         if self.central_tabs.currentWidget() is not self.map_panel:
             self.central_tabs.setCurrentWidget(self.map_panel)
+
+    # ------------------------------------------------------------------ favourites of the objects window
+    def _favorites(self):
+        v = self.project.view if isinstance(self.project.view, dict) else {}
+        self.project.view = v
+        return v.setdefault("favorites", [])
+
+    def _palette_menu(self, pos):
+        it = self.palette.itemAt(pos)
+        data = it.data(0, Qt.UserRole) if it is not None else None
+        if not data or not self.project:
+            return
+        from PySide6.QtWidgets import QMenu
+        favs = self._favorites()
+        key = list(data)
+        inside = [f for f in favs if list(f[1]) == key]
+        m = QMenu(self.palette)
+        a = m.addAction("Убрать из избранного" if inside else "\u2605 В избранное")
+        if m.exec(self.palette.viewport().mapToGlobal(pos)) is not a:
+            return
+        if inside:
+            for f in inside:
+                favs.remove(f)
+        else:
+            favs.append([it.text(0).strip(), key])
+        self.model_changed(False)
+        self.refresh_palette()
 
     # ------------------------------------------------------------------ lists
     def refresh_palette(self):
@@ -331,6 +568,11 @@ class WorldMixin:
                 it.setToolTip(0, tip)
             parent.addChild(it)
             return it
+        favs = self._favorites()
+        if favs:
+            c = cat("\u2605 Избранное")
+            for text, data in favs:
+                add(c, text, tuple(data), "ПКМ — убрать из избранного")
         c = cat("Персонажи (NPC проекта)")
         for n in sorted(self.project.npcs, key=lambda x: x.targetname.lower()):
             disp = n.display_name.get(self.display_lang) or n.display_name.get(self.project.base_language, "")
@@ -342,21 +584,48 @@ class WorldMixin:
             it = add(c, n, ("marker", k))
             it.setForeground(0, QColor(col))
         c = cat("Предметы")
-        for name in self.item_names():
-            add(c, name, ("item", name))
+        lang, base = self.display_lang, self.project.base_language
+        for name in self.all_item_ids():
+            it = self.project.item(name)
+            add(c, "%s  (%s)" % (it.label(lang, base), name) if it else name, ("item", name))
         c = cat("Контейнеры (с лутом)")
         for m, n in wd.CONTAINER_MODELS:
             add(c, n, ("container", m), m)
         add(c, "другая модель…", ("container", None))
+        c = cat("Терминалы (компьютеры, консоли Альянса)")
+        from ..termdata import MODELS as TERM_MODELS
+        for m, style, n in TERM_MODELS:
+            add(c, n, ("terminal", m), m)
         c = cat("Пропы (мебель, декор)")
         for m, n in wd.PROP_MODELS:
             add(c, n, ("prop", m), m)
         add(c, "другая модель…", ("prop", None))
         c = cat("Прочее")
+        add(c, "Переход на другую карту (дверь)", ("transition",),
+            "Коробка-триггер: игрок входит — грузится другая карта, он появляется перед парной дверью там. "
+            "Инвентарь, квесты, время и погода переносятся")
+        add(c, "Зона (для событий и целей заданий)", ("zone",),
+            "Невидимая коробка с именем: события «вошёл / вышел из зоны», цель задания «Дойти до», условие «игрок в зоне»")
+        add(c, "Звук на карте (гул, капли, радио)", ("sound",),
+            "Звук в точке: петля звучит всё время. Время суток и задания — условием присутствия")
+        add(c, "Точка появления (враги, массовка)", ("spawner",),
+            "Держит рядом с собой несколько NPC из списка, пока игрок неподалёку; после их смерти пополняется через N часов")
         add(c, "Маршрут патруля", ("path",), "Кликайте точки на карте, Enter или правая кнопка — готово")
         add(c, "Своя сущность (classname)…", ("entity",), "ambient_generic, light_deferred, info_target…")
+        c = cat("В саму карту (Hammer, после правки — F9)")
+        tip = "Записывается в VMF карты, как будто поставлено в Hammer; в игре появится после сборки карты (F9)"
+        add(c, "Статический проп…", ("vmf", "prop_static", None), "Самый дешёвый для FPS проп (не двигается). " + tip)
+        for m, n in wd.PROP_MODELS:
+            add(c, "   " + n, ("vmf", "prop_static", m), m)
+        add(c, "Динамический проп…", ("vmf", "prop_dynamic", None), "Проп с анимацией / входами. " + tip)
+        add(c, "Физический проп…", ("vmf", "prop_physics", None), "Падает и толкается. " + tip)
+        add(c, "Лампа (deferred)", ("vmf", "light_deferred", ""), "Точечный свет с тенью. Сборка — секунды. " + tip)
+        add(c, "Прожектор (deferred)", ("vmf", "light_deferred_spot", ""), "Направленный свет: повернуть — Alt+тащить или кольца. " + tip)
+        add(c, "Сущность Hammer (classname)…", ("vmf", "", ""), "info_target, ambient_generic, env_* … " + tip)
         pt.expandItem(pt.topLevelItem(0))
         pt.expandItem(pt.topLevelItem(1))
+        if favs:
+            pt.expandItem(pt.topLevelItem(2))
 
     def refresh_faction_list(self):
         self.faction_list.clear()
@@ -396,25 +665,39 @@ class WorldMixin:
                 c.addTopLevelItem(it)
                 it.setExpanded(True)
         if self.scene is not None:
-            hi = QTreeWidgetItem(["NPC из Hammer", ""])
-            f = hi.font(0)
-            f.setBold(True)
-            hi.setFont(0, f)
-            for (i, cls, o, a, e) in self.scene.entities:
-                if not is_npc_class(cls):
-                    continue
-                tn = e.get("targetname", "")
-                lbl = "%s  (%s)" % (tn or "без имени", cls)
+            ro = "" if self.scene.vmf is not None else "  · только просмотр"
+            heads = {"npc": "NPC из Hammer", "prop": "Пропы Hammer", "light": "Свет Hammer", "other": "Сущности Hammer"}
+            hgroups = {}
+            for ob in self.scene.objects:
+                kind = "npc" if ob.is_npc() else "prop" if ob.draw_model() else "light" if ob.classname in LIGHT_CLASSES else "other"
+                tn = ob.get("targetname")
+                if kind == "npc":
+                    lbl = "%s  (%s)" % (tn or "без имени", ob.classname)
+                elif kind == "prop":
+                    lbl = "%s  · %s" % (ob.label(), ob.classname.replace("prop_", ""))
+                else:
+                    lbl = "%s  (%s)" % (tn, ob.classname) if tn else ob.classname
                 if flt and flt not in lbl.lower():
                     continue
-                it = QTreeWidgetItem([lbl, "%.0f %.0f %.0f" % tuple(o)])
-                it.setData(0, Qt.UserRole, ("hammer", i))
-                if tn and self.project.npc(tn):
+                if kind not in hgroups:
+                    hi = QTreeWidgetItem(["", ""])
+                    f = hi.font(0)
+                    f.setBold(True)
+                    hi.setFont(0, f)
+                    hgroups[kind] = hi
+                it = QTreeWidgetItem([lbl, "%.0f %.0f %.0f" % tuple(ob.origin)])
+                it.setData(0, Qt.UserRole, ("obj", ob.key))
+                if kind == "npc" and tn and self.project.npc(tn):
                     it.setForeground(0, QColor("#7fd6ff"))
-                hi.addChild(it)
-            if hi.childCount():
-                hi.setText(0, "NPC из Hammer (%d)" % hi.childCount())
-                c.addTopLevelItem(hi)
+                if ob.ent is not None and ob.ent.dirty:
+                    it.setForeground(1, QColor("#ffd27a"))
+                hgroups[kind].addChild(it)
+            for kind in ("npc", "prop", "light", "other"):
+                hi = hgroups.get(kind)
+                if hi is not None:
+                    hi.setText(0, "%s (%d)%s" % (heads[kind], hi.childCount(), ro))
+                    c.addTopLevelItem(hi)
+                    hi.setExpanded(kind in ("npc", "light") or bool(flt))
         self.refresh_map_list()
 
     def _cell_clicked(self, it, col):
@@ -439,6 +722,9 @@ class WorldMixin:
     def on_world_selected(self, target):
         if target is None:
             return
+        if target[0] == "multi":
+            self.inspector.show_target(("worldmulti", target[1]))
+            return
         if target[0] == "ref" and self.layer is not None:
             r = self.layer.ref(target[1])
             self.worldview.focus_npc = r.npc if r is not None and r.type == "npc" else ""
@@ -448,8 +734,8 @@ class WorldMixin:
         self.model_changed(False, moved=True)
         self.cell_timer.start()
         t = self.inspector.target
-        if t and t[0] in ("ref", "pathpt", "nav"):
-            self.inspector.show_target(t)
+        if t and t[0] in ("ref", "pathpt", "nav", "obj", "worldmulti"):
+            self.inspector.rebuild_soon()
 
     def on_world_activated(self, target):
         if target and target[0] == "ref" and self.layer is not None:
@@ -467,6 +753,10 @@ class WorldMixin:
         t = self.worldview.sel
         if t is None or self.layer is None:
             return
+        many = [x for x in self.worldview.editable_selection() if x[0] in ("ref", "obj")]
+        if len(many) > 1 or (t[0] == "obj"):
+            self.delete_targets(many or [t])
+            return
         if t[0] == "pathpt":
             r = self.layer.ref(t[1])
             if r is not None and t[2] < len(r.points):
@@ -482,6 +772,10 @@ class WorldMixin:
             self.delete_ref(r)
 
     def duplicate_world_selected(self):
+        sel = [x for x in self.worldview.editable_selection() if x[0] in ("ref", "obj")]
+        if len(sel) > 1 or (sel and sel[0][0] == "obj"):
+            self._paste_items(self._copy_items(sel), offset=[48, 0, 0])
+            return
         r = self._sel_ref()
         if r is not None:
             self.duplicate_ref(r)
@@ -546,6 +840,10 @@ class WorldMixin:
                     pk.path = new
                 if pk.target == old:
                     pk.target = new
+        for layer in self.project.maps.values():
+            for r in layer.refs:
+                if r.type == "transition" and r.target == old:      # the pair of a renamed transition
+                    r.target = new
 
     def ref_names_for(self, tn):
         maps = [m for m, _ in self.project.placements(tn)] or ([self.cur_map] if self.cur_map else [])
@@ -585,6 +883,21 @@ class WorldMixin:
             if not ok or not cls.strip():
                 return
             d = ("entity", cls.strip())
+        if d[0] == "vmf":
+            if self.scene is not None and self.scene.vmf is None:
+                QMessageBox.information(self, "В карту", "Для этой карты не найден VMF (папки исходников карт — Проект → Настройки), "
+                                        "поэтому в саму карту ставить нельзя. Можно поставить объект программы (выше).")
+                return
+            if d[1].startswith("prop_") and d[2] is None:
+                mdl = self.browse_model("", "models/")
+                if not mdl:
+                    return
+                d = (d[0], d[1], mdl)
+            if not d[1]:
+                cls, ok = QInputDialog.getText(self, "Сущность Hammer", "classname:", text="info_target")
+                if not ok or not cls.strip():
+                    return
+                d = (d[0], cls.strip(), "")
         self.start_place(d)
 
     def start_place(self, payload):
@@ -595,7 +908,9 @@ class WorldMixin:
         self.place_payload = payload
         names = {"npc": "NPC «%s»" % payload[1] if len(payload) > 1 else "NPC", "marker": "маркер «%s»" % wd.MARKER_NAMES.get(payload[1], ""),
                  "item": "предмет %s" % (payload[1] if len(payload) > 1 else ""), "container": "контейнер", "prop": "проп",
-                 "path": "маршрут", "entity": "сущность %s" % (payload[1] if len(payload) > 1 else "")}
+                 "path": "маршрут", "entity": "сущность %s" % (payload[1] if len(payload) > 1 else ""),
+                 "vmf": "%s в карту" % (payload[1] if len(payload) > 1 else ""), "spawner": "точку появления", "transition": "переход", "zone": "зону", "sound": "звук",
+                 "terminal": "терминал"}
         self.worldview.set_mode("place", "Клик — поставить %s · Shift+клик — поставить ещё · Esc — отмена" % names.get(payload[0], ""))
         self.worldview.setFocus()
 
@@ -605,6 +920,9 @@ class WorldMixin:
     def on_place(self, pos, normal):
         d = self.place_payload
         if d is None or self.layer is None:
+            return
+        if d[0] == "vmf":
+            self._place_vmf(d, pos, normal)
             return
         L = self.layer
         cam = self.worldview.cam.pos
@@ -622,11 +940,20 @@ class WorldMixin:
         elif d[0] == "item":
             r.classname = d[1]
             r.pos[2] += 4
+        elif d[0] == "terminal":
+            from ..termdata import MODELS as TERM_MODELS
+            r.model = d[1]
+            m = self.scene.model(d[1])
+            if m is not None and m.ok:
+                r.pos[2] += self.scene.lowest_offset(d[1], r.angles)
+            style = next((s for mm, s, _n in TERM_MODELS if mm == d[1]), "pc")
+            same = [t for t in self.project.terminals if t.style == style] or list(self.project.terminals)
+            r.terminal = same[0].id if same else ""
         elif d[0] in ("container", "prop"):
             r.model = d[1]
             m = self.scene.model(d[1])
             if m is not None and m.ok:
-                r.pos[2] -= float(m.mins[2])      # stand on the surface
+                r.pos[2] += self.scene.lowest_offset(d[1], r.angles)      # the lowest point on the surface
             if d[0] == "container":
                 label = dict(wd.CONTAINER_MODELS).get(d[1], "")
                 if label and "russian" in self.project.languages:
@@ -642,6 +969,18 @@ class WorldMixin:
             return
         elif d[0] == "entity":
             r.classname = d[1]
+        elif d[0] == "transition":
+            r.name = self._unique_name("tr_%s_%d" % (self.cur_map, r.id))
+        elif d[0] == "zone":
+            r.name = self._unique_name("zone_%d" % r.id)
+            r.size = [256.0, 256.0, 128.0]
+        elif d[0] == "sound":
+            r.pos[2] += 32
+            r.sound = "ambient/machines/transformer_loop.wav"
+            r.radius = 800.0
+        elif d[0] == "spawner":
+            r.name = self._unique_name("spawn_%d" % r.id)
+            r.keyvalues = {"npcs": "", "count_min": "1", "count_max": "3", "radius": "384", "respawn_hours": "24"}
         L.refs.append(r)
         self.model_changed(False, moved=True)
         self.world_changed("place")
@@ -694,6 +1033,11 @@ class WorldMixin:
                     m.addAction("Распорядок…", lambda: self.open_npc(r.npc, tab=2))
                 if r.type == "path":
                     m.addAction("Добавить точки…", lambda: self.start_path_draw(r))
+                mname = self.worldview._ref_model_name(r)
+                if mname:
+                    m.addAction("Просмотр модели и анимаций…", lambda r=r, mname=mname: self.view_model_of_ref(r, mname))
+                elif r.type == "marker":
+                    m.addAction("Анимация маркера…", lambda r=r: self.view_marker_anim(r))
                 m.addAction("Опустить на пол", lambda: (setattr(r, "pos", self.scene.drop_to_floor(r.pos)), self.on_world_edited("drop"), self.world_changed("drop")))
                 m.addAction("Повернуть на 90°", lambda: self.worldview.rotate_selected(90))
                 m.addAction("Дублировать", lambda: self.duplicate_ref(r))
@@ -702,15 +1046,30 @@ class WorldMixin:
                     m.addAction("Удалить точку", self.delete_world_selected)
                 m.addAction("Удалить", lambda: self.delete_ref(r))
                 m.addSeparator()
-        elif target is not None and target[0] == "hammer":
-            for (i, cls, o, a, e) in self.scene.entities:
-                if i == target[1]:
-                    tn = e.get("targetname", "")
+        elif target is not None and target[0] == "obj":
+            ob = self.scene.find(target[1])
+            if ob is not None:
+                tn = ob.get("targetname")
+                if ob.is_npc():
                     if tn and self.project.npc(tn):
                         m.addAction("Открыть NPC «%s»" % tn, lambda tn=tn: self.open_npc(tn))
-                    elif tn and is_npc_class(cls):
-                        m.addAction("Добавить «%s» в проект" % tn, lambda tn=tn, cls=cls, e=e: self.npc_from_hammer(tn, cls, e))
+                    elif tn:
+                        m.addAction("Добавить «%s» в проект" % tn, lambda ob=ob, tn=tn: self.npc_from_hammer(tn, ob.classname, ob))
+                if ob.draw_model():
+                    m.addAction("Просмотр модели и анимаций…", lambda ob=ob: self.view_model(ob.draw_model(), ob.skin))
+                if ob.editable:
+                    m.addAction("Приземлить (End)", self.worldview.land_selected)
+                    m.addAction("Повернуть на 90°", lambda: self.worldview.rotate_selected(90))
+                    m.addAction("Дублировать (Ctrl+D)", self.duplicate_world_selected)
+                    m.addAction("Копировать (Ctrl+C)", self.copy_world_selected)
+                    m.addSeparator()
+                    m.addAction("Удалить", self.delete_world_selected)
+                else:
+                    a = m.addAction("VMF карты не найден — только просмотр")
+                    a.setEnabled(False)
             m.addSeparator()
+        if self._clip:
+            m.addAction("Вставить сюда (Ctrl+V)", lambda: self.paste_world(wpos))
         if wpos is not None:
             sub = m.addMenu("Поставить сюда")
             for n in sorted(self.project.npcs, key=lambda x: x.targetname.lower())[:40]:
@@ -720,11 +1079,239 @@ class WorldMixin:
                 sub.addAction("Маркер: " + n, lambda k=k: self._place_at(("marker", k), wpos))
             sub.addSeparator()
             sub.addAction("Ящик с лутом", lambda: self._place_at(("container", wd.CONTAINER_MODELS[0][0]), wpos))
+            sub.addAction("Терминал: компьютер", lambda: self._place_at(("terminal", "models/props_lab/monitor01a.mdl"), wpos))
+            sub.addAction("Терминал: экран Альянса", lambda: self._place_at(("terminal", "models/props_combine/combine_intmonitor001.mdl"), wpos))
             sub.addAction("Аптечка", lambda: self._place_at(("item", "item_healthkit"), wpos))
             sub.addAction("Маршрут патруля отсюда", lambda: self._place_at(("path",), wpos))
             m.addAction("Игра отсюда (F6)", lambda: self.run_game_here(wpos))
         m.addAction("Вид сверху сюда", lambda: self._top_view(wpos))
         m.exec(gpos)
+
+    # ------------------------------------------------------------------ model viewer (M7)
+    def view_model(self, model_name, skin=0, sequence="", title=""):
+        from .model_viewer import open_viewer
+        return open_viewer(self, model_name, skin, sequence, title)
+
+    def view_model_of_ref(self, r, model_name):
+        skin, seq = r.skin, ""
+        if r.type == "npc":
+            npc = self.project.npc(r.npc)
+            skin = npc.actor.skin if npc else 0
+            seq = self.npc_preview_sequence(npc) if npc else ""
+        return self.view_model(model_name, skin, seq, "Просмотр: %s" % r.label())
+
+    def npc_preview_sequence(self, npc, hour=None):
+        """The animation an NPC plays at this hour of the map view: its package's marker animation, else idle."""
+        hour = self.worldview.hour if hour is None else hour
+        pk = npc.actor.package_at(hour) if npc else None
+        if pk is not None and pk.anim:
+            return self.marker_sequence(pk.anim)
+        mk = self.marker_of_package(pk) if pk is not None else None
+        if mk is not None and mk.anim:
+            return self.marker_sequence(mk.anim)
+        return "ACT_IDLE"
+
+    def marker_of_package(self, pk):
+        """A marker ref of the current map a package uses (use_marker by name, sleep / eat / sit kinds), or None."""
+        if self.layer is None or pk is None:
+            return None
+        name = pk.ref if pk.type in ("use_marker", "sleep", "eat", "sandbox") or pk.location == "ref" else ""
+        kinds = tuple(pk.markers) or {"sleep": ("sleep",), "eat": ("eat", "sit")}.get(pk.type, ())
+        for r in self.layer.refs:
+            if r.type != "marker":
+                continue
+            if name and r.name == name:
+                return r
+        for r in self.layer.refs:
+            if r.type == "marker" and kinds and r.kind in kinds:
+                return r
+        return None
+
+    def marker_sequence(self, anim_name):
+        """actbusy name -> its busy sequence / activity (scripts/actbusy.txt); an ACT_ / sequence name as is."""
+        if not anim_name:
+            return ""
+        if anim_name.upper().startswith("ACT_"):
+            return anim_name
+        if getattr(self, "_actbusy", None) is None:
+            from ..world.anim import actbusy_sequences
+            self._actbusy = actbusy_sequences(self.fs) if self.fs is not None else {}
+        busy = self._actbusy.get(anim_name.lower())
+        return busy[0] if busy and busy[0] else anim_name
+
+    # --- sitting markers of the animation library: fit to the furniture
+    def seat_params(self):
+        """{actbusy name: numbers} of scripts/hl2rpm_anim_seats.txt (make_anims.py)"""
+        if getattr(self, "_seat_params", None) is None:
+            from ..world import seatfit
+            self._seat_params = seatfit.load_params(self.fs)
+        return self._seat_params
+
+    def fit_marker_to_furniture(self, ref, radius=110.0):
+        """put a sitting marker where its animation lands the character on the nearest seat (a prop of the
+        map or of the layer): position, facing, seat height -> (True, message) / (False, why)"""
+        from ..world import seatfit
+        params = self.seat_params().get((ref.anim or "").lower())
+        if not params:
+            return False, "У анимации «%s» нет подгонки (нужна анимация библиотеки: rpm_sit_chair, rpm_sit_couch)" % (ref.anim or "—")
+        if "over_seat" not in params:
+            return False, "«%s» — не мебель: для неё «Прислонить к стене» / «Поставить на пол»" % ref.anim
+        cands = []
+        if self.scene is not None:
+            for ob in self.scene.objects:
+                if ob.model and ob.model.endswith(".mdl"):
+                    cands.append((ob.model, ob.origin, ob.angles[1]))
+        for r in (self.layer.refs if self.layer else []):
+            if r.type in ("prop", "container") and r.model:
+                cands.append((r.model, r.pos, r.angles[1]))
+        best = None
+        for model, origin, yaw in cands:
+            d = math.hypot(origin[0] - ref.pos[0], origin[1] - ref.pos[1])
+            if d > radius or abs(origin[2] - ref.pos[2]) > 80:
+                continue
+            if best is None or d < best[0]:
+                info = self._seat_info(model)
+                if info and "seat_h" in info:
+                    best = (d, model, origin, yaw, info)
+        if best is None:
+            return False, "Рядом с маркером (%.0f ед.) нет мебели с сиденьем" % radius
+        _d, model, origin, yaw, info = best
+        res = seatfit.marker_for(info, origin, yaw, params)
+        if res is None:
+            return False, "Не удалось найти сиденье у %s" % model
+        pos, myaw, h = res
+        ref.pos = [round(pos[0], 1), round(pos[1], 1), round(pos[2], 1)]
+        ref.angles = [0.0, round(myaw, 1), 0.0]
+        ref.seat_h = round(h, 1)
+        return True, "%s: сиденье %.1f ед., маркер поставлен" % (model.rsplit("/", 1)[-1], h)
+
+    def fit_marker_to_bed(self, ref, radius=120.0):
+        """a lying marker (rpm_lie_bed): the nearest bed (and the mattress on it), the marker at the middle of the
+        long side whose left is the headboard (a free side), the mattress height -> (True, message) / (False, why)"""
+        import numpy as np
+        from ..world import seatfit
+        from ..world.scene import model_matrix
+        params = self.seat_params().get((ref.anim or "").lower()) or {}
+        if self.scene is None:
+            return False, "Карта не загружена"
+        cands = []
+        for ob in self.scene.objects:
+            if ob.model and ob.model.endswith(".mdl"):
+                cands.append((ob.model, ob.origin, ob.angles))
+        for r in (self.layer.refs if self.layer else []):
+            if r.type in ("prop", "container") and r.model:
+                cands.append((r.model, r.pos, r.angles))
+        beds = [c for c in cands if any(k in c[0].lower() for k in ("bed", "cot", "mattress"))
+                and math.hypot(c[1][0] - ref.pos[0], c[1][1] - ref.pos[1]) < radius]
+        if not beds:
+            return False, "Рядом с маркером (%.0f ед.) нет кровати (модели с bed / cot / mattress в имени)" % radius
+        main = min(beds, key=lambda c: ("mattress" in c[0].lower(), math.hypot(c[1][0] - ref.pos[0], c[1][1] - ref.pos[1])))
+        yaw = math.radians(main[2][1])
+        cs, sn = math.cos(yaw), math.sin(yaw)
+        o = np.array(main[1], dtype=np.float64)
+        tris = []
+        for model, origin, angles in beds:
+            m = self.scene.model(model)
+            if m is None or not m.ok:
+                continue
+            T = m.triangles().astype(np.float64)
+            M = model_matrix(origin, angles).astype(np.float64)
+            W = T @ M[:3, :3].T + M[:3, 3]
+            # into the main bed's frame (its yaw only): the bed's axes become x / y
+            d = W - o
+            tris.append(np.stack([d[..., 0] * cs + d[..., 1] * sn, -d[..., 0] * sn + d[..., 1] * cs, d[..., 2]], axis=-1))
+        if not tris:
+            return False, "Модель кровати не прочитана"
+        T = np.concatenate(tris)
+
+        def to_world(v):
+            return o + np.array([v[0] * cs - v[1] * sn, v[0] * sn + v[1] * cs, v[2]])
+
+        def blocked(pos, out):
+            wp = to_world(pos)
+            wd = np.array([out[0] * cs - out[1] * sn, out[0] * sn + out[1] * cs, 0.0])
+            start = wp - wd * 10.0 + np.array([0.0, 0.0, 30.0])
+            return self.scene.cast(start, wd, 30.0) is not None
+        res = seatfit.bed_marker(T, params, near=None, blocked=blocked)
+        if res is None:
+            return False, "Не найден матрас у %s" % main[0]
+        pos = to_world(res["pos"])
+        pos = self.scene.drop_to_floor([float(pos[0]), float(pos[1]), float(pos[2]) + 2.0])
+        ref.pos = [round(pos[0], 1), round(pos[1], 1), round(pos[2], 1)]
+        ref.angles = [0.0, round((res["yaw"] + math.degrees(yaw)) % 360.0, 1), 0.0]
+        ref.seat_h = round(res["h"], 1)
+        msg = "%s: матрас %.1f ед., маркер у длинной стороны" % (main[0].rsplit("/", 1)[-1], res["h"])
+        if not res["head_ok"]:
+            msg += "; со стороны изголовья не встать - голова будет в ногах кровати"
+        if res["blocked"]:
+            msg += "; обе стороны заняты - проверьте место"
+        return True, msg
+
+    def fit_marker_to_wall(self, ref, radius=72.0):
+        """a leaning marker (rpm_lean_wall): find the nearest wall around the marker (rays at the height of the
+        back), stand wall_dist in front of it, facing away from it, on the floor -> (True, message) / (False, why)"""
+        import numpy as np
+        params = self.seat_params().get((ref.anim or "").lower()) or {}
+        dist = float(params.get("wall_dist", 14.0))
+        if self.scene is None:
+            return False, "Карта не загружена"
+        base = self.scene.drop_to_floor(list(ref.pos))
+        best = None
+        yaw0 = math.radians(ref.angles[1] if ref.angles else 0.0)
+        for k in range(24):
+            a = yaw0 + math.pi + k * (2.0 * math.pi / 24.0)          # behind the marker first
+            d = np.array([math.cos(a), math.sin(a), 0.0])
+            hits = []
+            for z in (30.0, 50.0):
+                r = self.scene.cast(np.array(base, float) + [0, 0, z], d, radius)
+                if r is None or abs(r[1][2]) > 0.3:
+                    break
+                hits.append(r)
+            if len(hits) < 2 or abs(hits[0][0] - hits[1][0]) > 6.0:
+                continue                                              # not a wall at both heights
+            t = 0.5 * (hits[0][0] + hits[1][0])
+            if best is None or t < best[0] - 0.5:
+                n = np.array(hits[0][1], float)
+                if n @ d > 0:
+                    n = -n
+                best = (t, d, n)
+        if best is None:
+            return False, "В %.0f ед. от маркера нет стены (нужна вертикальная поверхность на высоте спины)" % radius
+        t, d, n = best
+        n2 = np.array([n[0], n[1], 0.0])
+        n2 /= max(1e-6, np.linalg.norm(n2))
+        hit = np.array(base, float) + d * t
+        pos = hit + n2 * dist
+        pos = self.scene.drop_to_floor([float(pos[0]), float(pos[1]), float(base[2])])
+        ref.pos = [round(pos[0], 1), round(pos[1], 1), round(pos[2], 1)]
+        ref.angles = [0.0, round(math.degrees(math.atan2(n2[1], n2[0])) % 360.0, 1), 0.0]
+        return True, "Маркер у стены: %.0f ед. от неё, спиной к ней" % dist
+
+    def _seat_info(self, model):
+        cache = getattr(self, "_seat_cache", None)
+        if cache is None:
+            cache = self._seat_cache = {}
+        if model not in cache:
+            from ..world import seatfit
+            info = None
+            try:
+                m = self.scene.model(model) if self.scene is not None else None
+                if m is not None and m.ok:
+                    info = seatfit.analyze(m.triangles())
+            except Exception:
+                info = None
+            cache[model] = info
+        return cache[model]
+
+    def view_marker_anim(self, r):
+        from ..worlddata import NPC_DEFAULT_MODEL
+        model = NPC_DEFAULT_MODEL.get("npc_citizen", "")
+        owner = self.project.npc(r.owner) if r.owner else None
+        if owner is not None:
+            model = owner.actor.model_or_default()
+        if not model:
+            model = "models/humans/group01/male_07.mdl"
+        return self.view_model(model, 0, self.marker_sequence(r.anim), "Анимация маркера «%s»" % (r.name or r.kind))
 
     def _place_at(self, payload, pos):
         self.place_payload = payload
@@ -773,19 +1360,71 @@ class WorldMixin:
     def human_models(self):
         return HUMAN_MODELS
 
-    def browse_model(self, current, prefix="models/"):
+    def model_names(self):
         if self.fs is None:
-            return ""
+            return []
         if self._model_names is None:
             QApplication.setOverrideCursor(Qt.WaitCursor)
             try:
                 self._model_names = self.fs.listdir("models", ".mdl")
             finally:
                 QApplication.restoreOverrideCursor()
-        dlg = ModelBrowser(self, self._model_names, current)
+        return self._model_names
+
+    def thumbnailer(self):
+        if self.fs is None or self.matsys is None:
+            return None
+        if getattr(self, "_thumbs", None) is None or self._thumbs.fs is not self.fs:
+            self._thumbs = Thumbnailer(self.fs, self.matsys)
+        return self._thumbs
+
+    def browse_model(self, current, prefix="models/"):
+        if self.fs is None:
+            return ""
+        dlg = ModelBrowser(self, self, self.model_names, current)
         if dlg.exec() == QDialog.Accepted:
             return dlg.value()
         return ""
+
+    # --- the "Модели" tab: every model of the game, drag one onto the map
+    def _build_models_tab(self):
+        w = QWidget()
+        l = QVBoxLayout(w)
+        l.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        row.setContentsMargins(4, 4, 4, 0)
+        row.addWidget(QLabel("Ставить как:"))
+        self.models_as = QComboBox()
+        for data, text in (("vmf:prop_static", "статический проп в карту (F9)"), ("vmf:prop_dynamic", "динамический проп в карту (F9)"),
+                           ("vmf:prop_physics", "физический проп в карту (F9)"), ("prop", "проп программы (без сборки)"),
+                           ("container", "контейнер с лутом")):
+            self.models_as.addItem(text, data)
+        row.addWidget(self.models_as, 1)
+        l.addLayout(row)
+        self.models_grid = ModelGrid(self, self.model_names, self._model_payload)
+        self.models_grid.activated.connect(lambda m: self.start_place(self._model_payload(m)))
+        l.addWidget(self.models_grid, 1)
+        h = QLabel("Перетащите модель на карту или дважды щёлкните, затем щёлкните на карте.")
+        h.setObjectName("hint")
+        h.setWordWrap(True)
+        l.addWidget(h)
+        return w
+
+    def _model_payload(self, model):
+        kind = self.models_as.currentData() or "prop"
+        if kind.startswith("vmf:"):
+            return ["vmf", kind[4:], model]
+        return [kind, model]
+
+    def on_world_drop(self, payload, pos, normal):
+        if not payload or self.layer is None:
+            return
+        payload = tuple(payload)
+        if payload[0] == "vmf" and self.scene is not None and self.scene.vmf is None:
+            QMessageBox.information(self, "В карту", "У этой карты нет VMF — поставлю объект программы.")
+            payload = ("prop", payload[2])
+        self.place_payload = payload
+        self.on_place(list(pos), list(normal))
 
     def model_sequences(self, model):
         if self.fs is None or not model:
@@ -955,16 +1594,340 @@ class WorldMixin:
             p = pos
         # rpm_start: the game puts the player there once the map is loaded (Source pitch is down-positive)
         start = "%.0f %.0f %.0f %.0f %.0f %.2f" % (p[0], p[1], p[2] + 4, -cam.pitch if pos is None else 0, cam.yaw, self.preview_hour())
+        from .test_state_dialog import launch_args
         args = [s.hl2_exe, "-game", s.mod_dir, "-dev", "-console", "-novid", "+dialog_language", self.display_lang,
-                "+rpm_start", start, "+map", self.cur_map]
+                "+rpm_start", start] + launch_args(self.project) + ["+map", self.cur_map]
         self.logln("Запуск: " + " ".join('"%s"' % a if " " in a else a for a in args))
         subprocess.Popen(args, cwd=os.path.dirname(s.hl2_exe))
+
+    # ------------------------------------------------------------------ the map's VMF (objects placed in Hammer)
+    def _vmf_dirs(self):
+        out = []
+        for d in (self.project.settings.maps_dirs if self.project else []):
+            out += [d, os.path.join(d, "test")]
+        return out
+
+    def _vmf_doc(self, name):
+        """The VMF of a map (kept between map switches so unsaved edits survive), or None."""
+        doc = self.vmfdocs.get(name)
+        if doc is not None:
+            if doc.changed_on_disk() and not doc.dirty:
+                try:
+                    doc.load()
+                    self.logln("VMF %s изменён вне программы (Hammer) — перечитан" % os.path.basename(doc.path))
+                except OSError as e:
+                    self.logln("VMF %s: %s" % (doc.path, e))
+            return doc
+        path = find_vmf(name, self._vmf_dirs())
+        if not path:
+            return None
+        try:
+            doc = VMFDoc(path)
+        except Exception as e:
+            self.logln("VMF %s не прочитан: %s" % (path, e))
+            return None
+        self.vmfdocs[name] = doc
+        return doc
+
+    def sync_scene_from_vmf(self):
+        """After undo / redo: rebuild the map objects from the VMF state."""
+        if self.scene is None or self.scene.vmf is None:
+            return
+        self.scene.objects = []
+        doc = self.scene.vmf
+        for ent in doc.live():
+            if ent.get("origin"):
+                self.scene.add_object(ent)
+        self.worldview.refresh_objects()
+        self.worldview._prune_selection()
+        self.refresh_cell_view()
+
+    def _place_vmf(self, d, pos, normal):
+        sc = self.scene
+        if sc is None or sc.vmf is None:
+            return
+        cls, mdl = d[1], d[2] or ""
+        cam = self.worldview.cam.pos
+        yaw = round(math.degrees(math.atan2(cam[1] - pos[1], cam[0] - pos[0])) / 15) * 15 % 360
+        keys = {}
+        ang = [0, yaw, 0]
+        p = list(pos)
+        if cls.startswith("prop_"):
+            keys = {"model": mdl, "skin": "0", "solid": "6"}
+            if cls == "prop_static":
+                keys.update({"fademindist": "-1", "fadescale": "1"})
+            sc.model(mdl)
+            p[2] += sc.lowest_offset(mdl, ang)
+        elif cls in ("light_deferred", "light_deferred_spot"):
+            keys = dict(NEW_LIGHT_KEYS)
+            keys["light_type"] = "1" if cls.endswith("spot") else "0"
+            if cls.endswith("spot"):
+                ang = [60, yaw, 0]
+            p[2] += 96 if abs(normal[2]) > 0.5 else 0
+            if abs(normal[2]) <= 0.5:
+                p = [p[0] + normal[0] * 16, p[1] + normal[1] * 16, p[2]]
+        else:
+            p[2] += 8
+        ent = sc.vmf.add(cls, p, ang, **keys)
+        ob = sc.add_object(ent)
+        self.worldview.refresh_objects()
+        self.model_changed(False, moved=True)
+        self.world_changed("place")
+        self.worldview.select(("obj", ob.key))
+        self.logln("В карту: %s %s (VMF изменён — сохраните и соберите карту, F9)" % (cls, mdl))
+
+    def delete_targets(self, targets):
+        n = 0
+        for t in targets:
+            if t[0] == "ref":
+                r = self.layer.ref(t[1]) if self.layer else None
+                if r is not None and r in self.layer.refs:
+                    self.layer.refs.remove(r)
+                    n += 1
+            elif t[0] == "obj" and self.scene is not None:
+                ob = self.scene.find(t[1])
+                if ob is not None and ob.editable:
+                    self.scene.remove_object(ob)
+                    n += 1
+        if not n:
+            return
+        self.worldview.select(None, emit=False)
+        self.worldview.refresh_objects()
+        self.inspector.show_target(("npc",) if self.npc else None)
+        self.model_changed(False, moved=True)
+        self.world_changed("delete")
+        self.statusBar().showMessage("Удалено объектов: %d" % n, 4000)
+
+    # --- copy / paste (also between maps)
+    def _copy_items(self, targets):
+        items = []
+        for t in targets:
+            if t[0] == "ref":
+                r = self.layer.ref(t[1]) if self.layer else None
+                if r is not None:
+                    items.append({"ref": r.to_dict()})
+            elif t[0] == "obj" and self.scene is not None:
+                ob = self.scene.find(t[1])
+                if ob is not None and ob.ent is not None:
+                    items.append({"ent": [list(x) for x in ob.ent.kv]})
+        return items
+
+    def copy_world_selected(self):
+        sel = [x for x in self.worldview.selset if x[0] in ("ref", "obj")]
+        items = self._copy_items(sel)
+        if not items:
+            return
+        self._clip = items
+        QApplication.clipboard().setText(json.dumps({"hl2rpm_ck": items}, ensure_ascii=False))
+        self.statusBar().showMessage("Скопировано объектов: %d — Ctrl+V вставит под курсор (и на другой карте)" % len(items), 5000)
+
+    def paste_world(self, pos=None):
+        items = self._clip
+        if not items:
+            try:
+                d = json.loads(QApplication.clipboard().text())
+                items = d.get("hl2rpm_ck")
+            except (ValueError, AttributeError):
+                items = None
+        if not items:
+            return
+        self._paste_items(items, at=pos)
+
+    def _paste_items(self, items, offset=None, at=None):
+        if self.layer is None:
+            return
+        # anchor = the first item's position
+        def item_pos(it):
+            if "ref" in it:
+                r = it["ref"]
+                pts = r.get("points") or []
+                return list(r.get("pos") or (pts[0]["pos"] if pts else [0, 0, 0]))
+            for k, v in it["ent"]:
+                if k == "origin":
+                    return [float(x) for x in v.split()[:3]]
+            return [0, 0, 0]
+        anchor = item_pos(items[0])
+        off = list(offset) if offset is not None else ([at[i] - anchor[i] for i in range(3)] if at is not None else [48, 0, 0])
+        new = []
+        skipped = 0
+        for it in items:
+            if "ref" in it:
+                r = wd.Ref.from_dict(dict(it["ref"]))
+                r.id = self.layer.new_id()
+                r.pos = [r.pos[i] + off[i] for i in range(3)]
+                for pt in r.points:
+                    pt.pos = [pt.pos[i] + off[i] for i in range(3)]
+                if r.name:
+                    r.name = self._unique_name(r.name)
+                self.layer.refs.append(r)
+                new.append(("ref", r.id))
+            else:
+                if self.scene is None or self.scene.vmf is None:
+                    skipped += 1
+                    continue
+                kv = [list(x) for x in it["ent"] if x[0] != "id"]
+                cls = next((v for k, v in kv if k == "classname"), "info_target")
+                ent = self.scene.vmf.add(cls, [0, 0, 0])
+                for k, v in kv:
+                    if k != "classname":
+                        ent.set(k, v)
+                p = item_pos(it)
+                ent.origin = [p[i] + off[i] for i in range(3)]
+                ob = self.scene.add_object(ent)
+                new.append(("obj", ob.key))
+        self.worldview.refresh_objects()
+        self.model_changed(False, moved=True)
+        self.world_changed("paste")
+        self.worldview.select_many(new)
+        msg = "Вставлено объектов: %d" % len(new)
+        if skipped:
+            msg += " (объекты Hammer пропущены: у карты нет VMF)"
+        self.statusBar().showMessage(msg, 5000)
+
+    def _gizmo_mode_changed(self, mode):
+        mp = self.map_panel
+        mp.giz_move.setChecked(mode == "move")
+        mp.giz_rot.setChecked(mode == "rotate")
+
+    # --- save the VMF / build the map
+    def dirty_vmfs(self):
+        return [d for d in self.vmfdocs.values() if d.dirty]
+
+    def save_vmfs(self):
+        """Write the changed VMFs (with a .bak copy). False if the user cancelled."""
+        for name, doc in list(self.vmfdocs.items()):
+            if not doc.dirty:
+                continue
+            if doc.changed_on_disk():
+                r = QMessageBox.question(self, "VMF изменён в Hammer",
+                                         "%s сохранили в Hammer после того, как программа его прочитала.\n\n"
+                                         "Да — записать правки программы поверх (изменения Hammer в этих сущностях пропадут, "
+                                         "остальное — нет: программа меняет только свои сущности).\n"
+                                         "Нет — не сохранять VMF сейчас." % os.path.basename(doc.path),
+                                         QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+                if r == QMessageBox.Cancel:
+                    return False
+                if r == QMessageBox.No:
+                    continue
+                st = doc.state()
+                doc.load()
+                doc.restore(st)
+            try:
+                bak = doc.save()
+            except OSError as e:
+                QMessageBox.critical(self, "VMF", "Не удалось записать %s:\n%s" % (doc.path, e))
+                return False
+            self.logln("VMF %s сохранён (копия: %s). Соберите карту (F9), чтобы изменения появились в игре." % (doc.path, os.path.basename(bak) if bak else "—"))
+        if self.scene is not None and self.scene.vmf is not None:
+            self.refresh_cell_view()
+        return True
+
+    def build_map(self):
+        if self.scene is None or not self.cur_map:
+            QMessageBox.information(self, "Сборка", "Откройте карту.")
+            return
+        doc = self.scene.vmf
+        if doc is None:
+            QMessageBox.information(self, "Сборка", "Для карты %s не найден VMF (Проект → Настройки → папки исходников карт)." % self.cur_map)
+            return
+        if self._build_proc is not None:
+            QMessageBox.information(self, "Сборка", "Карта уже собирается — см. «Журнал».")
+            return
+        kind = doc.kinds_changed()
+        if doc.dirty and not self.save_vmfs():
+            return
+        bin_dir = os.path.join(os.path.dirname(self.project.settings.hl2_exe), "bin") if self.project.settings.hl2_exe else SDK_BIN
+        exe = {k: os.path.join(bin_dir, "hl2rpm_%s.exe" % k) for k in ("vbsp", "vvis", "vrad")}
+        if not all(os.path.isfile(x) for x in exe.values()):
+            exe = {k: os.path.join(bin_dir, "%s.exe" % k) for k in ("vbsp", "vvis", "vrad")}
+        base = os.path.splitext(doc.path)[0]
+        game = self.project.settings.mod_dir
+        if not kind:
+            r = QMessageBox.question(self, "Сборка", "Правок объектов Hammer нет. Собрать карту %s полностью?" % self.cur_map)
+            if r != QMessageBox.Yes:
+                return
+            kind = "full"
+        if kind == "ents" and not os.path.isfile(base + ".bsp"):
+            kind = "full"      # -onlyents needs the previous BSP next to the VMF
+        if kind == "ents":
+            steps = [(exe["vbsp"], ["-game", game, "-onlyents", base])]
+        else:
+            steps = [(exe["vbsp"], ["-game", game, base]), (exe["vvis"], ["-game", game, base]), (exe["vrad"], ["-game", game, "-both", base])]
+        self.logln("Сборка %s (%s): %d шаг(а)" % (self.cur_map, "только сущности" if kind == "ents" else "полная", len(steps)))
+        self.map_panel.build.setEnabled(False)
+        self.map_panel.build.setText("⚙ Собирается…")
+        self._build_t0 = time.time()
+        self._build_steps = steps
+        self._build_base = base
+        self._run_build_step()
+
+    def _run_build_step(self):
+        if not self._build_steps:
+            self._build_done(True)
+            return
+        exe, args = self._build_steps.pop(0)
+        p = QProcess(self)
+        p.setWorkingDirectory(os.path.dirname(exe))
+        p.setProcessChannelMode(QProcess.MergedChannels)
+        self._build_proc = p
+        self._build_leak = False
+
+        def out():
+            data = bytes(p.readAll()).decode("utf-8", "replace")
+            for line in data.splitlines():
+                low = line.lower()
+                if "leaked" in low:
+                    self._build_leak = True
+                if any(k in low for k in ("error", "warning", "leak", "elapsed", "too many", "exceeded", "***")):
+                    self.logln("    " + line.strip())
+
+        def done(code, status):
+            self._build_proc = None
+            out()
+            if code != 0 or self._build_leak:
+                self.logln("  %s завершился с кодом %d%s" % (os.path.basename(exe), code, " — карта протекает (leak)" if self._build_leak else ""))
+                self._build_done(False)
+                return
+            self._run_build_step()
+        p.readyRead.connect(out)
+        p.finished.connect(done)
+        self.logln("  ==> %s %s" % (os.path.basename(exe), " ".join('"%s"' % a if " " in a else a for a in args)))
+        p.start(exe, args)
+
+    def _build_done(self, ok):
+        self.map_panel.build.setEnabled(True)
+        self.map_panel.build.setText("⚙ Собрать карту")
+        if not ok:
+            QMessageBox.warning(self, "Сборка", "Сборка %s не удалась — подробности во вкладке «Журнал»." % self.cur_map)
+            return
+        bsp = self._build_base + ".bsp"
+        name = os.path.basename(self._build_base)
+        s = self.project.settings
+        test_dirs = [os.path.normcase(os.path.join(d, "test")) for d in s.maps_dirs]
+        is_test = os.path.normcase(os.path.dirname(self._build_base)) in test_dirs or \
+            os.path.isfile(os.path.join(s.mod_dir, "testmaps", "maps", name + ".bsp"))
+        dest = os.path.join(s.mod_dir, "testmaps" if is_test else "", "maps", name + ".bsp")
+        try:
+            if os.path.isfile(dest):
+                os.makedirs(MAP_BACKUPS, exist_ok=True)
+                shutil.copy2(dest, os.path.join(MAP_BACKUPS, "%s_%s.bsp" % (name, time.strftime("%Y%m%d_%H%M%S"))))
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy2(bsp, dest)
+        except OSError as e:
+            QMessageBox.warning(self, "Сборка", "Карта собрана, но не скопирована в мод (игра запущена?):\n%s" % e)
+            return
+        self.logln("Карта %s собрана за %.0f с → %s" % (name, time.time() - self._build_t0, dest))
+        if self.cur_map == name:
+            self.open_map(name, force=True)
 
     def import_world(self):
         if not self.project:
             return
         log = []
         n_npc, n_maps = world_import.import_world(self.project, self.project.settings.game_dir, log)
+        from .. import rpg_export
+        rpg_export.import_rpg(self.project, self.project.settings.game_dir, log)
+        self.refresh_item_tree()
         self.logln("Импорт мира: " + "; ".join(log))
         self.model_changed(True)
         self.refresh_npc_list()

@@ -57,6 +57,12 @@ public:
 	bool IsQuestRowIndex(int rowIndex) const;
 	const QuestClientEntry *GetQuestEntryForRowIndex(int rowIndex) const;
 	void OpenInventoryTab();
+	void OpenQuestsTab();		// HL2RPM: the journal (rpm_journal)
+
+	// HL2RPM (M6): the data for the character menu (hl2rpm_menu.cpp), which paints it its own way
+	const CUtlVector<CUtlString> &GetItemList() const { return m_Items; }
+	const CUtlVector<QuestClientEntry> &GetQuestList() const { return m_Quests; }
+	void GetWeightInfo(float &cur, float &max, bool &over) const { cur = m_flCurWeight; max = m_flMaxWeight; over = m_bOverencumbered; }
 
 private:
 	void ShowActions(int idx);
@@ -114,5 +120,10 @@ private:
 };
 
 CVGuiInventoryPanel *GetGlobalInventoryPanel();
+
+// HL2RPM (M6): an inventory entry "<class>:<count>[:...]" for other windows
+void InventoryClient_ParseEntry(const char *raw, char *cls, int clsSize, int &count, bool &hasExplicitCount);
+float InventoryClient_EntryWeight(const char *raw);
+bool InventoryClient_IsAmmo(const char *cls);
 
 #endif // VGUI_INVENTORYPANEL_H

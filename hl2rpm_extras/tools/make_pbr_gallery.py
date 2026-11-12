@@ -12,7 +12,7 @@ import os
 import re
 import sys
 
-sys.path.insert(0, r"E:\SourceModding\HL2RPMSOURCE\.claude\skills\hl2rpm-hammer\scripts")
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "AI_instructions", "skills", "hl2rpm-hammer", "scripts")))
 from vmf import VMF, parse  # noqa: E402
 import new_test_map  # noqa: E402
 

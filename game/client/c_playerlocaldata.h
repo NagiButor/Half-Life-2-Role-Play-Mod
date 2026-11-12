@@ -62,6 +62,7 @@ public:
 	CInterpolatedVar< QAngle >	m_iv_vecPunchAngleVel;
 	bool					m_bDrawViewmodel;
 	bool					m_bWearingSuit;
+	int						m_iSuitTheme;	// HL2RPM (M6): the theme of the suit worn (hl2rpm_ui.h)
 	bool					m_bPoisoned;
 	float					m_flStepSize;
 	bool					m_bAllowAutoMovement;

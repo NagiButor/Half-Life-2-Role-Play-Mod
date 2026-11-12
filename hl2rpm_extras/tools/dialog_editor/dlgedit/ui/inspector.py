@@ -2,8 +2,8 @@
 returning visit / quest / placed object / faction."""
 import os
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QGroupBox,
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QGroupBox,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QRadioButton,
                                QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget,
                                QInputDialog, QMessageBox, QHeaderView, QAbstractItemView, QTabWidget)
@@ -11,8 +11,15 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBo
 from ..model import (LANGUAGE_NAMES, QUEST_STATES, QUEST_STATE_NAMES, TARGETNAME_RE, Option, Quest, Stage, short_lang,
                      text_for)
 from .widgets import LangTexts, NodeCombo, QuestCombo, AutoText, completer_line, hint
+from .logic_widgets import LogicList
+from .quest_widgets import ObjectiveList
+from .. import logic
 from . import theme
+from . import rpg_pages
 from . import world_pages
+from . import logic_pages
+from . import sound_pages
+from . import char_pages
 
 COMMON_SEQUENCES = ["g_fist", "g_point", "g_shrug", "g_answer", "g_explain", "g_nod", "g_headshake", "g_plead",
                     "gesture_agitated_1", "g_present", "g_frustrated", "g_despair", "g_question"]
@@ -50,6 +57,21 @@ class Inspector(QScrollArea):
     def changed(self, structural=False):
         self.ctx.model_changed(structural)
 
+    def rebuild_soon(self):
+        """Rebuild the page after the current signal returns. A rebuild deletes every widget of
+        the page: done from inside a combo's signal it closed the combo's open list at once."""
+        if getattr(self, "_rebuild_pending", False):
+            return
+        self._rebuild_pending = True
+
+        def run():
+            if QApplication.activePopupWidget() is not None:
+                QTimer.singleShot(60, run)
+                return
+            self._rebuild_pending = False
+            self.show_target(self.target)
+        QTimer.singleShot(0, run)
+
     def _page(self, title, subtitle=""):
         w = QWidget()
         lay = QVBoxLayout(w)
@@ -75,10 +97,49 @@ class Inspector(QScrollArea):
             w, lay = self._page("Нет проекта", "Файл → Новый проект или Открыть.")
         elif target and target[0] == "quest":
             w, lay = self.quest_page(target[1])
+        elif target and target[0] == "event" and p.event(target[1]) is not None:
+            w, lay = logic_pages.event_page(self, p.event(target[1]))
+        elif target and target[0] == "terminal" and len(target) > 1 and p.terminal(target[1]) is not None:
+            from . import term_pages
+            w, lay = term_pages.terminal_page(self, p.terminal(target[1]))
+        elif target and target[0] == "topic" and len(target) > 1 and p.topic(target[1]) is not None:
+            w, lay = logic_pages.topic_page(self, p.topic(target[1]))
+        elif target and target[0] == "globals":
+            w, lay = logic_pages.globals_page(self)
+        elif target and target[0] == "rpgrules":
+            w, lay = char_pages.rules_page(self)
+        elif target and target[0] == "rpgchars":
+            w, lay = char_pages.chars_page(self)
+        elif target and target[0] == "newgame":
+            w, lay = char_pages.newgame_page(self)
+        elif target and target[0] in ("perks", "traits"):
+            w, lay = char_pages.perks_page(self, target[0] == "traits")
+        elif target and target[0] == "perk" and p.perk(target[1]) is not None:
+            w, lay = char_pages.perk_page(self, p.perk(target[1]))
+        elif target and target[0] == "trait" and p.trait(target[1]) is not None:
+            w, lay = char_pages.perk_page(self, p.trait(target[1]), True)
+        elif target and target[0] == "music":
+            w, lay = sound_pages.music_page(self)
+        elif target and target[0] == "track" and p.track(target[1]) is not None:
+            w, lay = sound_pages.track_page(self, p.track(target[1]))
+        elif target and target[0] == "soundscapes":
+            w, lay = sound_pages.soundscapes_page(self)
+        elif target and target[0] == "soundscape" and p.soundscape(target[1]) is not None:
+            w, lay = sound_pages.soundscape_page(self, p.soundscape(target[1]))
+        elif target and target[0] == "barksets":
+            w, lay = sound_pages.barksets_page(self)
+        elif target and target[0] == "barkset" and p.bark_set(target[1]) is not None:
+            w, lay = sound_pages.barkset_page(self, p.bark_set(target[1]))
         elif target and target[0] in ("ref", "pathpt") and layer is not None and layer.ref(target[1]) is not None:
             w, lay = world_pages.ref_page(self, layer, layer.ref(target[1]))
-        elif target and target[0] == "hammer" and getattr(self.ctx, "scene", None) is not None:
-            w, lay = world_pages.hammer_page(self, self.ctx.scene, target[1])
+        elif target and target[0] == "obj" and getattr(self.ctx, "scene", None) is not None:
+            w, lay = world_pages.mapobj_page(self, self.ctx.scene, target[1])
+        elif target and target[0] == "worldmulti":
+            w, lay = world_pages.multi_page(self, target[1])
+        elif target and target[0] == "item":
+            w, lay = rpg_pages.item_page(self, target[1])
+        elif target and target[0] == "lootlist":
+            w, lay = rpg_pages.lootlist_page(self, target[1])
         elif target and target[0] == "nav" and layer is not None:
             w, lay = world_pages.nav_page(self, layer, target[1])
         elif target and target[0] == "faction" and p.faction(target[1]) is not None:
@@ -128,7 +189,8 @@ class Inspector(QScrollArea):
         tabs.addTab(dw, "Диалог")
         tabs.addTab(world_pages.actor_tab(self, npc), "Персонаж")
         tabs.addTab(world_pages.routine_tab(self, npc), "Распорядок (%d)" % len(npc.actor.packages))
-        tabs.setCurrentIndex(self.npc_tab if 0 <= self.npc_tab < 3 else 0)
+        tabs.addTab(sound_pages.barks_tab(self, npc), "Фразы (%d)" % len(npc.actor.barks))
+        tabs.setCurrentIndex(self.npc_tab if 0 <= self.npc_tab < 4 else 0)
         tabs.currentChanged.connect(lambda i: setattr(self, "npc_tab", i))
         lay.addWidget(tabs)
         return w, lay
@@ -172,7 +234,7 @@ class Inspector(QScrollArea):
                 def take():
                     npc.display_name[p.base_language] = hl[0]
                     self.changed(False)
-                    self.show_target(self.target)
+                    self.rebuild_soon()
                 b.clicked.connect(take)
                 gl.addWidget(b)
         lay.addWidget(g)
@@ -275,7 +337,7 @@ class Inspector(QScrollArea):
             def mk_start():
                 npc.start_node = n.id
                 self.changed(True)
-                self.show_target(self.target)
+                self.rebuild_soon()
             sb.clicked.connect(mk_start)
             top.addWidget(sb)
         lay.addLayout(top)
@@ -320,14 +382,14 @@ class Inspector(QScrollArea):
             if 0 <= i < len(n.options) and 0 <= j < len(n.options):
                 n.options[i], n.options[j] = n.options[j], n.options[i]
                 self.changed(True)
-                self.show_target(self.target)
+                self.rebuild_soon()
 
         def delete():
             i = ol.currentRow()
             if 0 <= i < len(n.options):
                 del n.options[i]
                 self.changed(True)
-                self.show_target(self.target)
+                self.rebuild_soon()
         up.clicked.connect(lambda: move(-1))
         dn.clicked.connect(lambda: move(1))
         de.clicked.connect(delete)
@@ -372,7 +434,7 @@ class Inspector(QScrollArea):
                     n.options.append(Option())
             upd_mode()
             self.changed(True)
-            self.show_target(self.target)
+            self.rebuild_soon()
         mode.idClicked.connect(apply_mode)
 
         def set_auto(v):
@@ -427,6 +489,14 @@ class Inspector(QScrollArea):
         dl.addWidget(ds)
         f.addRow("Варианты появятся:", dl)
         gl.addLayout(f)
+        lay.addWidget(g)
+
+        g, gl = _group("Действия при реплике")
+        gl.addWidget(hint("Выполняются, когда NPC говорит эту реплику: выдать предмет, поставить флаг, этап задания… "
+                          "«NPC нападает» и подобные — после закрытия окна диалога."))
+        al = LogicList(self.ctx, n.actions, actions=True)
+        al.changed.connect(lambda: self.changed(True))
+        gl.addWidget(al)
         lay.addWidget(g)
 
         g, gl = _group("Заметка")
@@ -486,7 +556,7 @@ class Inspector(QScrollArea):
         def set_next(v):
             o.next = v
             self.changed(True)
-            self.show_target(self.target)
+            self.rebuild_soon()
         nc.picked.connect(set_next)
         f.addRow("Следующая реплика:", nc)
         cl = QCheckBox("Закрыть диалог")
@@ -506,6 +576,15 @@ class Inspector(QScrollArea):
             self.changed(True)
         sp.toggled.connect(set_sp)
         f.addRow("", sp)
+        tr = QCheckBox("Открыть торговлю (диалог закроется)")
+        tr.setToolTip("NPC должен быть торговцем: «Персонаж» → «Торговец»")
+        tr.setChecked(o.trade)
+
+        def set_tr(v):
+            o.trade = bool(v)
+            self.changed(True)
+        tr.toggled.connect(set_tr)
+        f.addRow("", tr)
         ss = completer_line(o.server_sequence, self.ctx.mapindex.targetnames(), "targetname scripted_sequence / logic")
 
         def set_ss():
@@ -527,7 +606,7 @@ class Inspector(QScrollArea):
             def setq(v, a=attr):
                 setattr(o, a, v)
                 self.changed(True)
-                self.show_target(self.target)
+                self.rebuild_soon()
             qc.picked.connect(setq)
             row = QHBoxLayout()
             row.addWidget(qc, 1)
@@ -563,7 +642,7 @@ class Inspector(QScrollArea):
             def set_after(v):
                 o.after_next = v
                 self.changed(True)
-                self.show_target(self.target)
+                self.rebuild_soon()
             anc.picked.connect(set_after)
             af.addRow("Перейти к реплике:", anc)
             al.addLayout(af)
@@ -575,8 +654,103 @@ class Inspector(QScrollArea):
             gl.addWidget(ag)
         lay.addWidget(g)
 
-        g, gl = _group("Условия показа")
-        gl.addWidget(hint("Вариант скрыт, пока условие не выполнено."))
+        g, gl = _group("Условия")
+        gl.addWidget(hint("Вариант виден, когда условия выполнены: задания, флаги, переменные, навыки, предметы, время, погода…"))
+        cl = LogicList(self.ctx, o.conditions)
+        gl.addWidget(cl)
+        su = QCheckBox("Если не выполнены — показывать серым")
+        su.setToolTip("Как в New Vegas: игрок видит вариант, но выбрать его не может")
+        su.setChecked(o.show_unmet)
+        su.setEnabled(bool(o.conditions))
+
+        def conds_changed():
+            su.setEnabled(bool(o.conditions))
+            self.changed(True)
+        cl.changed.connect(conds_changed)
+        su.toggled.connect(lambda v: (setattr(o, "show_unmet", bool(v)), self.changed(True)))
+        gl.addWidget(su)
+        lay.addWidget(g)
+
+        g, gl = _group("Проверка навыка")
+        ck = QCheckBox("Проверка: «[Красноречие 50]» перед текстом")
+        ck.setToolTip("Хватает навыка — переход по «Следующей реплике» и действия ниже; не хватает — реплика провала")
+        ck.setChecked(o.check is not None)
+
+        def set_check(v):
+            o.check = {"skill": "speech", "value": 50} if v else None
+            self.changed(True)
+            self.rebuild_soon()
+        ck.toggled.connect(set_check)
+        gl.addWidget(ck)
+        if o.check is not None:
+            cf = _form()
+            crow = QHBoxLayout()
+            ckind = QComboBox()
+            # string data "skill:speech" - a combo doesn't find tuples back (findData), it showed the first skill
+            for sid, sname in logic.SKILLS:
+                ckind.addItem(sname, "skill:" + sid)
+            ckind.addItem("Уровень", "skill:level")
+            for sid, sname in logic.STATS:
+                ckind.addItem(sname + " (характеристика)", "stat:" + sid)
+            cur = ("stat:" + o.check["stat"]) if o.check.get("stat") else ("skill:" + (o.check.get("skill") or "speech"))
+            ckind.setCurrentIndex(max(0, ckind.findData(cur)))
+            cval = QSpinBox()
+            cval.setRange(0, 100)
+            cval.setValue(int(o.check.get("value", 0) or 0))
+
+            def set_cv(*_):
+                k, sid = ckind.currentData().split(":", 1)
+                o.check = {k: sid, "value": cval.value()}
+                self.changed(True)
+            ckind.currentIndexChanged.connect(set_cv)
+            cval.valueChanged.connect(set_cv)
+            crow.addWidget(ckind, 1)
+            crow.addWidget(QLabel("≥"))
+            crow.addWidget(cval)
+            cf.addRow("Нужно:", crow)
+            fnc = NodeCombo(self.ctx, npc, o.fail_next, none_label="— закрыть диалог —")
+
+            def set_fail(v):
+                o.fail_next = v
+                self.changed(True)
+            fnc.picked.connect(set_fail)
+            cf.addRow("Не хватает →", fnc)
+            once = QCheckBox("Одна попытка (потом вариант скрыт)")
+            once.setChecked(o.check_once)
+            once.toggled.connect(lambda v: (setattr(o, "check_once", bool(v)), self.changed(True)))
+            cf.addRow("", once)
+            gl.addLayout(cf)
+            gl.addWidget(QLabel("Действия при провале:"))
+            fl = LogicList(self.ctx, o.fail_actions, actions=True, max_height=90)
+            fl.changed.connect(lambda: self.changed(True))
+            gl.addWidget(fl)
+        lay.addWidget(g)
+
+        g, gl = _group("Действия")
+        gl.addWidget(hint("Выполняются, когда игрок выбирает этот ответ (при проверке — только если она пройдена). "
+                          "«NPC нападает», торговля, перенос, другой диалог — после закрытия окна (значок ⏏)."))
+        al = LogicList(self.ctx, o.actions, actions=True)
+        al.changed.connect(lambda: self.changed(True))
+        gl.addWidget(al)
+        qrow = QHBoxLayout()
+        for label, act in (("NPC нападает", {"type": "hostile", "target": ""}),
+                           ("Вся фракция нападает", {"type": "faction_hostile", "faction": ""}),
+                           ("+ опыт", {"type": "xp", "value": 25})):
+            b = QToolButton(text=label)
+            b.setToolTip("Добавить действие «%s»" % logic.describe_action(act, p))
+
+            def add(_=False, act=act):
+                o.actions.append(dict(act))
+                al.refresh()
+                self.changed(True)
+            b.clicked.connect(add)
+            qrow.addWidget(b)
+        qrow.addStretch(1)
+        gl.addLayout(qrow)
+        lay.addWidget(g)
+
+        g, gl = _group("Простые условия (старые поля)")
+        gl.addWidget(hint("Вариант скрыт, пока условие не выполнено. Новое лучше задавать в «Условиях» выше."))
         f = _form()
         rrow = QHBoxLayout()
         rc = QCheckBox("репутация ≥")
@@ -709,32 +883,32 @@ class Inspector(QScrollArea):
         p = self.ctx.project
         q = p.quest(qid)
         if q is None:
-            return self._page("Квест не найден")
-        w, lay = self._page("Квест  %s" % q.id, "Квесты общие для всей игры: выдать/сдать квест может любой NPC. "
-                                                 "Записывается в файл диалога NPC-владельца.")
+            return self._page("Задание не найдено")
+        w, lay = self._page("Задание  %s" % q.id, "Задания общие для всей игры: выдать, продвинуть и сдать их может любой NPC, "
+                                                   "событие «Логики» или другое задание. Файл игры — scripts/rpg/quests.txt.")
         f = _form()
         idl = QLineEdit(q.id)
 
         def rename():
             new = idl.text().strip()
             if new != q.id:
-                if not new or any(c in new for c in ' "|;~:') or p.quest(new):
-                    QMessageBox.warning(self, "id квеста", "Пустой, с пробелом/: ; | ~ или уже существует")
+                if not new or any(c in new for c in ' "|;~:.') or p.quest(new):
+                    QMessageBox.warning(self, "id задания", "Пустой, с пробелом/: ; | ~ . или уже существует")
                     idl.setText(q.id)
                     return
                 self.ctx.rename_quest(q, new)
         idl.editingFinished.connect(rename)
         f.addRow("id:", idl)
-        own = QComboBox()
-        for n in p.npcs:
-            own.addItem(n.targetname, n.targetname)
-        own.setCurrentIndex(max(0, own.findData(q.owner)))
+        xp = QSpinBox()
+        xp.setRange(0, 100000)
+        xp.setSingleStep(25)
+        xp.setValue(q.xp)
 
-        def set_owner(_):
-            q.owner = own.currentData()
+        def set_xp(v):
+            q.xp = v
             self.changed(False)
-        own.currentIndexChanged.connect(set_owner)
-        f.addRow("В файле NPC:", own)
+        xp.valueChanged.connect(set_xp)
+        f.addRow("Опыт за выполнение:", xp)
         mr = QSpinBox()
         mr.setRange(-1000, 1000)
         mr.setValue(q.min_rep)
@@ -744,23 +918,6 @@ class Inspector(QScrollArea):
             self.changed(False)
         mr.valueChanged.connect(set_mr)
         f.addRow("Мин. репутация:", mr)
-        names = self.ctx.mapindex.targetnames(npc_only=True)
-        fk = completer_line(";".join(q.fail_on_kill), names, "targetname через ;  — убийство проваливает квест")
-
-        def set_fk():
-            q.fail_on_kill = [t.strip() for t in fk.text().split(";") if t.strip()]
-            self.changed(False)
-        fk.editingFinished.connect(set_fk)
-        f.addRow("Провал, если убит:", fk)
-        fp = QSpinBox()
-        fp.setRange(-1000, 0)
-        fp.setValue(q.fail_rep_penalty)
-
-        def set_fp(v):
-            q.fail_rep_penalty = v
-            self.changed(False)
-        fp.valueChanged.connect(set_fp)
-        f.addRow("Штраф репутации:", fp)
         lay.addLayout(f)
 
         g, gl = _group("Название")
@@ -774,53 +931,123 @@ class Inspector(QScrollArea):
         gl.addWidget(d)
         lay.addWidget(g)
 
+        names = self.ctx.mapindex.targetnames(npc_only=True)
         g, gl = _group("Этапы (%d)" % len(q.stages))
+        gl.addWidget(hint("Этап — запись в журнале и его цели. Когда все обязательные цели выполнены, задание само "
+                          "переходит дальше (после последнего этапа — выполнено). Этап без целей ждёт действия: "
+                          "ответа в диалоге, события, другого этапа."))
         for si, s in enumerate(q.stages):
             sg, sl = _group("Этап %d" % si)
-            st = LangTexts(self.ctx, s.title, multiline=False, placeholder="название этапа")
+            st = LangTexts(self.ctx, s.title, multiline=False, placeholder="название этапа (журнал)")
             st.changed.connect(lambda: self.changed(False))
             sl.addWidget(st)
-            sd = LangTexts(self.ctx, s.desc, multiline=True, placeholder="что сделать")
+            sd = LangTexts(self.ctx, s.desc, multiline=True, placeholder="что сделать (журнал)")
             sd.changed.connect(lambda: self.changed(False))
             sl.addWidget(sd)
+            sl.addWidget(QLabel("Цели:"))
+            ol = ObjectiveList(self.ctx, q, s)
+            ol.changed.connect(lambda: self.changed(False))
+            sl.addWidget(ol)
+            sl.addWidget(QLabel("Когда этап начинается:"))
+            al = LogicList(self.ctx, s.actions, actions=True, max_height=100,
+                           empty_text="Ничего не происходит. Например: выдать предмет, поставить флаг, NPC нападает.")
+            al.changed.connect(lambda: self.changed(False))
+            sl.addWidget(al)
             sf = _form()
-            kt = completer_line(";".join(s.kill_targets), names, "targetname через ;  (пусто — этап без убийств)")
-            kc = QSpinBox()
-            kc.setRange(0, 999)
-            kc.setValue(s.kill_count)
+            nx = QComboBox()
+            nx.addItem("— следующий этап —", "next")
+            for sj in range(len(q.stages)):
+                if sj != si:
+                    nx.addItem("этап %d" % sj, sj)
+            nx.addItem("— задание выполнено —", "final")
+            nx.setCurrentIndex(max(0, nx.findData("final" if s.final else (s.next if s.next != -1 else "next"))))
 
-            def set_kill(*_, s=s, kt=kt, kc=kc):
-                s.kill_targets = [t.strip() for t in kt.text().split(";") if t.strip()]
-                s.kill_count = kc.value()
+            def set_next(_, s=s, nx=nx):
+                v = nx.currentData()
+                s.final = v == "final"
+                s.next = v if isinstance(v, int) else -1
                 self.changed(False)
-            kt.editingFinished.connect(set_kill)
-            kc.valueChanged.connect(set_kill)
-            sf.addRow("Убить:", kt)
-            sf.addRow("Сколько:", kc)
+            nx.currentIndexChanged.connect(set_next)
+            sf.addRow("Цели выполнены →", nx)
+            if s.kill_targets or s.kill_count:
+                kt = completer_line(";".join(s.kill_targets), names, "targetname через ;")
+                kc = QSpinBox()
+                kc.setRange(0, 999)
+                kc.setValue(s.kill_count)
+
+                def set_kill(*_, s=s, kt=kt, kc=kc):
+                    s.kill_targets = [x.strip() for x in kt.text().split(";") if x.strip()]
+                    s.kill_count = kc.value()
+                    self.changed(False)
+                kt.editingFinished.connect(set_kill)
+                kc.valueChanged.connect(set_kill)
+                sf.addRow("Убить (старое):", kt)
+                sf.addRow("Сколько:", kc)
             sl.addLayout(sf)
-            sl.addWidget(hint("Этап с целями переключается на следующий сам, когда цели убиты."))
+            brow = QHBoxLayout()
             rb = QPushButton("Удалить этап %d" % si)
 
             def rm(_=False, si=si):
                 del q.stages[si]
+                for x in q.stages:
+                    if x.next == si:
+                        x.next = -1
+                    elif x.next > si:
+                        x.next -= 1
                 self.changed(False)
-                self.show_target(self.target)
+                self.rebuild_soon()
             rb.clicked.connect(rm)
-            sl.addWidget(rb)
+            brow.addWidget(rb)
+            brow.addStretch(1)
+            sl.addLayout(brow)
             gl.addWidget(sg)
         ab = QPushButton("+ этап")
 
         def add_stage():
             q.stages.append(Stage())
             self.changed(False)
-            self.show_target(self.target)
+            self.rebuild_soon()
         ab.clicked.connect(add_stage)
         gl.addWidget(ab)
         lay.addWidget(g)
 
+        g, gl = _group("Итог")
+        gl.addWidget(QLabel("При выполнении (кроме награды и опыта):"))
+        oc = LogicList(self.ctx, q.on_complete, actions=True, max_height=100)
+        oc.changed.connect(lambda: self.changed(False))
+        gl.addWidget(oc)
+        gl.addWidget(QLabel("При провале:"))
+        of = LogicList(self.ctx, q.on_fail, actions=True, max_height=100)
+        of.changed.connect(lambda: self.changed(False))
+        gl.addWidget(of)
+        gl.addWidget(QLabel("Провалить, если (пока задание активно):"))
+        fc = LogicList(self.ctx, q.fail_conditions, max_height=100,
+                       empty_text="Не проваливается само. Например: «НЕ NPC жив» — заказчик убит.")
+        fc.changed.connect(lambda: self.changed(False))
+        gl.addWidget(fc)
+        ff = _form()
+        fk = completer_line(";".join(q.fail_on_kill), names, "targetname через ;")
+
+        def set_fk():
+            q.fail_on_kill = [x.strip() for x in fk.text().split(";") if x.strip()]
+            self.changed(False)
+        fk.editingFinished.connect(set_fk)
+        ff.addRow("Провал, если игрок убил:", fk)
+        fp = QSpinBox()
+        fp.setRange(-1000, 0)
+        fp.setValue(q.fail_rep_penalty)
+
+        def set_fp(v):
+            q.fail_rep_penalty = v
+            self.changed(False)
+        fp.valueChanged.connect(set_fp)
+        ff.addRow("Штраф репутации:", fp)
+        gl.addLayout(ff)
+        lay.addWidget(g)
+
         g, gl = _group("Награда")
         tbl = QTableWidget(len(q.rewards), 2)
-        tbl.setHorizontalHeaderLabels(["Предмет (classname)", "Кол-во"])
+        tbl.setHorizontalHeaderLabels(["Предмет", "Кол-во"])
         tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         tbl.verticalHeader().setVisible(False)
         tbl.setMaximumHeight(36 + 30 * max(2, len(q.rewards)))
@@ -854,14 +1081,14 @@ class Inspector(QScrollArea):
         def add_reward():
             q.rewards.append(["item_healthkit", 1])
             self.changed(False)
-            self.show_target(self.target)
+            self.rebuild_soon()
 
         def del_reward():
             r = tbl.currentRow()
             if 0 <= r < len(q.rewards):
                 del q.rewards[r]
                 self.changed(False)
-                self.show_target(self.target)
+                self.rebuild_soon()
         addr.clicked.connect(add_reward)
         delr = QPushButton("− выбранный")
         delr.clicked.connect(del_reward)
@@ -871,10 +1098,12 @@ class Inspector(QScrollArea):
         gl.addLayout(rl)
         lay.addWidget(g)
 
-        # usages
+        # usages: dialog options (old fields and logic), lines, events, other quests, packages, map objects
         uses = []
         for npc in p.npcs:
             for n in npc.nodes:
+                if any(x.get("quest") == q.id for x in n.actions):
+                    uses.append(("%s #%d: действия реплики" % (npc.targetname, n.id), (npc.targetname, ("node", n.id))))
                 for i, o in enumerate(n.options):
                     kinds = []
                     if o.grant == q.id:
@@ -885,22 +1114,33 @@ class Inspector(QScrollArea):
                         kinds.append("проваливает")
                     if o.set_stage and o.set_stage[0] == q.id:
                         kinds.append("этап")
-                    if (o.require_state and o.require_state[0] == q.id) or (o.require_stage and o.require_stage[0] == q.id):
+                    if (o.require_state and o.require_state[0] == q.id) or (o.require_stage and o.require_stage[0] == q.id) \
+                            or any(x.get("quest") == q.id for x in o.conditions):
                         kinds.append("условие")
+                    if any(x.get("quest") == q.id for x in o.actions + o.fail_actions):
+                        kinds.append("действие")
                     if kinds:
                         uses.append(("%s #%d вариант %d: %s" % (npc.targetname, n.id, i + 1, ", ".join(kinds)),
                                      (npc.targetname, ("option", n.id, i))))
-        g, gl = _group("Где используется (%d)" % len(uses))
+        others = []
+        for where, kind, lst in logic.iter_logic(p):
+            if " #" in where.split(":")[0]:
+                continue        # dialog lines and options: listed above with a link
+            if any(x.get("quest") == q.id for x in lst or []) and not where.startswith("задание %s" % q.id):
+                others.append(where)
+        g, gl = _group("Где используется (%d)" % (len(uses) + len(set(others))))
         for label, (tn, tgt) in uses:
             b = QPushButton(label)
             b.setFlat(True)
             b.setStyleSheet("text-align:left; color:#7fb6ff;")
             b.clicked.connect(lambda _=False, tn=tn, tgt=tgt: self.ctx.goto(tn, tgt))
             gl.addWidget(b)
-        if not uses:
-            gl.addWidget(hint("Пока ни один ответ не выдаёт этот квест."))
+        for where in sorted(set(others)):
+            gl.addWidget(QLabel("• " + where))
+        if not uses and not others:
+            gl.addWidget(hint("Пока задание никто не выдаёт: ответ в диалоге («Выдать» или действие «Задание: выдать») или событие."))
         lay.addWidget(g)
-        de = QPushButton("Удалить квест")
+        de = QPushButton("Удалить задание")
         de.clicked.connect(lambda: self.ctx.delete_quest(q))
         lay.addWidget(de)
         return w, lay

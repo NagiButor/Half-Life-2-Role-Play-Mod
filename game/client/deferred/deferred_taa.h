@@ -34,4 +34,11 @@ void DeferredTAA_MarkCameraAttached( bool bBegin );
 // in place of FXAA: blends the frame into the history
 void DeferredTAA_Draw( const CViewSetup &view );
 
+// HL2RPM: render scale - the frame (pScene, the size of view) brought up to the screen (the size of
+// screen): TAA upscale, or a plain stretch without TAA. Leaves the back buffer pushed as the render
+// target for the post-processing; DeferredTAA_EndUpscale pops it.
+class ITexture;
+void DeferredTAA_DrawUpscale( const CViewSetup &view, const CViewSetup &screen, ITexture *pScene );
+void DeferredTAA_EndUpscale();
+
 #endif // DEFERRED_TAA_H

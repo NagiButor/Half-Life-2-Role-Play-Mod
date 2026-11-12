@@ -17,6 +17,42 @@ static const float2 flRadiosityTexelSizeHalf = float2( 0.5f / RADIOSITY_BUFFER_R
 	0.5f / RADIOSITY_BUFFER_RES_Y );
 static const float2 flRadiosityUVRatio = float2( RADIOSITY_UVRATIO_X, RADIOSITY_UVRATIO_Y );
 
+// HL2RPM: how a point or spot light falls off with distance (the light passes, their volumetrics).
+// It used to be ( 1 - d / r )^power alone: with a power of 1 (the lights converted from a map's light
+// entities) or a bright light the light was still strong at its radius and stopped there - a circle
+// on the floor and the walls where it was cut off. Now:
+//  power > 0: the deferred light's own curve, ( 1 - d / r )^power, x ( 1 - x^8 ): the same up to
+//             three quarters of the radius, then it reaches 0 with no edge, whatever the power;
+//  power < 0: a light converted from the map's light / light_spot (cdeferred_manager_server.cpp) -
+//             the engine's attenuation 1 / ( c + l d + q d^2 ) as k = c / q = -power, scaled to 1 at
+//             100 units like vrad's brightness, in the window ( 1 - x^4 )^2 to its radius. k is
+//             kept to 24^2 or more: the hot spot right at a lamp at most ~18 x its 100-unit light.
+float DeferredLightFalloff( float flDist, float flRadius, float flPower )
+{
+	const float x = saturate( flDist / flRadius );
+	const float x2 = x * x;
+	const float x4 = x2 * x2;
+	const float flOwn = pow( 1.0f - x, max( flPower, 0.01f ) ) * ( 1.0f - x4 * x4 );
+	const float k = max( -flPower, 576.0f );
+	const float w = 1.0f - x4;
+	const float flEngine = ( k + 10000.0f ) / ( k + flDist * flDist ) * w * w;
+	return ( flPower < 0.0f ) ? flEngine : flOwn;
+}
+
+// HL2RPM: a light far brighter than a lit surface can show (a floodlight of brightness 3000 is
+// 11 x "white" at 100 units) was clipped flat by the composite's soft limit (r_deferred_light_limit)
+// only after its cone and its edge had been applied: the whole penumbra of the cone was still over
+// the limit and the light fell from "full" to nothing in the last degree of it - a hard ellipse on
+// the floor, a circle on the wall. The same soft limit, on the light's own strength before its
+// cone and edge, keeps the penumbra the author gave it. Returns the factor for the falloff.
+#define DEFERRED_LIGHT_PEAK 2.5f
+float DeferredLightPeak( float3 vecColor, float flFalloff )
+{
+	const float x = dot( vecColor, float3( 0.3f, 0.59f, 0.11f ) ) * flFalloff * ( 1.0f / DEFERRED_LIGHT_PEAK );
+	const float x2 = x * x;
+	return rsqrt( sqrt( 1.0f + x2 * x2 ) );
+}
+
 float3 DoStandardCookie( sampler sCookie, float2 uvs )
 {
 	return tex2D( sCookie, uvs ).rgb;

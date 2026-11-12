@@ -1,0 +1,6 @@
+# perf scenario: building_test (house446 interior)
+|cl_weather_tour_step 10; r_hl2rpm_gpuprof 1; sv_weather partlycloudy 0; sv_timecycle_set_time 13
+|setpos -250 -535 -320; setang -3 64 0
+shot|setpos -250 -535 -320; setang -3 64 0
+shot|setpos -136 123 -343; setang 3 200 0
+shot|setpos 103 155 -343; setang 3 327 0

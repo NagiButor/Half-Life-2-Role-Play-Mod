@@ -1015,6 +1015,8 @@ float CHud::GetFOVSensitivityAdjust()
 //-----------------------------------------------------------------------------
 // Purpose: Return true if the passed in sections of the HUD shouldn't be drawn
 //-----------------------------------------------------------------------------
+extern bool RPMTerminal_HidesHud();
+
 bool CHud::IsHidden( int iHudFlags )
 {
 	// Not in game?
@@ -1035,6 +1037,10 @@ bool CHud::IsHidden( int iHudFlags )
 
 	// Everything hidden?
 	if ( iHideHud & HIDEHUD_ALL )
+		return true;
+
+	// HL2RPM: the camera is at the screen of a terminal
+	if ( RPMTerminal_HidesHud() )
 		return true;
 
 	// Local player dead?

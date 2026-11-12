@@ -30,6 +30,9 @@ enum RenderParamVector_t
 
 	VECTOR_RENDERPARM_WIND_DIRECTION,
 
+	// HL2RPM: the color of the window a model is shown in (hl2rpm_itempreview_ps30)
+	VECTOR_RENDERPARM_HL2RPM_PREVIEW_RIM,
+
 	MAX_VECTOR_RENDER_PARMS = 20
 };
 
@@ -102,6 +105,9 @@ enum
 	DEFERRED_RENDER_STAGE_GBUFFER,
 	DEFERRED_RENDER_STAGE_SHADOWPASS,
 	DEFERRED_RENDER_STAGE_COMPOSITION,
+	// HL2RPM: a model on its own in a render target, without a scene (the card of an item):
+	// DEFERRED_MODEL lights itself (hl2rpm_itempreview_ps30), eyes, teeth, glass and decals skip it
+	DEFERRED_RENDER_STAGE_PREVIEW,
 };
 
 #endif // RENDERPARM_H

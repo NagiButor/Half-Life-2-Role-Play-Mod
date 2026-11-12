@@ -102,6 +102,18 @@ def_light_t::def_light_t( bool bWorld )
 
 	iNumLeaves = 0;
 
+	iReachSlot = -1;
+	flReachParam = -1.0f;
+	flReachFade = 0.0f;
+	reachTrackPos.Init();
+	flReachTrackRadius = -1.0f;
+	flReachStillSince = 0.0f;
+	bReachBounds = false;
+	reach_min.Init();
+	reach_max.Init();
+	reachBoundsPos.Init();
+	flReachBoundsRadius = 0.0f;
+
 #if DEFCFG_ADAPTIVE_VOLUMETRIC_LOD
 	flVolumeLOD0Dist = 128;
 	flVolumeLOD1Dist = 256;
@@ -649,14 +661,66 @@ void def_light_t::UpdateXForms()
 	else
 		worldTransform.SetupMatrixOrgAngles( pos, worldAng );
 
+	// HL2RPM: the reach box holds only for the place and radius it was traced for
+	if ( bReachBounds && ( reachBoundsPos != pos || flReachBoundsRadius != flRadius ) )
+		bReachBounds = false;
+
+	UpdateLeaves();
+}
+
+// HL2RPM: the leaves the light is culled by (CLightingManager::CullLights - visibility data, occlusion
+// buffer; the shadow budget) are those of all it can reach: its radius / cone (bounds_*_naive), or, once
+// its reach map is traced, the box of what its rays reached. They were the leaves of bounds_min/max -
+// the box of the 14 (5 for a spot) traces above: the light that falls between those rays (through a
+// door, past a corner, on the floor far off) lies in leaves that box misses, and a lamp whose listed
+// leaves were out of view was culled while its light was in plain sight - it went out and came back
+// as the player moved ("FIXME: inaccurate with e.g. angled lights, causes popping" in CullLights).
+void def_light_t::GetCullBounds( Vector &vecMins, Vector &vecMaxs ) const
+{
+	if ( bReachBounds )
+	{
+		// (never more than the light's own reach)
+		for ( int i = 0; i < 3; i++ )
+		{
+			vecMins[i] = Max( reach_min[i], bounds_min_naive[i] );
+			vecMaxs[i] = Min( reach_max[i], bounds_max_naive[i] );
+		}
+		return;
+	}
+	vecMins = bounds_min_naive;
+	vecMaxs = bounds_max_naive;
+}
+
+void def_light_t::UpdateLeaves()
+{
+	Vector vecMins, vecMaxs;
+	GetCullBounds( vecMins, vecMaxs );
+
 	CLightLeafEnum leaves;
 	ISpatialQuery* pQuery = engine->GetBSPTreeQuery();
-	pQuery->EnumerateLeavesInBox( bounds_min, bounds_max, &leaves, 0 );
+	pQuery->EnumerateLeavesInBox( vecMins, vecMaxs, &leaves, 0 );
 
-	AssertMsgOnce( leaves.m_LeafList.Count() <= DEFLIGHT_MAX_LEAVES, "You sure have got a huge light there, or crappy leaves." );
-
+	// (more than fit: the list is left incomplete and CullLights does not cull by leaves)
 	iNumLeaves = Min( DEFLIGHT_MAX_LEAVES, leaves.m_LeafList.Count() );
 	Q_memcpy( iLeaveIDs, leaves.m_LeafList.Base(), sizeof(int) * iNumLeaves );
+}
+
+void def_light_t::SetReachBounds( const Vector &vecMins, const Vector &vecMaxs )
+{
+	bReachBounds = true;
+	reach_min = vecMins;
+	reach_max = vecMaxs;
+	reachBoundsPos = pos;
+	flReachBoundsRadius = flRadius;
+	UpdateLeaves();
+}
+
+void def_light_t::ClearReachBounds()
+{
+	if ( !bReachBounds )
+		return;
+	bReachBounds = false;
+	UpdateLeaves();
 }
 
 void def_light_t::UpdateRenderMesh()

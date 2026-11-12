@@ -17,6 +17,7 @@
 
 #include "cbase.h"
 #include "npc_BaseZombie.h"
+#include "hl2rpm_zombies.h"
 #include "player.h"
 #include "game.h"
 #include "ai_network.h"
@@ -1185,6 +1186,7 @@ void CNPC_BaseZombie::DieChopped( const CTakeDamageInfo &info )
 		// Inherit some misc. properties
 		pLegGib->m_iViewHideFlags = m_iViewHideFlags;
 #endif
+		RPMZombie_LegsGib( this, pLegGib );		// HL2RPM: the legs wear the body's clothes
 
 		CopyRenderColorTo( pLegGib );
 	}
@@ -2426,6 +2428,7 @@ void CNPC_BaseZombie::BecomeTorso( const Vector &vecTorsoForce, const Vector &ve
 		if ( pGib )
 		{
 			pGib->SetOwnerEntity( this );
+			RPMZombie_LegsGib( this, pGib );		// HL2RPM
 		}
 	}
 

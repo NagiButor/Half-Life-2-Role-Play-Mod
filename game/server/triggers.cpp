@@ -108,6 +108,8 @@ BEGIN_DATADESC( CBaseTrigger )
 	DEFINE_FIELD( m_hFilter,	FIELD_EHANDLE ),
 	DEFINE_KEYFIELD( m_bDisabled,		FIELD_BOOLEAN,	"StartDisabled" ),
 	DEFINE_UTLVECTOR( m_hTouchingEntities, FIELD_EHANDLE ),
+	DEFINE_KEYFIELD( m_vecRPMBoxMins,	FIELD_VECTOR,	"rpm_box_mins" ),
+	DEFINE_KEYFIELD( m_vecRPMBoxMaxs,	FIELD_VECTOR,	"rpm_box_maxs" ),
 
 #ifdef MAPBASE
 	DEFINE_KEYFIELD( m_flWait, FIELD_FLOAT, "wait" ),
@@ -368,7 +370,14 @@ void CBaseTrigger::InitTrigger( )
 	}
 
 	SetMoveType( MOVETYPE_NONE );
-	SetModel( STRING( GetModelName() ) );    // set size and link into world
+	if ( m_vecRPMBoxMins != m_vecRPMBoxMaxs && GetModelName() == NULL_STRING )
+	{
+		// HL2RPM: a box trigger of the world layer (no brush model to set)
+		SetSolid( SOLID_BBOX );
+		SetCollisionBounds( m_vecRPMBoxMins, m_vecRPMBoxMaxs );
+	}
+	else
+		SetModel( STRING( GetModelName() ) );    // set size and link into world
 	if ( showtriggers.GetInt() == 0 )
 	{
 		AddEffects( EF_NODRAW );
@@ -1414,11 +1423,21 @@ class CTriggerVolume : public CPointEntity	// Derive from point entity so this d
 {
 public:
 	DECLARE_CLASS( CTriggerVolume, CPointEntity );
+	DECLARE_DATADESC();
 
 	void		Spawn( void );
+
+	// HL2RPM: a box volume of the world layer (no brush model)
+	Vector		m_vecRPMBoxMins;
+	Vector		m_vecRPMBoxMaxs;
 };
 
 LINK_ENTITY_TO_CLASS( trigger_transition, CTriggerVolume );
+
+BEGIN_DATADESC( CTriggerVolume )
+	DEFINE_KEYFIELD( m_vecRPMBoxMins, FIELD_VECTOR, "rpm_box_mins" ),
+	DEFINE_KEYFIELD( m_vecRPMBoxMaxs, FIELD_VECTOR, "rpm_box_maxs" ),
+END_DATADESC()
 
 // Define space that travels across a level transition
 void CTriggerVolume::Spawn( void )
@@ -1426,7 +1445,13 @@ void CTriggerVolume::Spawn( void )
 	SetSolid( SOLID_BSP );
 	AddSolidFlags( FSOLID_NOT_SOLID );
 	SetMoveType( MOVETYPE_NONE );
-	SetModel( STRING( GetModelName() ) );    // set size and link into world
+	if ( m_vecRPMBoxMins != m_vecRPMBoxMaxs && GetModelName() == NULL_STRING )
+	{
+		SetSolid( SOLID_BBOX );
+		SetCollisionBounds( m_vecRPMBoxMins, m_vecRPMBoxMaxs );
+	}
+	else
+		SetModel( STRING( GetModelName() ) );    // set size and link into world
 	if ( showtriggers.GetInt() == 0 )
 	{
 		AddEffects( EF_NODRAW );

@@ -10,6 +10,7 @@
 
 #include "simtimer.h"
 #include "npc_BaseZombie.h"
+#include "hl2rpm_zombies.h"
 #include "ai_hull.h"
 #include "ai_navigator.h"
 #include "ai_memory.h"
@@ -253,6 +254,9 @@ void CZombie::Precache( void )
 	PrecacheModel( DefaultOrCustomModel( "models/zombie/classic.mdl" ) );
 	PrecacheModel( "models/zombie/classic_torso.mdl" );
 	PrecacheModel( "models/zombie/classic_legs.mdl" );
+	// HL2RPM: the clothes of the zombies (hl2rpm_zombies.cpp)
+	if ( FClassnameIs( this, "npc_zombie" ) || FClassnameIs( this, "npc_zombie_torso" ) )
+		RPMZombie_Precache( RPMZ_CLASSIC );
 
 	PrecacheScriptSound( "Zombie.FootstepRight" );
 	PrecacheScriptSound( "Zombie.FootstepLeft" );
@@ -277,6 +281,9 @@ void CZombie::Precache( void )
 //-----------------------------------------------------------------------------
 void CZombie::Spawn( void )
 {
+	// HL2RPM: a zombie with the stock model takes other clothes (not npc_zombie_custom)
+	if ( FClassnameIs( this, "npc_zombie" ) || FClassnameIs( this, "npc_zombie_torso" ) )
+		RPMZombie_Choose( this, RPMZ_CLASSIC );
 	Precache();
 
 #ifdef MAPBASE
@@ -487,14 +494,14 @@ const char *CZombie::GetHeadcrabModel( void )
 //-----------------------------------------------------------------------------
 const char *CZombie::GetLegsModel( void )
 {
-	return "models/zombie/classic_legs.mdl";
+	return RPMZombie_Legs( this, "models/zombie/classic_legs.mdl" );
 }
 
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 const char *CZombie::GetTorsoModel( void )
 {
-	return "models/zombie/classic_torso.mdl";
+	return RPMZombie_Torso( this, "models/zombie/classic_torso.mdl" );
 }
 
 
@@ -506,7 +513,7 @@ void CZombie::SetZombieModel( void )
 
 	if ( m_fIsTorso )
 	{
-		SetModel( "models/zombie/classic_torso.mdl" );
+		SetModel( RPMZombie_Torso( this, "models/zombie/classic_torso.mdl" ) );
 		SetHullType( HULL_TINY );
 	}
 	else

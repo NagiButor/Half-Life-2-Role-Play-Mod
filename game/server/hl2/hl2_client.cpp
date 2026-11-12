@@ -103,6 +103,8 @@ CBaseEntity* FindEntity( edict_t *pEdict, char *classname)
 //-----------------------------------------------------------------------------
 // Purpose: Precache game-specific models & sounds
 //-----------------------------------------------------------------------------
+#include "hl2rpm_items.h"
+
 void ClientGamePrecache( void )
 {
 	CBaseEntity::PrecacheModel("models/player.mdl");
@@ -111,6 +113,24 @@ void ClientGamePrecache( void )
 	extern char g_szDefaultPlayerModel[MAX_PATH];
 	if ( g_szDefaultPlayerModel[0] )
 		CBaseEntity::PrecacheModel( g_szDefaultPlayerModel );
+	// the bodies of the suits
+	CUtlVector<const char *> suits;
+	RPMItems::SuitBodies( suits );
+	for ( int i = 0; i < suits.Count(); i++ )
+		CBaseEntity::PrecacheModel( suits[i] );
+	// the first-person hands of the suits (hand_viewmodel of the melee weapons)
+	CUtlVector<const char *> hands;
+	RPMItems::HandsModels( hands );
+	for ( int i = 0; i < hands.Count(); i++ )
+		CBaseEntity::PrecacheModel( hands[i] );
+	// the suits as items (the inventory drops one to wear it: no late precache hitch then)
+	static const char *s_SuitItems[] = { "item_suit", "item_suit_pcv", "item_suit_cp", "item_combine_soldier_suit", "item_suit_prison", "item_suit_elite", "item_suit_worker", "item_suit_hazmat" };
+	for ( int i = 0; i < ARRAYSIZE( s_SuitItems ); i++ )
+	{
+		const char *pszItemModel = RPMItems::Model( s_SuitItems[i] );
+		if ( pszItemModel && pszItemModel[0] )
+			CBaseEntity::PrecacheModel( pszItemModel );
+	}
 #endif
 	CBaseEntity::PrecacheModel( "models/gibs/agibs.mdl" );
 	CBaseEntity::PrecacheModel ("models/weapons/v_hands.mdl");

@@ -1,0 +1,8 @@
+# E:\SourceModding\HL2RPMSOURCE\Downloaded models\HL2 Melee Pack\Half-Life_2_Melee_Pack_1465467710_1465703167_2016-06-09-1322.gma -> E:\Steam\steamapps\sourcemods\hl2rpm
+
+# kept (already in the game):
+# materials/models/weapons/hl2meleepack/axe/axe.vmt
+# materials/models/weapons/hl2meleepack/axe/axe.vtf
+# materials/models/weapons/hl2meleepack/axe/axe_ref.vtf
+# materials/models/weapons/hl2meleepack/pickaxe/pickaxe01.vmt
+# materials/models/weapons/hl2meleepack/pickaxe/pickaxe01.vtf

@@ -1,0 +1,7 @@
+# vprof
+|cl_weather_tour_step 8; sv_weather partlycloudy 0; sv_timecycle_set_time 13
+|setpos -2954 -3625 60; setang -5 69 0
+|vprof_on; host_speeds 1
+shot|setpos -2954 -3625 60; setang -5 69 0
+|vprof_generate_report; vprof_generate_report_budget; host_speeds 0
+|vprof_off

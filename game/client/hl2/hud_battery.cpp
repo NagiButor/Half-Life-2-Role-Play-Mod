@@ -141,7 +141,11 @@ void CHudBattery::OnThink( void )
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
+static int s_iRPMBattery = 0;
+int RPMHud_GetBattery() { return s_iRPMBattery; }	// HL2RPM: the panel itself is cut out (hl2rpm_suithud.cpp)
+
 void CHudBattery::MsgFunc_Battery( bf_read &msg )
 {
 	m_iNewBat = msg.ReadShort();
+	s_iRPMBattery = m_iNewBat;
 }

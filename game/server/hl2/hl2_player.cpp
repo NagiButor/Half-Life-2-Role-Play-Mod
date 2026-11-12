@@ -63,6 +63,7 @@
 #include "mapbase/variant_tools.h"
 #include "mapbase/protagonist_system.h"
 #endif
+#include "hl2rpm_logic.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -3574,6 +3575,11 @@ void CHL2_Player::PlayerUse ( void )
 
 	if ( m_afButtonPressed & IN_USE )
 	{
+		// HL2RPM: sit on / stand up from the furniture marker under the crosshair (hl2rpm_seat.cpp)
+		extern bool RPMSeat_OnUse( CBasePlayer *pPlayer );
+		if ( RPMSeat_OnUse( this ) )
+			return;
+
 		// Currently using a latched entity?
 		if ( ClearUseEntity() )
 		{
@@ -3642,6 +3648,9 @@ void CHL2_Player::PlayerUse ( void )
 				m_afPhysicsFlags |= PFLAG_USING;
 
 			pUseEntity->AcceptInput( "Use", this, this, emptyVariant, USE_TOGGLE );
+			// HL2RPM: "use" events and quest objectives of the Creation Kit
+			if ( m_afButtonPressed & IN_USE )
+				RPMLogic::NoteUse( this, pUseEntity );
 
 			usedSomething = true;
 		}

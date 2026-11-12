@@ -383,7 +383,7 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 	{
 		Assert( pDeferredContext != NULL );
 
-		if ( pDeferredContext->m_bMaterialVarsChanged || !pDeferredContext->HasCommands( CDeferredPerMaterialContextData::DEFSTAGE_COMPOSITE )
+		if ( pDeferredContext->NeedsCommands( CDeferredPerMaterialContextData::DEFSTAGE_COMPOSITE )
 			|| building_cubemaps.GetBool() )
 		{
 			tmpBuf.Reset();

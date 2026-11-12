@@ -288,6 +288,7 @@
     <ClCompile Include="hl2rpm_fxaa.cpp" />
     <ClCompile Include="hl2rpm_postfx.cpp" />
     <ClCompile Include="hl2rpm_taa.cpp" />
+    <ClCompile Include="hl2rpm_taau.cpp" />
     <ClCompile Include="hl2rpm_depthalpha.cpp" />
     <ClCompile Include="weather_motes.cpp" />
     <ClCompile Include="deferred_decal.cpp" />

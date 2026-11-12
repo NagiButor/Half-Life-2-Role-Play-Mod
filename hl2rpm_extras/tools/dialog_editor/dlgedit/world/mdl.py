@@ -13,10 +13,11 @@ def _cstr(data, ofs):
 
 
 class Mesh:
-    __slots__ = ("material", "pos", "nrm", "uv", "idx")
+    __slots__ = ("material", "pos", "nrm", "uv", "idx", "bw", "bb")
 
-    def __init__(self, material, pos, nrm, uv, idx):
+    def __init__(self, material, pos, nrm, uv, idx, bw=None, bb=None):
         self.material, self.pos, self.nrm, self.uv, self.idx = material, pos, nrm, uv, idx
+        self.bw, self.bb = bw, bb       # bone weights (n, 3) and global bone indices (n, 3) of the VVD (animation)
 
 
 class Model:
@@ -182,7 +183,7 @@ def _build_meshes(model, mdl, nbody, bodyidx, vtx, verts):
             material, mmodelidx, mnverts, mvertoffset = struct.unpack_from("<iiii", mdl, mmp)
             vmeshp = vlp + vmeshofs + mi * 9
             nsg, sgofs, mflags = struct.unpack_from("<iiB", vtx, vmeshp)
-            pos_l, nrm_l, uv_l, idx_l = [], [], [], []
+            pos_l, nrm_l, uv_l, idx_l, bw_l, bb_l = [], [], [], [], [], []
             base = 0
             for sgi in range(nsg):
                 sgp = vmeshp + sgofs + sgi * 25
@@ -197,6 +198,10 @@ def _build_meshes(model, mdl, nbody, bodyidx, vtx, verts):
                 pos_l.append(v["pos"])
                 nrm_l.append(v["nrm"])
                 uv_l.append(v["uv"])
+                w = v["w"].copy()
+                w[np.arange(3)[None, :] >= v["nb"][:, None]] = 0.0
+                bw_l.append(w)
+                bb_l.append(v["b"])
                 idx_l.append(ind[: (len(ind) // 3) * 3] + base)
                 base += nv
             if not pos_l:
@@ -204,7 +209,9 @@ def _build_meshes(model, mdl, nbody, bodyidx, vtx, verts):
             model.meshes.append(Mesh(material, np.ascontiguousarray(np.concatenate(pos_l), dtype=np.float32),
                                      np.ascontiguousarray(np.concatenate(nrm_l), dtype=np.float32),
                                      np.ascontiguousarray(np.concatenate(uv_l), dtype=np.float32),
-                                     np.ascontiguousarray(np.concatenate(idx_l), dtype=np.uint32)))
+                                     np.ascontiguousarray(np.concatenate(idx_l), dtype=np.uint32),
+                                     np.ascontiguousarray(np.concatenate(bw_l), dtype=np.float32),
+                                     np.ascontiguousarray(np.concatenate(bb_l), dtype=np.int32)))
 
 
 def sequence_names(fs, name, depth=0):

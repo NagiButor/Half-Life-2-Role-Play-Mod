@@ -16,6 +16,9 @@
 #include "filesystem.h"
 #include <KeyValues.h>
 #include "timecycle/env_timecycle.h"
+#include "hl2rpm_items.h"
+#include "hl2rpm_ui.h"
+#include "tier1/fmtstr.h"
 
 using namespace vgui;
 
@@ -81,6 +84,15 @@ enum
     CHAN_INVENTORY_CLICK_ITEM = CHAN_USER_BASE + 124,
     CHAN_INVENTORY_CLICK_ACTION = CHAN_USER_BASE + 125,
 };
+
+// HL2RPM (M6): the new menu (hl2rpm_menu.cpp) opens and closes with the sounds of this panel
+void InventoryClient_PlayPanelSound(bool bOpen)
+{
+    if (bOpen)
+        PlayLocalUISound("npc\\combine_soldier\\zipline_clothing1.wav", CHAN_INVENTORY_PANEL_OPEN_A, 0.22f);
+    else
+        PlayLocalUISound("npc\\combine_soldier\\zipline_clothing2.wav", CHAN_INVENTORY_PANEL_CLOSE_A, 0.22f);
+}
 // Helper: map internal classnames to friendly labels and compute ammo bullet counts
 static void GetFriendlyLabelAndCount(const char *classname, int pickupCount, bool hasExplicitBullets, char *out, int outSize)
 {
@@ -88,6 +100,21 @@ static void GetFriendlyLabelAndCount(const char *classname, int pickupCount, boo
     {
         Q_snprintf(out, outSize, "(unknown)");
         return;
+    }
+
+    // HL2RPM: items of the item database - their name in the game's language
+    // (ammo keeps its bullet count below; money and other stackables show the count)
+    {
+        const RPMItemDef_t *pDef = RPMItems::Find(classname);
+        if (pDef && Q_stricmp(pDef->category, "ammo") != 0 && Q_strnicmp(classname, "item_ammo", 9) != 0 &&
+            Q_strnicmp(classname, "item_box", 8) != 0)
+        {
+            if (pDef->stackable && hasExplicitBullets && pickupCount > 1)
+                Q_snprintf(out, outSize, "%s x%d", RPMItems::Name(classname), pickupCount);
+            else
+                Q_snprintf(out, outSize, "%s", RPMItems::Name(classname));
+            return;
+        }
     }
 
     // Ammo pickups: convert to bullets using the server-defined sizes
@@ -268,6 +295,12 @@ static float GetClassUnitWeightKgClient(const char *classname, bool bAmmoUnit)
 {
     if (!classname || !classname[0])
         return 0.0f;
+    // HL2RPM: the item database decides first, like on the server (inventory_system.cpp)
+    const RPMItemDef_t *pDef = RPMItems::Find(classname);
+    if (pDef && pDef->weight >= 0.0f)
+        return pDef->weight;
+    if (!pDef && RPMItems::IsBuiltin(classname))
+        return 0.0f;
     if (!s_bWeightTableLoaded_Client)
         LoadInventoryWeightTableClient();
 
@@ -296,6 +329,9 @@ static float GetInventoryEntryWeightKgClient(const char *classname, int count, b
         const int bullets = hasExplicitBullets ? Max(0, count) : 0;
         return GetClassUnitWeightKgClient(classname, true) * (float)bullets;
     }
+    // HL2RPM: stackable items of the database weigh per unit (as on the server)
+    if (RPMItems::IsStackable(classname))
+        return GetClassUnitWeightKgClient(classname, false) * (float)Max(1, count);
 
     return GetClassUnitWeightKgClient(classname, false);
 }
@@ -783,6 +819,13 @@ int CVGuiInventoryPanel::GetActiveTab() const
 void CVGuiInventoryPanel::OpenInventoryTab()
 {
     m_nActiveTab = 0;
+    BeginInventory();
+}
+
+void CVGuiInventoryPanel::OpenQuestsTab()
+{
+    m_nActiveTab = 1;
+    engine->ClientCmd("quest_request\n");
     BeginInventory();
 }
 
@@ -2229,12 +2272,17 @@ static void __Cmd_Inventory_Open_End(const CCommand &args)
     if (panel) panel->EndInventory();
 }
 
+// HL2RPM (M6): the character menu (hl2rpm_menu.cpp) takes Tab / I and the journal when cl_rpm_menu is on
+extern bool RPMMenu_Toggle(int tab);
+
 // Local command that user keybind will call; forwards request to server
 static void __Cmd_Inventory_Request_Local(const CCommand &args)
 {
     // Toggle: if panel is visible, close it locally; otherwise request from server
     CVGuiLootPanel *lootPanel = GetGlobalLootPanel();
     if (lootPanel && lootPanel->IsVisible())
+        return;
+    if (RPMMenu_Toggle(1))
         return;
     CVGuiInventoryPanel *panel = GetGlobalInventoryPanel();
     if (panel && panel->IsVisible())
@@ -2249,270 +2297,139 @@ static void __Cmd_Inventory_Request_Local(const CCommand &args)
     }
 }
 
+// HL2RPM (M6): notifications at the top left in the look of hl2rpm_ui.h - a black plate with a bar
+// of the accent color that flashes when it slides in, the kind above in small capitals
+// ("ПОДОБРАНО", "ЗАДАНИЕ"), shown as long as it takes to read the text (2.5-6 s)
 class CToastNotificationPanel : public Panel
 {
 public:
     CToastNotificationPanel(Panel *parent) : Panel(parent, "ToastNotification")
     {
-        SetSize(300, 28);
         SetProportional(false);
         SetVisible(false);
-        m_flCornerRadius = 6.0f;
-
         SetZPos(10000);
         SetMouseInputEnabled(false);
         SetKeyBoardInputEnabled(false);
+        SetPaintBackgroundEnabled(false);
     }
-    
-    void ShowToastMessage(const char *message, const char *soundName)
-    {
-        ToastEntry e;
-        e.showTime = gpGlobals->curtime;
-        e.duration = 1.8f;
-        e.isReward = false;
-        e.count = 1;
-        e.prefixW = 0;
-        e.itemW = 0;
-        e.spaceW = 0;
 
+    virtual void ApplySchemeSettings(vgui::IScheme *pScheme) OVERRIDE
+    {
+        Panel::ApplySchemeSettings(pScheme);
+        RPMUI::LoadFonts(pScheme);
+    }
+
+    static const char *KindName(const char *category, bool ru)
+    {
+        if (!category || !category[0])
+            return "";
+        if (!Q_stricmp(category, "quest"))
+            return ru ? "Задание" : "Quest";
+        if (!Q_stricmp(category, "xp") || !Q_stricmp(category, "experience"))
+            return ru ? "Опыт" : "Experience";
+        if (!Q_stricmp(category, "level"))
+            return ru ? "Новый уровень" : "Level up";
+        if (!Q_stricmp(category, "location"))
+            return ru ? "Локация" : "Location";
+        if (!Q_stricmp(category, "perk"))
+            return ru ? "Перк" : "Perk";
+        if (!Q_stricmp(category, "rep") || !Q_stricmp(category, "reputation") || !Q_stricmp(category, "faction"))
+            return ru ? "Репутация" : "Reputation";
+        if (!Q_stricmp(category, "inventory") || !Q_stricmp(category, "item"))
+            return ru ? "Инвентарь" : "Inventory";
+        if (!Q_stricmp(category, "hint"))
+            return ru ? "Подсказка" : "Hint";
+        return "";
+    }
+
+    void ShowToastMessage(const char *message, const char *soundName, const char *category = "")
+    {
+        const bool ru = !Q_stricmp(RPMItems::Language(), "russian");
         const char *msgIn = message ? message : "";
+        ToastEntry e;
+        e.showTime = gpGlobals->realtime;
+        // "PICKUP|<item>|<count>", "REWARD|<item>|<count>"
         if (!Q_strnicmp(msgIn, "REWARD|", 7) || !Q_strnicmp(msgIn, "PICKUP|", 7))
         {
-            const char *p = msgIn + 7;
-            const char *bar = strchr(p, '|');
-            if (bar)
-            {
-                e.isReward = true;
-                char itemBuf[256];
-                int n = (int)(bar - p);
-                if (n < 0) n = 0;
-                if (n > (int)(sizeof(itemBuf) - 1)) n = (int)(sizeof(itemBuf) - 1);
-                Q_strncpy(itemBuf, p, n + 1);
-                itemBuf[n] = '\0';
-                e.item = itemBuf;
-                e.count = atoi(bar + 1);
-                if (e.count < 1) e.count = 1;
-            }
-        }
-
-        if (e.isReward)
-        {
-            if (!Q_strnicmp(msgIn, "PICKUP|", 7))
-                e.prefix = "You picked up";
-            else
-                e.prefix = "You received";
-            e.itemText = e.item;
-            if (e.count > 1)
-            {
-                char itemTextBuf[320];
-                Q_snprintf(itemTextBuf, sizeof(itemTextBuf), "%s x%d", e.item.Get(), e.count);
-                e.itemText = itemTextBuf;
-            }
-            e.message = "REWARD";
+            const bool reward = !Q_strnicmp(msgIn, "REWARD|", 7);
+            CUtlStringList parts;
+            V_SplitString(msgIn, "|", parts);
+            const char *item = parts.Count() > 1 ? parts[1] : "";
+            int count = parts.Count() > 2 ? Max(1, atoi(parts[2])) : 1;
+            if (strchr(item, '_') && !strchr(item, ' '))
+                item = RPMItems::Name(item);	// an id (weapon_pistol) -> its name
+            e.text = count > 1 ? CFmtStr("%s (%d)", item, count).Access() : item;
+            e.kind = reward ? (ru ? "Получено" : "Received") : (ru ? "Подобрано" : "Picked up");
         }
         else
         {
-            e.message = msgIn;
+            e.text = msgIn;
+            e.kind = KindName(category, ru);
         }
+        // long enough to read it (UTF-8 characters, ~12 per second)
+        int chars = 0;
+        for (const char *c = e.text.Get(); *c; c++)
+            if ((*c & 0xC0) != 0x80)
+                chars++;
+        e.duration = clamp(chars / 12.0f + (e.kind.Length() ? 0.5f : 0.0f), 2.5f, 6.0f);
+
+        m_Entries.AddToTail(e);
+        while (m_Entries.Count() > 5)
+            m_Entries.Remove(0);
 
         if (soundName && soundName[0])
             surface()->PlaySound(soundName);
 
-        vgui::IScheme *pScheme = vgui::scheme()->GetIScheme(GetScheme());
-        HFont hFont = pScheme->GetFont("CenterPrintText", true);
-        int textW = 0, textH = 0;
-        if (e.isReward)
-        {
-            wchar_t wPrefix[256];
-            wchar_t wItem[256];
-            g_pVGuiLocalize->ConvertANSIToUnicode(e.prefix.Get(), wPrefix, sizeof(wPrefix));
-            g_pVGuiLocalize->ConvertANSIToUnicode(e.itemText.Get(), wItem, sizeof(wItem));
-            surface()->GetTextSize(hFont, wPrefix, e.prefixW, textH);
-            surface()->GetTextSize(hFont, wItem, e.itemW, textH);
-            wchar_t wSpace[8];
-            g_pVGuiLocalize->ConvertANSIToUnicode(" ", wSpace, sizeof(wSpace));
-            surface()->GetTextSize(hFont, wSpace, e.spaceW, textH);
-            textW = e.prefixW + e.spaceW + e.itemW;
-        }
-        else
-        {
-            wchar_t wMsg[256];
-            g_pVGuiLocalize->ConvertANSIToUnicode(e.message.Get(), wMsg, sizeof(wMsg));
-            surface()->GetTextSize(hFont, wMsg, textW, textH);
-        }
-
-        int padH = 18;
-        int padV = 10;
-        e.width = textW + padH;
-        e.height = textH + padV;
-        if (e.width < 240) e.width = 240;
-
-        m_Entries.AddToTail(e);
-        while (m_Entries.Count() > 6)
-            m_Entries.Remove(0);
-
         int sx, sy;
         surface()->GetScreenSize(sx, sy);
-        SetPos(32, 32);
-
+        SetBounds(0, 0, sx, sy);
         SetVisible(true);
-        SetZPos(10000);
         vgui::ivgui()->AddTickSignal(GetVPanel());
     }
-    
+
     virtual void Paint() OVERRIDE
     {
-        if (!IsVisible())
-            return;
+        using namespace RPMUI;
+        const float now = gpGlobals->realtime;
         for (int i = m_Entries.Count() - 1; i >= 0; --i)
-        {
-            float elapsed = gpGlobals->curtime - m_Entries[i].showTime;
-            if (elapsed > m_Entries[i].duration)
+            if (now - m_Entries[i].showTime > m_Entries[i].duration)
                 m_Entries.Remove(i);
-        }
-
         if (m_Entries.Count() <= 0)
         {
             SetVisible(false);
             vgui::ivgui()->RemoveTickSignal(GetVPanel());
             return;
         }
-
-        vgui::IScheme *pScheme = vgui::scheme()->GetIScheme(GetScheme());
-        HFont hFont = pScheme->GetFont("CenterPrintText", true);
-
-        int yCursor = 0;
+        const Palette_t &p = Pal();
+        const int hSmall = surface()->GetFontTall(Font(F_SMALL)), hText = surface()->GetFontTall(Font(F_TEXT));
+        int y = Sc(32);
         for (int i = 0; i < m_Entries.Count(); ++i)
         {
             const ToastEntry &e = m_Entries[i];
-            float elapsed = gpGlobals->curtime - e.showTime;
-            float fadeTime = 0.28f;
-            float alphaMul = 1.0f;
-            if (elapsed > (e.duration - fadeTime))
+            float t = now - e.showTime;
+            float in = Ramp(e.showTime, 0.2f);
+            float out = clamp((e.duration - t) / 0.3f, 0.0f, 1.0f);
+            float a = Min(in, out);
+            float flash = clamp(1.0f - t / 0.45f, 0.0f, 1.0f);
+            int x = Sc(32) - (int)(Sc(24) * (1.0f - in));
+            int textW = TextWidth(F_TEXT, e.text);
+            int kindW = e.kind.Length() ? SpacedWidth(F_SMALL, e.kind, Sc(2)) : 0;
+            int w = Max(Sc(260), Max(textW, kindW) + Sc(40));
+            int h = Sc(10) + (e.kind.Length() ? hSmall + Sc(2) : 0) + hText + Sc(10);
+            Plate(x, y, w, h, (int)(225 * a), Sc(5));
+            Color bar(Min(255, p.accent.r() + (int)(80 * flash)), Min(255, p.accent.g() + (int)(80 * flash)), Min(255, p.accent.b() + (int)(80 * flash)), (int)(255 * a));
+            Rect(x + Sc(4), y + Sc(5), Max(2, Sc(3)), h - Sc(10), bar);
+            int ty = y + Sc(10);
+            if (e.kind.Length())
             {
-                float t = (elapsed - (e.duration - fadeTime)) / fadeTime;
-                if (t < 0.0f) t = 0.0f;
-                if (t > 1.0f) t = 1.0f;
-                alphaMul = 1.0f - t;
+                Spaced(F_SMALL, x + Sc(16), ty, Fade(p.accent, a), e.kind, Sc(2), flash > 0.0f);
+                ty += hSmall + Sc(2);
             }
-
-            float goldStart = 0.06f;
-            float goldEnd = 0.28f;
-            float goldDur = goldEnd - goldStart;
-            float goldT = 0.0f;
-            if (elapsed >= goldStart && elapsed <= goldEnd)
-            {
-                goldT = (elapsed - goldStart) / goldDur;
-                goldT = sinf(goldT * M_PI);
-            }
-
-            int w = e.width;
-            int h = e.height;
-            int x0 = 0;
-            int y0 = yCursor;
-            int x1 = x0 + w;
-            int y1 = y0 + h;
-            yCursor += h + 6;
-
-            surface()->DrawSetTexture(-1);
-            const int NUM_CORNER_COORD = 10;
-            const int NUM_BACKGROUND_COORD = NUM_CORNER_COORD * 4;
-            vgui::Vertex_t vert[NUM_BACKGROUND_COORD];
-            Vector2D corner[NUM_CORNER_COORD];
-            for (int c = 0; c < NUM_CORNER_COORD; ++c)
-            {
-                corner[c].x = m_flCornerRadius * (1 - cos(((float)c / (float)(NUM_CORNER_COORD - 1)) * (M_PI / 2.0f)));
-                corner[c].y = m_flCornerRadius * (1 - sin(((float)c / (float)(NUM_CORNER_COORD - 1)) * (M_PI / 2.0f)));
-            }
-            for (int c = 0; c < NUM_CORNER_COORD; c++)
-            {
-                int j = (NUM_CORNER_COORD - 1) - c;
-                vert[c].Init(Vector2D(x0 + corner[c].x, y0 + corner[c].y));
-                vert[c + NUM_CORNER_COORD].Init(Vector2D(x1 - corner[j].x, y0 + corner[j].y));
-                vert[c + (NUM_CORNER_COORD * 2)].Init(Vector2D(x1 - corner[c].x, y1 - corner[c].y));
-                vert[c + (NUM_CORNER_COORD * 3)].Init(Vector2D(x0 + corner[j].x, y1 - corner[j].y));
-            }
-
-            int bgAlpha = (int)(120 * alphaMul);
-            surface()->DrawSetColor(28, 28, 28, bgAlpha);
-            surface()->DrawTexturedPolygon(ARRAYSIZE(vert), vert);
-
-            surface()->DrawSetColor(120, 120, 120, (int)(60 * alphaMul));
-            surface()->DrawTexturedPolygon(ARRAYSIZE(vert), vert);
-
-            int tx = x0 + 10;
-
-            surface()->DrawSetTextFont(hFont);
-            surface()->DrawSetTextColor(20, 20, 20, (int)(200 * alphaMul));
-
-            if (e.isReward)
-            {
-                wchar_t wPrefix[256];
-                wchar_t wItem[256];
-                g_pVGuiLocalize->ConvertANSIToUnicode(e.prefix.Get(), wPrefix, sizeof(wPrefix));
-                g_pVGuiLocalize->ConvertANSIToUnicode(e.itemText.Get(), wItem, sizeof(wItem));
-
-                int prefixH = 0;
-                int itemH = 0;
-                int tmpW = 0;
-                surface()->GetTextSize(hFont, wPrefix, tmpW, prefixH);
-                surface()->GetTextSize(hFont, wItem, tmpW, itemH);
-                int textH = (prefixH > itemH) ? prefixH : itemH;
-                int yText = y0 + (h - textH) / 2;
-
-                surface()->DrawSetTextPos(tx, yText + 1);
-                surface()->DrawUnicodeString(wPrefix, vgui::FONT_DRAW_NONADDITIVE);
-                surface()->DrawSetTextPos(tx + e.prefixW + e.spaceW, yText + 1);
-                surface()->DrawUnicodeString(wItem, vgui::FONT_DRAW_NONADDITIVE);
-
-                int rGray = 200, gGray = 200, bGray = 200;
-                int rGold = 255, gGold = 200, bGold = 40, aGold = (int)(255 * alphaMul);
-                int r = (int)(rGray + (rGold - rGray) * goldT);
-                int g = (int)(gGray + (gGold - gGray) * goldT);
-                int b = (int)(bGray + (bGold - bGray) * goldT);
-
-                surface()->DrawSetTextColor(r, g, b, aGold);
-                surface()->DrawSetTextPos(tx, yText);
-                surface()->DrawUnicodeString(wPrefix, vgui::FONT_DRAW_NONADDITIVE);
-
-                surface()->DrawSetTextColor(r, g, b, aGold);
-                surface()->DrawSetTextPos(tx + e.prefixW + e.spaceW, yText);
-                surface()->DrawUnicodeString(wItem, vgui::FONT_DRAW_NONADDITIVE);
-            }
-            else
-            {
-                wchar_t wMsg[256];
-                g_pVGuiLocalize->ConvertANSIToUnicode(e.message.Get(), wMsg, sizeof(wMsg));
-                int textW = 0, textH = 0;
-                surface()->GetTextSize(hFont, wMsg, textW, textH);
-                int yText = y0 + (h - textH) / 2;
-
-                surface()->DrawSetTextPos(tx, yText + 1);
-                surface()->DrawUnicodeString(wMsg, vgui::FONT_DRAW_NONADDITIVE);
-
-                int rGray = 200, gGray = 200, bGray = 200, aGray = (int)(220 * alphaMul);
-                int rGold = 255, gGold = 200, bGold = 40, aGold = (int)(255 * alphaMul);
-                int r = (int)(rGray + (rGold - rGray) * goldT);
-                int g = (int)(gGray + (gGold - gGray) * goldT);
-                int b = (int)(bGray + (bGold - bGray) * goldT);
-                int a = (int)(aGray + (aGold - aGray) * goldT);
-                surface()->DrawSetTextColor(r, g, b, a);
-                surface()->DrawSetTextPos(tx, yText);
-                surface()->DrawUnicodeString(wMsg, vgui::FONT_DRAW_NONADDITIVE);
-            }
+            Text(F_TEXT, x + Sc(16), ty, Fade(p.text, a), e.text, flash > 0.3f);
+            y += h + Sc(6);
         }
-
-        int maxW = 0;
-        int totalH = 0;
-        for (int i = 0; i < m_Entries.Count(); ++i)
-        {
-            if (m_Entries[i].width > maxW) maxW = m_Entries[i].width;
-            totalH += m_Entries[i].height;
-            if (i < m_Entries.Count() - 1) totalH += 6;
-        }
-        SetSize(maxW, totalH);
     }
-    
+
     virtual void OnTick() OVERRIDE
     {
         if (IsVisible())
@@ -2522,22 +2439,12 @@ public:
 private:
     struct ToastEntry
     {
-        CUtlString message;
+        CUtlString text;
+        CUtlString kind;
         float showTime;
         float duration;
-        int width;
-        int height;
-        bool isReward;
-        CUtlString prefix;
-        CUtlString item;
-        CUtlString itemText;
-        int count;
-        int prefixW;
-        int itemW;
-        int spaceW;
     };
     CUtlVector<ToastEntry> m_Entries;
-    float m_flCornerRadius;
 };
 
 static CToastNotificationPanel *s_pToastNotification = nullptr;
@@ -2552,6 +2459,13 @@ CToastNotificationPanel *GetToastNotificationPanel()
     return s_pToastNotification;
 }
 
+void RPMToast_Show(const char *message, const char *category)
+{
+    CToastNotificationPanel *pPanel = GetToastNotificationPanel();
+    if (pPanel)
+        pPanel->ShowToastMessage(message, "", category);
+}
+
 static void __Cmd_UI_Toast(const CCommand &args)
 {
     if (args.ArgC() < 3)
@@ -2561,7 +2475,7 @@ static void __Cmd_UI_Toast(const CCommand &args)
     const char *soundName = (args.ArgC() >= 4) ? args.Arg(3) : "";
     CToastNotificationPanel *pPanel = GetToastNotificationPanel();
     if (pPanel)
-        pPanel->ShowToastMessage(message, soundName);
+        pPanel->ShowToastMessage(message, soundName, args.Arg(1));
 }
 
 // Client console callback to display pickup notification from server
@@ -2585,5 +2499,46 @@ static void __Cmd_Inventory_Pickup_Notify(const CCommand &args)
 static ConCommand inventory_open_payload("inventory_open_payload", __Cmd_Inventory_Open_Payload, "Open inventory with payload (internal)", FCVAR_CLIENTDLL);
 static ConCommand inventory_open_end("inventory_open_end", __Cmd_Inventory_Open_End, "End inventory (internal)", FCVAR_CLIENTDLL);
 static ConCommand inventory_request_local("inventory_request_local", __Cmd_Inventory_Request_Local, "Request inventory (local, bound to key)", FCVAR_CLIENTDLL);
+
+// HL2RPM: the quest journal - the quests tab of the inventory window (bind a key: bind j rpm_journal)
+static void __Cmd_RPM_Journal(const CCommand &args)
+{
+    CVGuiLootPanel *lootPanel = GetGlobalLootPanel();
+    if (lootPanel && lootPanel->IsVisible())
+        return;
+    if (RPMMenu_Toggle(2))
+        return;
+    CVGuiInventoryPanel *panel = GetGlobalInventoryPanel();
+    if (!panel)
+        return;
+    if (panel->IsVisible())
+    {
+        engine->ClientCmd("inventory_open_end\n");
+        return;
+    }
+    panel->OpenQuestsTab();
+    engine->ClientCmd("inventory_request\n");
+}
+static ConCommand rpm_journal("rpm_journal", __Cmd_RPM_Journal, "HL2RPM: the quest journal (quests of the inventory window)", FCVAR_CLIENTDLL);
 static ConCommand inventory_pickup_notify("inventory_pickup_notify", __Cmd_Inventory_Pickup_Notify, "Pickup notification (internal)", FCVAR_CLIENTDLL);
 static ConCommand ui_toast("ui_toast", __Cmd_UI_Toast, "UI toast notification (internal)", FCVAR_CLIENTDLL);
+
+// HL2RPM (M6): inventory entries for the character menu
+void InventoryClient_ParseEntry(const char *raw, char *cls, int clsSize, int &count, bool &hasExplicitCount)
+{
+    ExtractLootEntrySummary(raw, cls, clsSize, count, hasExplicitCount);
+}
+
+float InventoryClient_EntryWeight(const char *raw)
+{
+    char cls[256];
+    int count = 1;
+    bool hasExplicit = false;
+    ExtractLootEntrySummary(raw, cls, sizeof(cls), count, hasExplicit);
+    return GetInventoryEntryWeightKgClient(cls, count, hasExplicit);
+}
+
+bool InventoryClient_IsAmmo(const char *cls)
+{
+    return IsAmmoClassnameForInventory(cls);
+}

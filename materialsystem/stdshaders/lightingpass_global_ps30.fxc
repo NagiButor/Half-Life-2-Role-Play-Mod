@@ -342,13 +342,18 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 	return shadow + ( 1.0f - shadow ) * leak * g_vecFoliage.y;
 }
 
+// HL2RPM: the cascades in use - at most 4 (cascade_t.cpp: GetActiveCascadeCount clamps to 4, the
+// cascades above it are committed with zero matrices and never hold a point). The arrays keep room
+// for SHADOW_NUM_CASCADES (8); looking through all 8 cost every pixel 4 more transforms.
+#define SUN_SHADOW_CASCADES 4
+
 // flNormal: the geometric normal (see main), NdotL: its dot with the direction to the sun
 float SunShadowPCSS( float3 worldPos, float3 flNormal, float NdotL, float extraBias, float3 footX, float3 footY, out int outCascade, float flFoliage )
 {
 	int c = -1;
 	float3 uvz = 0;
 	[unroll]
-	for ( int i = 0; i < SHADOW_NUM_CASCADES; i++ )
+	for ( int i = 0; i < SUN_SHADOW_CASCADES; i++ )
 	{
 		float3 cand = SunShadowUVZ( worldPos, flNormal, NdotL, i );
 		if ( InsideCascade( cand ) )
@@ -368,7 +373,7 @@ float SunShadowPCSS( float3 worldPos, float3 flNormal, float NdotL, float extraB
 	float2 centered = abs( uvz.xy * 2.0f - 1.0f );
 	float blendFactor = smoothstep( 0.92f, 0.995f, max( centered.x, centered.y ) );
 	[branch]
-	if ( blendFactor > 0.0f && c < ( SHADOW_NUM_CASCADES - 1 ) && ( g_vecPCSS.w < 1.5f || g_vecPCSS.w > 4.5f ) )
+	if ( blendFactor > 0.0f && c < ( SUN_SHADOW_CASCADES - 1 ) && ( g_vecPCSS.w < 1.5f || g_vecPCSS.w > 4.5f ) )
 	{
 		float3 uvzNext = SunShadowUVZ( worldPos, flNormal, NdotL, c + 1 );
 		if ( InsideCascade( uvzNext ) )

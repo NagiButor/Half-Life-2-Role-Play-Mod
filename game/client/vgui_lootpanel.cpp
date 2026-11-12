@@ -10,6 +10,7 @@
 #include <vgui_controls/AnimationController.h>
 #include "clientmode.h"
 #include <stdarg.h>
+#include "hl2rpm_items.h"
 
 using namespace vgui;
 
@@ -73,6 +74,21 @@ static void GetFriendlyLabelAndCount(const char *classname, int pickupCount, boo
     {
         Q_snprintf(out, outSize, "(unknown)");
         return;
+    }
+
+    // HL2RPM: items of the item database - their name in the game's language
+    // (ammo keeps its bullet count below; money and other stackables show the count)
+    {
+        const RPMItemDef_t *pDef = RPMItems::Find(classname);
+        if (pDef && Q_stricmp(pDef->category, "ammo") != 0 && Q_strnicmp(classname, "item_ammo", 9) != 0 &&
+            Q_strnicmp(classname, "item_box", 8) != 0)
+        {
+            if (pDef->stackable && hasExplicitBullets && pickupCount > 1)
+                Q_snprintf(out, outSize, "%s x%d", RPMItems::Name(classname), pickupCount);
+            else
+                Q_snprintf(out, outSize, "%s", RPMItems::Name(classname));
+            return;
+        }
     }
 
     if (!Q_stricmp(classname, "item_healthkit") || !Q_stricmp(classname, "item_healthvial"))
@@ -454,6 +470,8 @@ CVGuiLootPanel::CVGuiLootPanel(Panel *parent) : BaseClass(parent, "LootPanel")
     m_DisplayName = "";
     m_SoundOpen = "";
     m_SoundClose = "";
+    m_bTrade = false;
+    m_nPlayerMoney = m_nVendorMoney = 0;
 
     // Add a small red close button top-right
     CConfirmCloseButton *pClose = new CConfirmCloseButton(this, "LootClose", "X");
@@ -500,8 +518,20 @@ CVGuiLootPanel *GetGlobalLootPanel()
     return s_pLootPanel;
 }
 
+// HL2RPM (M6): the window of the new look shows the loot when cl_rpm_menu is on
+extern bool RPMLoot_Show(CVGuiLootPanel *pData);
+extern void RPMLoot_Hide();
+extern bool RPMLoot_IsOpen();
+
+bool CVGuiLootPanel::IsVisible()
+{
+    return BaseClass::IsVisible() || RPMLoot_IsOpen();
+}
+
 void CVGuiLootPanel::BeginLoot()
 {
+    if (RPMLoot_Show(this))
+        return;
     DevMsg("[LootPanel] BeginLoot build=%s\n", g_pszLootPanelBuild);
     bool wasVisible = IsVisible();
     for (int i = 0; i < m_LeftButtons.Count(); ++i) delete m_LeftButtons[i];
@@ -594,6 +624,16 @@ void CVGuiLootPanel::BeginLoot()
         char disp[256]; char cls[201]; int cnt = 1; bool hasExplicit = false;
         ExtractLootEntrySummary(raw, cls, sizeof(cls), cnt, hasExplicit);
         GetFriendlyLabelAndCount(cls, cnt, hasExplicit, disp, sizeof(disp));
+        if (m_bTrade)
+        {
+            int price = i < m_LeftPrices.Count() ? m_LeftPrices[i] : -1;
+            char priced[300];
+            if (price >= 0)
+                Q_snprintf(priced, sizeof(priced), "%s   [%d]", disp, price);
+            else
+                Q_snprintf(priced, sizeof(priced), "%s   [—]", disp);
+            Q_strncpy(disp, priced, sizeof(disp));
+        }
 
         char namebuf[64]; Q_snprintf(namebuf, sizeof(namebuf), "LootLeftItem%d", i);
         CInvOptionButton *btn = new CInvOptionButton(m_pLeftListPanel, namebuf, disp, 0, i, this);
@@ -614,6 +654,13 @@ void CVGuiLootPanel::BeginLoot()
         char disp[256]; char cls[201]; int cnt = 1; bool hasExplicit = false;
         ExtractLootEntrySummary(raw, cls, sizeof(cls), cnt, hasExplicit);
         GetFriendlyLabelAndCount(cls, cnt, hasExplicit, disp, sizeof(disp));
+        if (m_bTrade)
+        {
+            int price = i < m_RightPrices.Count() ? m_RightPrices[i] : 0;
+            char priced[300];
+            Q_snprintf(priced, sizeof(priced), "%s   [%d]", disp, Max(0, price));
+            Q_strncpy(disp, priced, sizeof(disp));
+        }
 
         char namebuf[64]; Q_snprintf(namebuf, sizeof(namebuf), "LootRightItem%d", i);
         CInvOptionButton *btn = new CInvOptionButton(m_pRightListPanel, namebuf, disp, 1, i, this);
@@ -630,7 +677,7 @@ void CVGuiLootPanel::BeginLoot()
     int bw = 140, bh = 34;
     if (m_pPutAll)
     {
-        bool enable = (m_LeftButtons.Count() > 0);
+        bool enable = (m_LeftButtons.Count() > 0) && !m_bTrade;
         m_pPutAll->SetBounds( (pw/4) - (bw/2), ph - bh - 12, bw, bh );
         m_pPutAll->SetVisible(enable);
         m_pPutAll->SetEnabled(enable);
@@ -640,7 +687,7 @@ void CVGuiLootPanel::BeginLoot()
 
     if (m_pTakeAll)
     {
-        bool enable = (m_RightButtons.Count() > 0);
+        bool enable = (m_RightButtons.Count() > 0) && !m_bTrade;
         m_pTakeAll->SetBounds( (3*(pw/4)) - (bw/2), ph - bh - 12, bw, bh );
         m_pTakeAll->SetVisible(enable);
         m_pTakeAll->SetEnabled(enable);
@@ -737,6 +784,8 @@ void CVGuiLootPanel::PerformSelectedAction()
         return;
 
     char cmdbuf[64];
+    if (m_bTrade)
+        m_nSelectedAction = 0;		// a vendor's window has only buy / sell
     if (m_nActionColumn == 0)
     {
         if (m_nActionIndex >= m_LeftItems.Count())
@@ -780,9 +829,13 @@ void CVGuiLootPanel::ShowLeftActions(int idx)
     m_pLeftActionPrimary->SetCommand(cmdbuf);
     Q_snprintf(cmdbuf, sizeof(cmdbuf), "loot_drop_left %d", idx);
     m_pLeftActionSecondary->SetCommand(cmdbuf);
+    {
+        const bool ru = !Q_stricmp(RPMItems::Language(), "russian");
+        m_pLeftActionPrimary->SetText(m_bTrade ? (ru ? "Продать" : "Sell") : "Put");
+    }
 
     m_pLeftActionPrimary->SetVisible(true);
-    m_pLeftActionSecondary->SetVisible(true);
+    m_pLeftActionSecondary->SetVisible(!m_bTrade);
     m_pLeftActionPrimary->SetEnabled(true);
     m_pLeftActionSecondary->SetEnabled(true);
     m_pLeftActionPrimary->SetMouseInputEnabled(true);
@@ -844,9 +897,13 @@ void CVGuiLootPanel::ShowRightActions(int idx)
     m_pRightActionPrimary->SetCommand(cmdbuf);
     Q_snprintf(cmdbuf, sizeof(cmdbuf), "loot_drop_right %d", idx);
     m_pRightActionSecondary->SetCommand(cmdbuf);
+    {
+        const bool ru = !Q_stricmp(RPMItems::Language(), "russian");
+        m_pRightActionPrimary->SetText(m_bTrade ? (ru ? "Купить" : "Buy") : "Take");
+    }
 
     m_pRightActionPrimary->SetVisible(true);
-    m_pRightActionSecondary->SetVisible(true);
+    m_pRightActionSecondary->SetVisible(!m_bTrade);
     m_pRightActionPrimary->SetEnabled(true);
     m_pRightActionSecondary->SetEnabled(true);
     m_pRightActionPrimary->SetMouseInputEnabled(true);
@@ -1433,6 +1490,11 @@ void CVGuiLootPanel::SetItems(const CUtlVector<CUtlString> &leftItems, const CUt
 
 void CVGuiLootPanel::EndLoot()
 {
+    if (RPMLoot_IsOpen())
+    {
+        RPMLoot_Hide();
+        return;
+    }
     bool wasVisible = IsVisible();
     HideActionButtons();
     if (m_pPutAll) m_pPutAll->SetVisible(false);
@@ -1535,6 +1597,30 @@ void CVGuiLootPanel::OnTick()
         vgui::ivgui()->RemoveTickSignal(GetVPanel());
 }
 
+void CVGuiLootPanel::SetTrade(bool bTrade, int playerMoney, int vendorMoney, const char *currency, const char *leftPrices, const char *rightPrices)
+{
+    m_bTrade = bTrade;
+    m_nPlayerMoney = playerMoney;
+    m_nVendorMoney = vendorMoney;
+    m_Currency = currency ? currency : "";
+    m_LeftPrices.RemoveAll();
+    m_RightPrices.RemoveAll();
+    CUtlStringList parts;
+    if (leftPrices && leftPrices[0])
+    {
+        V_SplitString(leftPrices, ";", parts);
+        for (int i = 0; i < parts.Count(); ++i)
+            m_LeftPrices.AddToTail(atoi(parts[i]));
+    }
+    parts.PurgeAndDeleteElements();
+    if (rightPrices && rightPrices[0])
+    {
+        V_SplitString(rightPrices, ";", parts);
+        for (int i = 0; i < parts.Count(); ++i)
+            m_RightPrices.AddToTail(atoi(parts[i]));
+    }
+}
+
 void CVGuiLootPanel::SetContext(const char *displayName, const char *soundOpen, const char *soundClose)
 {
     m_DisplayName = (displayName && displayName[0]) ? displayName : "";
@@ -1543,10 +1629,28 @@ void CVGuiLootPanel::SetContext(const char *displayName, const char *soundOpen, 
 
     if (m_pRightLabel)
     {
-        if (m_DisplayName.Get()[0])
+        if (m_bTrade)
+        {
+            char buf[300];
+            Q_snprintf(buf, sizeof(buf), "%s:  %d %s", m_DisplayName.Get()[0] ? m_DisplayName.Get() : "?", m_nVendorMoney, m_Currency.Get());
+            m_pRightLabel->SetText(buf);
+        }
+        else if (m_DisplayName.Get()[0])
             m_pRightLabel->SetText(m_DisplayName.Get());
         else
             m_pRightLabel->SetText("NPC's inventory");
+    }
+    if (m_pLeftLabel)
+    {
+        if (m_bTrade)
+        {
+            const bool ru = !Q_stricmp(RPMItems::Language(), "russian");
+            char buf[300];
+            Q_snprintf(buf, sizeof(buf), "%s:  %d %s", ru ? "У вас" : "You have", m_nPlayerMoney, m_Currency.Get());
+            m_pLeftLabel->SetText(buf);
+        }
+        else
+            m_pLeftLabel->SetText("Your inventory");
     }
 }
 
@@ -1647,6 +1751,9 @@ void CVGuiLootPanel::OnCommand(const char *command)
         HideRightActions();
         return;
     }
+
+    if (m_bTrade && (!Q_strnicmp(command, "loot_drop_", 10) || !Q_stricmp(command, "loot_put_all") || !Q_stricmp(command, "loot_take_all")))
+        return;
 
     if (!Q_strnicmp(command, "loot_drop_left ", 15))
     {

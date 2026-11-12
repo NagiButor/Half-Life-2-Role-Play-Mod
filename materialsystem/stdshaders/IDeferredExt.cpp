@@ -54,6 +54,7 @@ CDeferredExtension::CDeferredExtension()
 	m_pTexGIProbesFar = NULL;
 	m_pTexGI = NULL;
 	m_pTexGIBlur = NULL;
+	m_pTexLightReach = NULL;
 
 	m_pflCommonLightData = NULL;
 	m_iCommon_NumRows = 0;
@@ -298,6 +299,11 @@ void CDeferredExtension::CommitTexture_GI( ITexture *pProbes, ITexture *pProbesF
 	m_pTexGIProbesFar = pProbesFar;
 	m_pTexGI = pGI;
 	m_pTexGIBlur = pBlur;
+}
+
+void CDeferredExtension::CommitTexture_LightReach( ITexture *pReach )
+{
+	m_pTexLightReach = pReach;
 }
 
 void CDeferredExtension::CommitPostFXData( const postfxData_t &data )

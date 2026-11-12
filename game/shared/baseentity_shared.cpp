@@ -60,6 +60,9 @@ ConVar hl2_episodic( "hl2_episodic", "0", FCVAR_REPLICATED );
 #include "rumble_shared.h"
 
 #include "hl2rpm_crashdebug.h"
+#ifdef GAME_DLL
+#include "hl2rpm_char.h"
+#endif
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -1619,9 +1622,17 @@ public:
 typedef CTraceFilterSimpleList CBulletsTraceFilter;
 #endif
 
-void CBaseEntity::FireBullets( const FireBulletsInfo_t &info )
+void CBaseEntity::FireBullets( const FireBulletsInfo_t &infoIn )
 {
-	RPM_CRUMB( "FireBullets from ent=%d '%s' shots=%d ammo=%d dmg=%.0f", entindex(), GetClassname(), info.m_iShots, info.m_iAmmoType, info.m_flDamage );
+	RPM_CRUMB( "FireBullets from ent=%d '%s' shots=%d ammo=%d dmg=%.0f", entindex(), GetClassname(), infoIn.m_iShots, infoIn.m_iAmmoType, infoIn.m_flDamage );
+#ifdef GAME_DLL
+	// HL2RPM: the player's weapon skill widens / narrows the spread (HL2 weapons fire on the server only)
+	FireBulletsInfo_t info = infoIn;
+	if ( IsPlayer() )
+		info.m_vecSpread *= RPMChar::SpreadScale( ToBasePlayer( this ) );
+#else
+	const FireBulletsInfo_t &info = infoIn;
+#endif
 #if defined(MAPBASE_VSCRIPT) && defined(GAME_DLL)
 	if ( m_ScriptScope.IsInitialized() && g_Hook_FireBullets.CanRunInScope( m_ScriptScope ) )
 	{

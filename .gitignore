@@ -60,3 +60,7 @@ config.cfg
 .vs/
 __pycache__/
 *.pyc
+
+# Local AI-client directory junctions; canonical skills are in AI_instructions/skills.
+.agents/skills/
+.claude/skills/

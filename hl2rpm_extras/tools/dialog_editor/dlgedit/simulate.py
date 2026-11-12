@@ -1,6 +1,7 @@
 """Dialog play-through in the editor: the same rules as the game server
 (dialog_definitions.cpp SendDialogNodeToPlayerEx, dialogsystem_server.cpp
 HandleDialogChoice / ContinueDialog), quests and reputation as editable state."""
+from . import logic
 from .model import text_for
 
 INT_MIN = -(2 ** 31)
@@ -19,7 +20,7 @@ class Screen:
         self.line_fallback = False
         self.voice = None          # Voice or None
         self.voice_lang = ""
-        self.options = []          # [(index, text, fallback)]
+        self.options = []          # [(index, text, fallback, greyed, check: None | True / False = passes)]
         self.auto_next = -1
         self.auto_close = False
         self.pending_spoil = False
@@ -38,6 +39,7 @@ class Simulator:
         self.quests = {}
         self.events = []
         self.current = None
+        self.state = logic.SimState()      # flags, variables, skills, items... (Creation Kit logic)
 
     def quest(self, qid):
         if qid not in self.quests:
@@ -57,6 +59,46 @@ class Simulator:
             if b and not b.is_empty():
                 return b, self.p.base_language
         return None, ""
+
+    def _sync_in(self):
+        st = self.state
+        st.quests = {k: [v.state, v.stage] for k, v in self.quests.items()}
+        st.rep = self.rep
+        st.talked = {self.npc.targetname} if self.spoken else set()
+
+    def _sync_out(self):
+        for k, (state, stage) in self.state.quests.items():
+            q = self.quest(k)
+            q.state, q.stage = state, stage
+        self.rep = self.state.rep
+
+    def _run(self, actions):
+        if not actions:
+            return
+        self._sync_in()
+        for line in logic.run_actions(actions, self.state, self.p, self.npc.targetname):
+            self.events.append("действие: " + line)
+        self._sync_out()
+
+    def _check_key(self, node_id, index):
+        return "%d.%d" % (node_id, index)
+
+    def option_state(self, node, i, o):
+        """(visible, greyed, check) - check None, or (passes, label)."""
+        if not self._option_visible(o):
+            return False, False, None
+        self._sync_in()
+        greyed = False
+        if o.conditions and not logic.eval_conds(o.conditions, self.state, self.npc.targetname):
+            if not o.show_unmet:
+                return False, False, None
+            greyed = True
+        check = None
+        if o.check:
+            if o.check_once and self._check_key(node.id, i) in self.state.checks:
+                return False, False, None
+            check = logic.check_passes(o.check, self.state)
+        return True, greyed, check
 
     def _option_visible(self, o):
         if o.require_rep is not None and self.rep < o.require_rep:
@@ -100,11 +142,15 @@ class Simulator:
         else:
             sc.line, sc.line_fallback = self._text(node.line)
             sc.voice, sc.voice_lang = self._voice(node.voice)
+            self._run(node.actions)
         if not suppress:
             for i, o in enumerate(node.options):
-                if self._option_visible(o):
+                vis, greyed, check = self.option_state(node, i, o)
+                if vis:
                     t, fb = self._text(o.text)
-                    sc.options.append((i, t, fb))
+                    if check is not None:
+                        t = check[1] + t
+                    sc.options.append((i, t, fb, greyed, None if check is None else check[0]))
         sc.events = self.events
         self.events = []
         self.current = sc
@@ -153,8 +199,21 @@ class Simulator:
         if node is None or index < 0 or index >= len(node.options):
             return sc
         o = node.options[index]
-        if not self._option_visible(o):
+        vis, greyed, check = self.option_state(node, index, o)
+        if not vis or greyed:
             return sc
+        if check is not None:
+            if o.check_once:
+                self.state.checks.add(self._check_key(node.id, index))
+            if not check[0]:
+                self.events.append("проверка %sне пройдена" % check[1])
+                self._run(o.fail_actions)
+                if o.fail_next != -1:
+                    return self._send(o.fail_next)
+                self.spoken = True
+                self.current = None
+                return None
+            self.events.append("проверка %sпройдена" % check[1])
         q = self.p.quest
         if o.grant:
             qd = q(o.grant)
@@ -187,8 +246,14 @@ class Simulator:
             else:
                 st.stage = o.set_stage[1]
                 self.events.append("квест «%s»: этап %d" % (o.set_stage[0], o.set_stage[1]))
+        self._run(o.actions)
         if o.server_sequence:
             self.events.append("запуск на карте: %s → BeginSequence" % o.server_sequence)
+        if o.trade:
+            self.events.append("окно торговли (диалог закрыт)")
+            self.spoken = True
+            self.current = None
+            return None
 
         if o.next != -1:
             if o.spoils:

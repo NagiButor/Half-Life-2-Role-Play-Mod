@@ -415,6 +415,8 @@ void CBaseHudWeaponSelection::SelectSlot( int iSlot )
 		return;
 	}
 
+	return;		// HL2RPM: there is nothing to select - one weapon is equipped from the inventory (hl2rpm_weapons.cpp)
+
 	// If player isn't wearing a suit, immediately switch weapons without opening the HUD
 	C_BasePlayer *pPlayer = C_BasePlayer::GetLocalPlayer();
 	if ( pPlayer && !pPlayer->IsSuitEquipped() )
@@ -462,6 +464,8 @@ void CBaseHudWeaponSelection::UserCmd_Close(void)
 //-----------------------------------------------------------------------------
 void CBaseHudWeaponSelection::UserCmd_NextWeapon(void)
 {
+	return;		// HL2RPM: see SelectSlot
+
 	// If player isn't wearing a suit, immediately switch to the next weapon without showing the HUD
 	C_BasePlayer *pPlayer = C_BasePlayer::GetLocalPlayer();
 	if ( pPlayer && !pPlayer->IsSuitEquipped() )
@@ -552,6 +556,8 @@ void CBaseHudWeaponSelection::UserCmd_NextWeapon(void)
 //-----------------------------------------------------------------------------
 void CBaseHudWeaponSelection::UserCmd_PrevWeapon(void)
 {
+	return;		// HL2RPM: see SelectSlot
+
 	// If player isn't wearing a suit, immediately switch to the previous weapon without showing the HUD
 	C_BasePlayer *pPlayer = C_BasePlayer::GetLocalPlayer();
 	if ( pPlayer && !pPlayer->IsSuitEquipped() )
@@ -644,6 +650,8 @@ void CBaseHudWeaponSelection::UserCmd_PrevWeapon(void)
 //-----------------------------------------------------------------------------
 void CBaseHudWeaponSelection::UserCmd_LastWeapon(void)
 {
+	return;		// HL2RPM: see SelectSlot
+
 	// If we're not allowed to draw, ignore weapon selections
 	if ( !BaseClass::ShouldDraw() )
 		return;

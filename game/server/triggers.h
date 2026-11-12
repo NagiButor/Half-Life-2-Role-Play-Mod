@@ -105,6 +105,16 @@ public:
 	bool		m_bDisabled;
 	string_t	m_iFilterName;
 	CHandle<class CBaseFilter>	m_hFilter;
+	// HL2RPM: a trigger made without a brush model (world layer of the Creation Kit): an axis-aligned box.
+	// Without a brush model the engine would take it for a point entity and carry it over level
+	// transitions (a trigger_changelevel arriving under the player fires again at once).
+	Vector		m_vecRPMBoxMins;
+	Vector		m_vecRPMBoxMaxs;
+	virtual int	ObjectCaps( void )
+	{
+		int caps = BaseClass::ObjectCaps();
+		return ( m_vecRPMBoxMins != m_vecRPMBoxMaxs ) ? ( caps & ~FCAP_ACROSS_TRANSITION ) : caps;
+	}
 
 protected:
 

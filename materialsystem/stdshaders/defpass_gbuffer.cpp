@@ -254,7 +254,7 @@ void DrawPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 	{
 		Assert( pDeferredContext != NULL );
 
-		if ( pDeferredContext->m_bMaterialVarsChanged || !pDeferredContext->HasCommands( CDeferredPerMaterialContextData::DEFSTAGE_GBUFFER ) )
+		if ( pDeferredContext->NeedsCommands( CDeferredPerMaterialContextData::DEFSTAGE_GBUFFER ) )
 		{
 			tmpBuf.Reset();
 

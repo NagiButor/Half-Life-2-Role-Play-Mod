@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout
 from .. import worlddata as wd
 from ..model import QUEST_STATES, QUEST_STATE_NAMES, TARGETNAME_RE
 from .widgets import AutoText, LangTexts, QuestCombo, hint
+from .logic_widgets import LogicList
 
 
 def _group(title):
@@ -43,6 +44,23 @@ def combo(items, current, editable=False, min_len=10):
     elif editable:
         c.setEditText(current or "")
     return c
+
+
+def bind_combo(cb, apply):
+    """Editable combo: call apply() only when its text really changed. Qt emits
+    lineEdit().editingFinished as soon as the arrow is clicked (the list is already open):
+    reacting to it rebuilt the page and closed the list, marked the project changed and
+    took an undo snapshot."""
+    last = [cb.currentText()]
+
+    def fire(*_):
+        if cb.currentText() == last[0]:
+            return
+        last[0] = cb.currentText()
+        apply()
+    cb.activated.connect(fire)
+    if cb.lineEdit() is not None:
+        cb.lineEdit().editingFinished.connect(fire)
 
 
 def hours_text(h):
@@ -279,9 +297,8 @@ def actor_tab(insp, npc):
         v = cls.currentData() if cls.currentIndex() >= 0 and cls.currentText() == cls.itemText(cls.currentIndex()) else cls.currentText().split()[0]
         a.classname = (v or "npc_citizen").strip()
         ch(True)
-        insp.show_target(insp.target)
-    cls.activated.connect(set_cls)
-    cls.lineEdit().editingFinished.connect(set_cls)
+        insp.rebuild_soon()
+    bind_combo(cls, set_cls)
     f.addRow("Класс:", cls)
     if not wd.NPC_HAS_ROUTINE.get(a.classname, True):
         f.addRow("", hint("У этого класса нет распорядка в игре (нет поведения actbusy) — пакеты не будут работать."))
@@ -294,8 +311,7 @@ def actor_tab(insp, npc):
         t = mdl.currentText().strip()
         a.model = "" if t.startswith("по умолчанию") else t
         ch(True)
-    mdl.activated.connect(set_model)
-    mdl.lineEdit().editingFinished.connect(set_model)
+    bind_combo(mdl, set_model)
     mrow.addWidget(mdl, 1)
     br = QToolButton(text="…")
     br.setToolTip("Выбрать модель из игры")
@@ -305,10 +321,17 @@ def actor_tab(insp, npc):
         if m:
             a.model = m
             ch(True)
-            insp.show_target(insp.target)
+            insp.rebuild_soon()
     br.clicked.connect(browse)
     mrow.addWidget(br)
+    va = QToolButton(text="Анимации…")
+    va.setToolTip("Модель с анимациями (свои и из подключённых моделей): что сейчас делает NPC по распорядку, "
+                  "анимации маркеров, походки")
+    va.clicked.connect(lambda: hasattr(ctx, "view_model") and ctx.view_model(a.model_or_default(), a.skin,
+                                                                             ctx.npc_preview_sequence(npc) if npc else "ACT_IDLE",
+                                                                             "Просмотр: %s" % npc.targetname if npc else ""))
     f.addRow("Модель:", mrow)
+    f.addRow("", va)
     sk = QSpinBox()
     sk.setRange(0, 32)
     sk.setValue(a.skin)
@@ -324,8 +347,7 @@ def actor_tab(insp, npc):
         t = wp.currentText().strip()
         a.weapon = "" if t.startswith("—") else t
         ch()
-    wp.activated.connect(set_wp)
-    wp.lineEdit().editingFinished.connect(set_wp)
+    bind_combo(wp, set_wp)
     f.addRow("Оружие:", wp)
     hp = QSpinBox()
     hp.setRange(0, 100000)
@@ -343,8 +365,7 @@ def actor_tab(insp, npc):
         t = fac.currentText().strip()
         a.faction = "" if t.startswith("—") else t
         ch(True)
-    fac.activated.connect(set_fac)
-    fac.lineEdit().editingFinished.connect(set_fac)
+    bind_combo(fac, set_fac)
     frow = QHBoxLayout()
     frow.addWidget(fac, 1)
     nf = QToolButton(text="+")
@@ -373,9 +394,231 @@ def actor_tab(insp, npc):
     lay.addWidget(g)
 
     g, gl = _group("Инвентарь трупа (лут)")
-    it = ItemsTable(a.loot_items, ctx.item_names())
+    it = ItemsTable(a.loot_items, ctx.all_item_ids() + ["list:" + x.id for x in p.lootlists], title="Предмет или list:<список лута>")
     it.changed.connect(ch)
     gl.addWidget(it)
+    lay.addWidget(g)
+
+    # combat
+    g, gl = _group("Бой")
+    cf = _form()
+    pr = combo([(-1, "по классу NPC"), (0, "плохая"), (1, "средняя"), (2, "хорошая"), (3, "очень хорошая"), (4, "идеальная")], a.proficiency)
+    pr.currentIndexChanged.connect(lambda _: (setattr(a, "proficiency", int(pr.currentData())), ch()))
+    cf.addRow("Меткость:", pr)
+    ag = combo([(-1, "по классу и фракции"), (0, "не нападает первым"), (1, "нападает на врагов"),
+                (2, "нападает на всех, кроме друзей"), (3, "бешеный — на всех, и на своих")], a.aggression)
+    ag.setToolTip("Как в New Vegas. «Не нападает первым» — пока его (или игрок) не тронут; «на всех, кроме друзей» — "
+                  "игрок враг, если фракция ему не друг")
+    ag.currentIndexChanged.connect(lambda _: (setattr(a, "aggression", int(ag.currentData())), ch()))
+    cf.addRow("Агрессия:", ag)
+    cn = combo([(-1, "по классу"), (0, "трус — убегает сразу"), (1, "осторожный — убегает при 50 % здоровья"),
+                (2, "обычный — убегает при 25 %"), (3, "храбрый — не убегает")], a.confidence)
+    cn.setToolTip("Как в New Vegas: при каком здоровье NPC бросает бой и убегает от врага")
+    cn.currentIndexChanged.connect(lambda _: (setattr(a, "confidence", int(cn.currentData())), ch()))
+    cf.addRow("Смелость:", cn)
+    xp = QSpinBox()
+    xp.setRange(0, 100000)
+    xp.setSpecialValueText("нет")
+    xp.setValue(a.xp)
+    xp.valueChanged.connect(lambda v: (setattr(a, "xp", int(v)), ch()))
+    cf.addRow("Опыт за убийство:", xp)
+    gl.addLayout(cf)
+    lay.addWidget(g)
+
+    # behaviour (rules of the game by default: РПГ → правила «Поведение NPC»)
+    g, gl = _group("Поведение")
+    bf = _form()
+    yl = combo([(-1, "по правилам игры (по умолчанию — нет)"), (0, "нет — стоит на месте"), (1, "да — отходит, как в HL2")],
+               a.yield_player)
+    yl.setToolTip("HL2: горожане отходят, когда игрок идёт на них. Торговцу и собеседнику лучше «нет».\n"
+                  "Общее значение — правило npc_yield (вкладка «РПГ»)")
+    yl.currentIndexChanged.connect(lambda _: (setattr(a, "yield_player", int(yl.currentData())), ch()))
+    bf.addRow("Уступает дорогу игроку:", yl)
+    pw = combo([(-1, "по правилам игры (по умолчанию — нет)"), (0, "нет"), (1, "да — любое оружие на полу"),
+                (2, "только в отряде игрока")], a.pickup_weapons)
+    pw.setToolTip("HL2: горожане подбирают любое оружие с пола. Общее значение — правило npc_pickup_weapons")
+    pw.currentIndexChanged.connect(lambda _: (setattr(a, "pickup_weapons", int(pw.currentData())), ch()))
+    bf.addRow("Подбирает оружие:", pw)
+    wl = combo([(-1, "по классу (ГО и солдаты следят, горожане — гражданские)"), (0, "не касается"),
+                (1, "гражданский — оружие носить нельзя"), (2, "следит: предупреждает, потом стреляет"),
+                (3, "следит: стреляет сразу")], a.weapon_law)
+    wl.setToolTip("Запрет оружия в Городе. Тот, кто следит, видит у гражданского (игрока или NPC) оружие в руках —\n"
+                  "«Убрать оружие!», последнее предупреждение, огонь. Убрал (H) — «Проходи». Повтор в течение минуты — огонь сразу.\n"
+                  "Игрок в форме ГО / солдата — свой. Фразы — событие «Запрет оружия» во «Фразах»; без них — фразы HL2.\n"
+                  "Общие настройки — правила weapon_law* (вкладка «РПГ»)")
+    wl.currentIndexChanged.connect(lambda _: (setattr(a, "weapon_law", int(wl.currentData())), ch()))
+    bf.addRow("Запрет оружия:", wl)
+    gl.addLayout(bf)
+    lay.addWidget(g)
+
+    # trade
+    g, gl = _group("Торговец")
+    vend = QCheckBox("Торгует")
+    vend.setToolTip("Окно торговли открывает вариант ответа с флажком «Открыть торговлю» в диалоге этого NPC")
+    vend.setChecked(a.vendor is not None)
+    gl.addWidget(vend)
+    vbox = QWidget()
+    vf = QFormLayout(vbox)
+    vf.setContentsMargins(0, 0, 0, 0)
+    vd = a.vendor or {}
+
+    def vset(key, value):
+        if a.vendor is None:
+            return
+        if a.vendor.get(key) != value:
+            a.vendor[key] = value
+            ch()
+    lists = ["list:" + x.id for x in p.lootlists]
+    goods = QComboBox()
+    goods.setEditable(True)
+    goods.addItems(lists)
+    goods.setCurrentText(vd.get("list", lists[0] if lists else ""))
+    goods.setToolTip("Список лута (list:<id>) и/или предметы через «;» — например list:trader_food;item_healthkit:2")
+    goods.lineEdit().editingFinished.connect(lambda: vset("list", goods.currentText().strip()))
+    goods.activated.connect(lambda _: vset("list", goods.currentText().strip()))
+    vf.addRow("Товары:", goods)
+    money = QSpinBox()
+    money.setRange(0, 1000000)
+    money.setValue(int(vd.get("money", 300)))
+    money.valueChanged.connect(lambda v: vset("money", int(v)))
+    vf.addRow("Деньги торговца:", money)
+    mk = QDoubleSpinBox()
+    mk.setRange(0.5, 10.0)
+    mk.setSingleStep(0.05)
+    mk.setValue(float(vd.get("markup", 1.25)))
+    mk.setSuffix(" × цены")
+    mk.valueChanged.connect(lambda v: vset("markup", round(float(v), 2)))
+    vf.addRow("Продаёт по:", mk)
+    pays = QSpinBox()
+    pays.setRange(1, 100)
+    pays.setSuffix(" % цены")
+    pays.setValue(int(round(float(vd.get("pays", 0.5)) * 100)))
+    pays.valueChanged.connect(lambda v: vset("pays", round(v / 100.0, 2)))
+    vf.addRow("Покупает по:", pays)
+    rs = QSpinBox()
+    rs.setRange(0, 24 * 60)
+    rs.setSpecialValueText("никогда")
+    rs.setSuffix(" ч")
+    rs.setValue(int(float(vd.get("restock_hours", 72))))
+    rs.valueChanged.connect(lambda v: vset("restock_hours", int(v)))
+    vf.addRow("Новый товар через:", rs)
+    curs = [x.id for x in p.items if x.category == "currency"] or ["rpm_credits"]
+    cur = combo([(c, c) for c in curs], vd.get("currency", curs[0]), editable=True)
+    cur.currentTextChanged.connect(lambda t: vset("currency", t.strip()))
+    vf.addRow("Валюта:", cur)
+    gl.addWidget(vbox)
+    vbox.setVisible(a.vendor is not None)
+
+    def set_vendor(on):
+        if on and a.vendor is None:
+            a.vendor = {"list": goods.currentText().strip(), "money": money.value(), "markup": round(mk.value(), 2),
+                        "pays": round(pays.value() / 100.0, 2), "restock_hours": rs.value(), "currency": cur.currentText().strip()}
+        elif not on:
+            a.vendor = None
+        vbox.setVisible(bool(on))
+        ch()
+    vend.toggled.connect(set_vendor)
+    gl.addWidget(hint("Окно торговли открывает вариант ответа с флажком «Открыть торговлю» в его диалоге. Цены — поле «Цена» "
+                      "предметов (вкладка «Предметы»), деньги игрока — предмет-валюта в инвентаре; запас и деньги торговца "
+                      "сохраняются в игре и обновляются раз в указанное время."))
+    lay.addWidget(g)
+
+    # template and variation
+    g, gl = _group("Шаблон и вариации")
+    gl.addWidget(hint("Шаблон — другой NPC проекта: пустые поля этого NPC берутся из него (класс, модель, оружие, фракция, "
+                      "лут, распорядок…). Вариации — случайный выбор для каждого появившегося NPC: так один шаблон "
+                      "«Горожанин» даёт толпу разных людей (точки появления, массовка)."))
+    tf = _form()
+    others = [("", "— нет —")] + [(n.targetname, n.targetname + ("  (шаблон)" if n.actor.is_template else ""))
+                                   for n in sorted(p.npcs, key=lambda x: x.targetname.lower()) if n is not npc]
+    tc = combo(others, a.template)
+    tc.currentIndexChanged.connect(lambda _: (setattr(a, "template", tc.currentData() or ""), ch(True)))
+    tf.addRow("Шаблон:", tc)
+    itc = QCheckBox("Это шаблон")
+    itc.setToolTip("Основа для других NPC и точек появления")
+    itc.setChecked(a.is_template)
+    itc.toggled.connect(lambda v: (setattr(a, "is_template", bool(v)), ch(True)))
+    tf.addRow("", itc)
+    gl.addLayout(tf)
+
+    def list_edit(title, values, attr, browse=None, placeholder=""):
+        box = QWidget()
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.addWidget(QLabel(title))
+        ed = QLineEdit("; ".join(values))
+        ed.setPlaceholderText(placeholder)
+
+        def apply():
+            vals = [x.strip() for x in ed.text().split(";")]
+            if attr != "weapons":
+                vals = [x for x in vals if x]
+            elif not any(vals):
+                vals = []
+            if vals != getattr(a, attr):
+                setattr(a, attr, vals)
+                ch()
+        ed.editingFinished.connect(apply)
+        row = QHBoxLayout()
+        row.addWidget(ed, 1)
+        if browse:
+            bt = QToolButton(text="+")
+            bt.setToolTip("Добавить модель из игры")
+
+            def add():
+                m = ctx.browse_model("", "models/")
+                if m:
+                    cur = [x.strip() for x in ed.text().split(";") if x.strip()]
+                    cur.append(m)
+                    ed.setText("; ".join(cur))
+                    apply()
+            bt.clicked.connect(add)
+            row.addWidget(bt)
+        bl.addLayout(row)
+        return box
+    inh = a.resolved(p) if a.template else None
+
+    def from_tpl(vals, dflt):
+        return ("из шаблона: " + "; ".join(v or "—" for v in vals)) if inh is not None and vals else dflt
+    gl.addWidget(list_edit("Модели (случайная для каждого):", a.models, "models", browse=True,
+                           placeholder=from_tpl(inh.models if inh else [], "models/humans/group01/male_01.mdl; models/humans/group01/female_02.mdl")))
+    gl.addWidget(list_edit("Оружие (случайное; пусто между ; — без оружия):", a.weapons, "weapons",
+                           placeholder=from_tpl(inh.weapons if inh else [], "weapon_pistol; weapon_smg1; ")))
+    skr = QHBoxLayout()
+    skr.addWidget(QLabel("Скин случайно до:"))
+    sm = QSpinBox()
+    sm.setRange(0, 32)
+    sm.setSpecialValueText("—")
+    sm.setValue(a.skin_max)
+    sm.valueChanged.connect(lambda v: (setattr(a, "skin_max", int(v)), ch()))
+    skr.addWidget(sm)
+    skr.addStretch(1)
+    gl.addLayout(skr)
+    gl.addWidget(hint("Случайные имена — по строке на имя, перевод через « | » (например: Иван | Ivan). "
+                      "Женские берутся для женских моделей (female в имени файла), мужские — для остальных."))
+    langs = p.languages
+
+    def names_edit(title, attr):
+        gl.addWidget(QLabel(title))
+        vals = getattr(a, attr)
+        ed = AutoText("\n".join(" | ".join(n.get(lg, "") for lg in langs).rstrip(" |") for n in vals), 2, 8,
+                      from_tpl([n.get(langs[0], "") for n in getattr(inh, attr)] if inh else [],
+                               "имя на %s | на %s" % tuple((langs + langs)[:2])))
+
+        def set_names(text):
+            out = []
+            for line in text.splitlines():
+                parts = [x.strip() for x in line.split("|")]
+                if not any(parts):
+                    continue
+                out.append({lg: parts[i] for i, lg in enumerate(langs) if i < len(parts) and parts[i]})
+            if out != getattr(a, attr):
+                setattr(a, attr, out)
+                ch()
+        ed.edited.connect(set_names)
+        gl.addWidget(ed)
+    names_edit("Мужские имена (и для любых моделей):", "names")
+    names_edit("Женские имена:", "names_female")
     lay.addWidget(g)
 
     g, gl = _group("Где стоит")
@@ -421,8 +664,8 @@ def routine_tab(insp, npc):
     sel = insp.pkg_sel if 0 <= insp.pkg_sel < len(a.packages) else (0 if a.packages else -1)
     insp.pkg_sel = sel
     tl = Timeline(a, sel, ctx.preview_hour())
-    tl.picked.connect(lambda i: (setattr(insp, "pkg_sel", i), insp.show_target(insp.target)))
-    tl.hourPicked.connect(lambda h: (ctx.set_preview_hour(h), insp.show_target(insp.target)))
+    tl.picked.connect(lambda i: (setattr(insp, "pkg_sel", i), insp.rebuild_soon()))
+    tl.hourPicked.connect(lambda h: (ctx.set_preview_hour(h), insp.rebuild_soon()))
     lay.addWidget(tl)
     cur = a.package_at(ctx.preview_hour())
     if cur:
@@ -441,7 +684,7 @@ def routine_tab(insp, npc):
         lst.addItem(it)
     if sel >= 0:
         lst.setCurrentRow(sel)
-    lst.currentRowChanged.connect(lambda i: (setattr(insp, "pkg_sel", i), insp.show_target(insp.target)) if i != insp.pkg_sel else None)
+    lst.currentRowChanged.connect(lambda i: (setattr(insp, "pkg_sel", i), insp.rebuild_soon()) if i != insp.pkg_sel else None)
     lay.addWidget(lst)
     bl = QHBoxLayout()
     add = QPushButton("+ пакет")
@@ -466,7 +709,7 @@ def routine_tab(insp, npc):
         insp.pkg_sel = len(a.packages) - 1
         insp.changed(True)
         ctx.world_changed("packages")
-        insp.show_target(insp.target)
+        insp.rebuild_soon()
     add.clicked.connect(add_pkg)
     bl.addWidget(add)
     for txt, d in (("▲", -1), ("▼", 1)):
@@ -481,7 +724,7 @@ def routine_tab(insp, npc):
                 insp.pkg_sel = j
                 insp.changed(True)
                 ctx.world_changed("packages")
-                insp.show_target(insp.target)
+                insp.rebuild_soon()
         b.clicked.connect(mv)
         bl.addWidget(b)
     dup = QToolButton(text="⧉")
@@ -496,7 +739,7 @@ def routine_tab(insp, npc):
             a.packages.insert(i + 1, c)
             insp.pkg_sel = i + 1
             insp.changed(True)
-            insp.show_target(insp.target)
+            insp.rebuild_soon()
     dup.clicked.connect(dup_pkg)
     bl.addWidget(dup)
     de = QToolButton(text="✕")
@@ -509,7 +752,7 @@ def routine_tab(insp, npc):
             insp.pkg_sel = min(i, len(a.packages) - 1)
             insp.changed(True)
             ctx.world_changed("packages")
-            insp.show_target(insp.target)
+            insp.rebuild_soon()
     de.clicked.connect(del_pkg)
     bl.addWidget(de)
     bl.addStretch(1)
@@ -532,7 +775,7 @@ def package_editor(insp, npc, pk):
         insp.changed(structural)
         ctx.world_changed("packages")
         if rebuild:
-            insp.show_target(insp.target)
+            insp.rebuild_soon()
     f = _form()
     nm = QLineEdit(pk.name)
     nm.editingFinished.connect(lambda: (setattr(pk, "name", nm.text().strip() or wd.PACKAGE_NAMES.get(pk.type, pk.type)), ch(True, True)))
@@ -605,8 +848,7 @@ def package_editor(insp, npc, pk):
                 v = rc.currentText().strip()
                 pk.ref = "" if v == "—" else v
                 ch()
-            rc.activated.connect(set_ref)
-            rc.lineEdit().editingFinished.connect(set_ref)
+            bind_combo(rc, set_ref)
             f.addRow("Маркер / объект:" if t != "use_marker" else "Маркер (по имени):", rc)
             if t == "use_marker":
                 f.addRow("", hint("Пусто — любой свободный маркер выбранных ниже видов в радиусе."))
@@ -712,8 +954,7 @@ def package_editor(insp, npc, pk):
             v = pc.currentText().strip()
             pk.path = "" if v == "—" else v
             ch()
-        pc.activated.connect(set_path)
-        pc.lineEdit().editingFinished.connect(set_path)
+        bind_combo(pc, set_path)
         prow = QHBoxLayout()
         prow.addWidget(pc, 1)
         nb = QPushButton("Нарисовать…")
@@ -732,8 +973,7 @@ def package_editor(insp, npc, pk):
             v = tc.currentData() if tc.currentIndex() >= 0 and tc.currentText() == tc.itemText(tc.currentIndex()) else tc.currentText().strip()
             pk.target = "" if v in ("!player", "игрок") else v
             ch()
-        tc.activated.connect(set_tg)
-        tc.lineEdit().editingFinished.connect(set_tg)
+        bind_combo(tc, set_tg)
         f.addRow("За кем:", tc)
     if t in ("wait", "travel", "guard", "sleep"):
         anims = [("", "— без анимации —" if t != "sleep" else "— на земле: сидя —")] + [(x, "%s  (%s)" % (n, x)) for x, n, _ in wd.ANIMS]
@@ -743,8 +983,7 @@ def package_editor(insp, npc, pk):
             v = an.currentData() if an.currentIndex() >= 0 and an.currentText() == an.itemText(an.currentIndex()) else an.currentText().strip()
             pk.anim = v or ""
             ch(False, True)
-        an.activated.connect(set_anim)
-        an.lineEdit().editingFinished.connect(set_anim)
+        bind_combo(an, set_anim)
         f.addRow("Анимация:" if t != "sleep" else "Без кровати:", an)
         if pk.anim:
             f.addRow("", anim_check(ctx, npc, pk.anim))
@@ -796,6 +1035,10 @@ def package_editor(insp, npc, pk):
     r2.addWidget(sg)
     cf.addRow("Квест на этапе:", r2)
     cl.addLayout(cf)
+    cl.addWidget(QLabel("Ещё условия (флаги, погода, предметы…):"))
+    pkl = LogicList(ctx, pk.conditions, max_height=100)
+    pkl.changed.connect(lambda: ch())
+    cl.addWidget(pkl)
     gl.addWidget(cg)
     note = AutoText(pk.note, 1, 4, "заметка")
     note.edited.connect(lambda tx: (setattr(pk, "note", tx), insp.changed(False)))
@@ -809,6 +1052,10 @@ def anim_check(ctx, npc, anim):
     if names is None:
         return hint("")
     ok = anim.lower() in names
+    if not ok and hasattr(ctx, "marker_sequence"):
+        # an actbusy entry (the library's rpm_sit_chair, rpm_lie_bed...): its busy sequence
+        seq = ctx.marker_sequence(anim)
+        ok = bool(seq) and seq.lower() in names
     short = model.rsplit("/", 1)[-1]
     lbl = QLabel(("✓ у модели %s есть эта анимация" % short) if ok else ("⚠ у модели %s нет «%s» — NPC будет просто стоять" % (short, anim)))
     lbl.setStyleSheet("color:%s" % ("#79c27f" if ok else "#e0a040"))
@@ -827,9 +1074,9 @@ def ref_page(insp, layer, ref):
         insp.changed(structural)
         ctx.world_changed("ref")
         if rebuild:
-            insp.show_target(insp.target)
+            insp.rebuild_soon()
     f = _form()
-    if ref.type in ("marker", "path", "item", "container", "prop", "entity"):
+    if ref.type in ("marker", "path", "item", "container", "prop", "entity", "spawner", "transition", "zone", "sound", "terminal"):
         nm = QLineEdit(ref.name)
         nm.setPlaceholderText({"marker": "имя (на него ссылаются пакеты)", "path": "имя маршрута"}.get(ref.type, "targetname (необязательно)"))
 
@@ -914,15 +1161,88 @@ def ref_page(insp, layer, ref):
             v = an.currentData() if an.currentIndex() >= 0 and an.currentText() == an.itemText(an.currentIndex()) else an.currentText().strip()
             ref.anim = v or ""
             ch(False, True)
-        an.activated.connect(set_anim)
-        an.lineEdit().editingFinished.connect(set_anim)
+        bind_combo(an, set_anim)
         f.addRow("Анимация:", an)
         own = combo([("", "— любой NPC —")] + [(n.targetname, n.targetname) for n in sorted(p.npcs, key=lambda x: x.targetname)], ref.owner)
         own.currentIndexChanged.connect(lambda _: (setattr(ref, "owner", own.currentData()), ch(True)))
         f.addRow("Владелец:", own)
+        # sitting animations of the library: the seat height and the fit to the furniture
+        sp = ctx.seat_params().get((ref.anim or "").lower()) or {}
+        if sp.get("wall"):
+            wall = QPushButton("Прислонить к стене")
+            wall.setToolTip("Найти ближайшую стену, поставить маркер в %.0f ед. перед ней спиной к ней и опустить на пол"
+                            % sp.get("wall_dist", 14))
+
+            def do_wall():
+                ok, msg = ctx.fit_marker_to_wall(ref)
+                wall.setToolTip(msg)
+                if ok:
+                    ch(True, True)
+                else:
+                    from PySide6.QtWidgets import QMessageBox
+                    QMessageBox.information(wall, "Прислонить к стене", msg)
+            wall.clicked.connect(do_wall)
+            f.addRow("Стена:", wall)
+        elif sp.get("bed"):
+            brow = QHBoxLayout()
+            bh = QDoubleSpinBox()
+            bh.setRange(-1.0, 40.0)
+            bh.setDecimals(1)
+            bh.setSpecialValueText("не задана (17)")
+            bh.setValue(ref.seat_h)
+            bh.setToolTip("Высота верха матраса над полом: анимация сама подстраивается (параметр позы rpm_seat_h)")
+            bh.valueChanged.connect(lambda v: (setattr(ref, "seat_h", float(v)), ch(False, True)))
+            brow.addWidget(bh, 1)
+            bfit = QPushButton("Подогнать к кровати")
+            bfit.setToolTip("Найти кровать (и матрас на ней), поставить маркер у длинной стороны: NPC сядет на край "
+                            "и ляжет головой к изголовью; записать высоту матраса")
+
+            def do_bed():
+                ok, msg = ctx.fit_marker_to_bed(ref)
+                bfit.setToolTip(msg)
+                if ok:
+                    ch(True, True)
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.information(bfit, "Подогнать к кровати", msg)
+            bfit.clicked.connect(do_bed)
+            brow.addWidget(bfit)
+            f.addRow("Высота матраса:", brow)
+        elif sp.get("ground"):
+            gr = QPushButton("Поставить на пол")
+            gr.setToolTip("Маркер — где NPC стоит перед тем, как сесть; таз окажется в %.0f ед. позади, ноги — до 30 ед. "
+                          "впереди: место должно быть свободно" % sp.get("pelvis_back", 9))
+            gr.clicked.connect(lambda: (setattr(ref, "pos", ctx.scene.drop_to_floor(ref.pos)) if ctx.scene is not None else None,
+                                        ch(True, True)))
+            f.addRow("Пол:", gr)
+        elif "over_seat" in sp:
+            srow = QHBoxLayout()
+            sh = QDoubleSpinBox()
+            sh.setRange(-1.0, 40.0)
+            sh.setDecimals(1)
+            sh.setSpecialValueText("не задана (17)")
+            sh.setValue(ref.seat_h)
+            sh.setToolTip("Высота сиденья над полом: анимация сама подстраивается под неё (параметр позы rpm_seat_h)")
+            sh.valueChanged.connect(lambda v: (setattr(ref, "seat_h", float(v)), ch(False, True)))
+            srow.addWidget(sh, 1)
+            fit = QPushButton("Подогнать к мебели")
+            fit.setToolTip("Найти ближайший стул / диван / скамью, поставить маркер так, чтобы NPC сел ровно на сиденье, "
+                           "и записать высоту сиденья")
+
+            def do_fit():
+                ok, msg = ctx.fit_marker_to_furniture(ref)
+                fit.setToolTip(msg)
+                if ok:
+                    ch(True, True)
+                else:
+                    from PySide6.QtWidgets import QMessageBox
+                    QMessageBox.information(fit, "Подогнать к мебели", msg)
+            fit.clicked.connect(do_fit)
+            srow.addWidget(fit)
+            f.addRow("Высота сиденья:", srow)
         lay.addLayout(f)
-        lay.addWidget(hint("NPC встаёт в точку маркера лицом по стрелке и играет анимацию. Для кровати и стула ставьте маркер "
-                           "туда, где должен оказаться NPC, — точное место подбирается в игре (F8 — обновить)."))
+        lay.addWidget(hint("NPC встаёт в точку маркера лицом по стрелке и играет анимацию. У анимаций библиотеки (rpm_…) кнопка "
+                           "выше ставит маркер сама: к стулу и дивану, к кровати (головой к изголовью), к стене. Проверить в игре — "
+                           "F8 и rpm_marker_use <NPC> <маркер>."))
         if ref.anim and ref.owner and p.npc(ref.owner):
             lay.addWidget(anim_check(ctx, p.npc(ref.owner), ref.anim))
         users = [n.targetname for n in p.npcs for pk in n.actor.packages if pk.ref == ref.name and ref.name]
@@ -930,13 +1250,12 @@ def ref_page(insp, layer, ref):
             lay.addWidget(hint("Используют пакеты: " + ", ".join(sorted(set(users)))))
     elif ref.type == "item":
         f = _form()
-        ic = combo([(x, x) for x in ctx.item_names()], ref.classname, editable=True)
+        ic = combo([(x, x) for x in ctx.all_item_ids()], ref.classname, editable=True)
 
         def set_cls(*_):
             ref.classname = ic.currentText().strip()
             ch(True)
-        ic.activated.connect(set_cls)
-        ic.lineEdit().editingFinished.connect(set_cls)
+        bind_combo(ic, set_cls)
         f.addRow("Предмет:", ic)
         lay.addLayout(f)
     elif ref.type in ("container", "prop"):
@@ -948,8 +1267,7 @@ def ref_page(insp, layer, ref):
             v = mc.currentData() if mc.currentIndex() >= 0 and mc.currentText() == mc.itemText(mc.currentIndex()) else mc.currentText().strip()
             ref.model = v
             ch(True)
-        mc.activated.connect(set_model)
-        mc.lineEdit().editingFinished.connect(set_model)
+        bind_combo(mc, set_model)
         mrow = QHBoxLayout()
         mrow.addWidget(mc, 1)
         br = QToolButton(text="…")
@@ -980,10 +1298,317 @@ def ref_page(insp, layer, ref):
             gl.addWidget(lt)
             lay.addWidget(g)
             g, gl = _group("Содержимое")
-            it = ItemsTable(ref.loot_items, ctx.item_names())
+            names = ctx.all_item_ids() + ["list:" + x.id for x in p.lootlists]
+            it = ItemsTable(ref.loot_items, names, title="Предмет или list:<список лута>")
             it.changed.connect(ch)
             gl.addWidget(it)
+            gl.addWidget(hint("list:<id> — список лута (вкладка «Предметы»): разыгрывается, когда игрок впервые откроет контейнер."))
             lay.addWidget(g)
+            # lock and restock (prop_loot_container keys)
+            g, gl = _group("Замок и пополнение")
+            lf = _form()
+            keys = [("", "— без ключа —")] + [(x.id, "%s  (%s)" % (x.label(ctx.display_lang, p.base_language), x.id))
+                                              for x in p.items if x.category == "key" or x.base == "key"]
+            kc = combo(keys, ref.keyvalues.get("lock_key", ""), editable=True)
+
+            def set_key():
+                v = kc.currentData() if kc.currentIndex() >= 0 and kc.currentText() == kc.itemText(kc.currentIndex()) else kc.currentText().strip()
+                if v:
+                    ref.keyvalues["lock_key"] = v
+                else:
+                    ref.keyvalues.pop("lock_key", None)
+                ch()
+            bind_combo(kc, set_key)
+            lf.addRow("Ключ:", kc)
+            lv = QSpinBox()
+            lv.setRange(0, 100)
+            lv.setSpecialValueText("не взломать")
+            lv.setValue(int(ref.keyvalues.get("lock_level", 0) or 0))
+            lv.valueChanged.connect(lambda v: (ref.keyvalues.__setitem__("lock_level", str(v)) if v else ref.keyvalues.pop("lock_level", None), ch()))
+            lf.addRow("Взлом (навык):", lv)
+            rs = QSpinBox()
+            rs.setRange(0, 24 * 60)
+            rs.setSpecialValueText("не пополняется")
+            rs.setSuffix(" ч")
+            rs.setValue(int(float(ref.keyvalues.get("restock_hours", 0) or 0)))
+            rs.valueChanged.connect(lambda v: (ref.keyvalues.__setitem__("restock_hours", str(v)) if v else ref.keyvalues.pop("restock_hours", None), ch()))
+            lf.addRow("Пополнение через:", rs)
+            owners = [("", "— ничьё —")] + [(n.targetname, "NPC: %s" % n.targetname) for n in sorted(p.npcs, key=lambda x: x.targetname.lower())
+                                            if not n.actor.is_template] + [(f.id, "Фракция: %s" % f.id) for f in p.factions]
+            oc = combo(owners, ref.keyvalues.get("owner", ""), editable=True)
+            oc.setToolTip("Чужое: под прицелом — красное «Украсть»; если взятие видит владелец или член его фракции, "
+                          "он говорит фразу «кража» и нападает, а репутация у фракции падает (правило rep_theft)")
+
+            def set_owner():
+                v = oc.currentData() if oc.currentIndex() >= 0 and oc.currentText() == oc.itemText(oc.currentIndex()) else oc.currentText().strip()
+                if v:
+                    ref.keyvalues["owner"] = v
+                else:
+                    ref.keyvalues.pop("owner", None)
+                ch()
+            bind_combo(oc, set_owner)
+            lf.addRow("Владелец:", oc)
+            gl.addLayout(lf)
+            gl.addWidget(hint("Заперт, если задан ключ или уровень взлома. Игрок с ключом в инвентаре открывает его, без ключа — "
+                              "только навыком «Взлом» не ниже уровня. Пополнение: через столько игровых часов содержимое "
+                              "возвращается к исходному (списки разыгрываются снова)."))
+            lay.addWidget(g)
+    elif ref.type == "terminal":
+        from .. import termdata as td
+        f = _form()
+        lang = ctx.display_lang
+        terms = [("", "— не выбран —")] + [(t.id, "%s — %s" % (t.id, t.label(lang, p.base_language))) for t in p.terminals]
+        tc = combo(terms, ref.terminal, editable=False)
+
+        def set_term(*_):
+            ref.terminal = tc.currentData() or ""
+            ch(True)
+        bind_combo(tc, set_term)
+        trow = QHBoxLayout()
+        trow.addWidget(tc, 1)
+        bn = QToolButton(text="+")
+        bn.setToolTip("Новый терминал для этого объекта")
+
+        def new_t():
+            from .term_pages import new_terminal
+            style = next((s for m, s, _n in td.MODELS if m == ref.model), "pc")
+            t = new_terminal(ctx, style)
+            if t:
+                ref.terminal = t.id
+                ch(True)
+        bn.clicked.connect(new_t)
+        trow.addWidget(bn)
+        bo = QToolButton(text="Открыть")
+        bo.setToolTip("Записи, взлом, команды этого терминала (вкладка «Логика»)")
+
+        def open_t():
+            if ref.terminal and p.terminal(ref.terminal):
+                ctx.left_tabs.setCurrentWidget(ctx.logic_tab)
+                ctx.inspector.show_target(("terminal", ref.terminal))
+        bo.clicked.connect(open_t)
+        trow.addWidget(bo)
+        f.addRow("Терминал:", trow)
+        mc = combo([(m, "%s  (%s)" % (n, m.rsplit("/", 1)[-1])) for m, s, n in td.MODELS], ref.model, editable=True, min_len=16)
+
+        def set_model(*_):
+            v = mc.currentData() if mc.currentIndex() >= 0 and mc.currentText() == mc.itemText(mc.currentIndex()) else mc.currentText().strip()
+            ref.model = v
+            ch(True)
+        bind_combo(mc, set_model)
+        mrow = QHBoxLayout()
+        mrow.addWidget(mc, 1)
+        br = QToolButton(text="…")
+
+        def browse():
+            m = ctx.browse_model(ref.model, "models/")
+            if m:
+                ref.model = m
+                ch(True, True)
+        br.clicked.connect(browse)
+        mrow.addWidget(br)
+        f.addRow("Модель:", mrow)
+        lay.addLayout(f)
+        lay.addWidget(hint("Экраны стандартных моделей игра знает сама. Для своей модели задайте экран в «Дополнительных ключах»: "
+                           "screen_pos «x y z» (центр экрана в координатах модели), screen_ang «pitch yaw 0» (куда смотрит экран), "
+                           "screen_size «ширина высота». Без них экран — передняя грань модели (+X). Вид (компьютер / Альянс) "
+                           "берётся из терминала; ключ style переопределяет."))
+    elif ref.type == "transition":
+        g, gl = _group("Куда ведёт")
+        gl.addWidget(hint("Игрок входит в коробку — загружается другая карта, и он появляется перед парным переходом там "
+                          "(по стрелке, лицом по ней). Поверните переход, чтобы задать, куда смотрит пришедший сюда. "
+                          "Инвентарь, квесты, время и погода переносятся. Пересобирать карты не нужно."))
+        tf = _form()
+        maps = sorted(n for n in ctx.map_files() if n != layer.name)
+        mc = combo([("", "— карта —")] + [(n, n) for n in maps], ref.target_map, editable=False)
+        tf.addRow("Карта:", mc)
+
+        def pairs_of(mapname):
+            tl = p.layer(mapname) if mapname else None
+            return [r for r in (tl.refs if tl else []) if r.type == "transition"]
+        pc = combo([("", "— нет —")] + [(r.name, "%s  (→ %s)" % (r.name, r.target_map or "?")) for r in pairs_of(ref.target_map)],
+                   ref.target)
+        tf.addRow("Парный переход:", pc)
+
+        def set_map(_):
+            v = mc.currentData() or ""
+            if v != ref.target_map:
+                ref.target_map = v
+                ref.target = ""
+                ch(rebuild=True)
+        mc.currentIndexChanged.connect(set_map)
+
+        def set_pair(_):
+            v = pc.currentData() or ""
+            if v != ref.target:
+                ref.target = v
+                pr = p.layer(ref.target_map).ref_by_name(v) if v and p.layer(ref.target_map) else None
+                if pr is not None and not pr.target:
+                    pr.target_map, pr.target = layer.name, ref.name
+                ch()
+        pc.currentIndexChanged.connect(set_pair)
+        gl.addLayout(tf)
+        brow = QHBoxLayout()
+        mk = QPushButton("Создать парный там")
+        mk.setToolTip("Новый переход на выбранной карте, ведущий обратно сюда; потом передвиньте его на той карте")
+        mk.setEnabled(bool(ref.target_map) and not ref.target)
+
+        def make_pair():
+            tl = p.layer(ref.target_map, create=True)
+            others = [r for r in tl.refs if r.type != "transition"]
+            pos = list(others[0].pos) if others else [0.0, 0.0, 0.0]
+            nr = wd.Ref(tl.new_id(), "transition", pos)
+            nr.name = ctx._unique_name("tr_%s_%d" % (ref.target_map, nr.id))
+            nr.target_map, nr.target = layer.name, ref.name
+            nr.keyvalues["_unplaced"] = "1"
+            tl.refs.append(nr)
+            ref.target = nr.name
+            ch(True, rebuild=True)
+        mk.clicked.connect(make_pair)
+        brow.addWidget(mk)
+        go = QPushButton("Открыть ту карту")
+        go.setEnabled(bool(ref.target_map and ref.target))
+
+        def goto_pair():
+            tl = p.layer(ref.target_map)
+            pr = tl.ref_by_name(ref.target) if tl else None
+            if pr is None:
+                return
+            ctx.open_map(ref.target_map)
+            if ctx.cur_map == ref.target_map and pr.keyvalues.pop("_unplaced", None) and ctx.scene is not None:
+                o, _a = ctx.scene.player_start()
+                pr.pos = [float(o[0]) + 96.0, float(o[1]), float(o[2])]
+                ctx.model_changed(False, moved=True)
+            ctx.focus_ref(ref.target_map, pr.id)
+        go.clicked.connect(goto_pair)
+        brow.addWidget(go)
+        brow.addStretch(1)
+        gl.addLayout(brow)
+        lay.addWidget(g)
+        g, gl = _group("Размер и прибытие")
+        sf = _form()
+        srow = QHBoxLayout()
+        for i, tip in enumerate(("ширина (X)", "глубина (Y)", "высота")):
+            sp = QSpinBox()
+            sp.setRange(16, 2048)
+            sp.setSingleStep(8)
+            sp.setToolTip(tip)
+            sp.setValue(int(ref.size[i]))
+            sp.valueChanged.connect(lambda v, i=i: (ref.size.__setitem__(i, float(v)), ch(), ctx.worldview.invalidate_overlay()))
+            srow.addWidget(sp)
+        sf.addRow("Коробка, ед.:", srow)
+        ad = QSpinBox()
+        ad.setRange(0, 1024)
+        ad.setSingleStep(8)
+        ad.setSuffix(" ед. перед ним")
+        ad.setValue(int(ref.arrive_dist))
+        ad.valueChanged.connect(lambda v: (setattr(ref, "arrive_dist", float(v)), ch(), ctx.worldview.invalidate_overlay()))
+        sf.addRow("Пришедший появляется:", ad)
+        gl.addLayout(sf)
+        gl.addWidget(hint("Точка прибытия должна быть свободной (не в стене и не внутри коробки этого перехода)."))
+        lay.addWidget(g)
+    elif ref.type == "spawner":
+        kvs = ref.keyvalues
+        g, gl = _group("Кого создаёт")
+        gl.addWidget(hint("NPC проекта (лучше шаблоны с вариациями) или классы игры. Вес — как часто выбирается."))
+        entries = []
+        for part in [x for x in kvs.get("npcs", "").split(";") if x.strip()]:
+            nm_, _, wt = part.partition(":")
+            entries.append([nm_.strip(), int(wt) if wt.strip().isdigit() else 1])
+        npc_names = [n.targetname for n in sorted(p.npcs, key=lambda x: (not x.actor.is_template, x.targetname.lower()))]
+        npc_names += ["npc_zombie", "npc_fastzombie", "npc_poisonzombie", "npc_zombine", "npc_headcrab", "npc_headcrab_fast",
+                      "npc_antlion", "npc_metropolice", "npc_combine_s", "npc_citizen", "npc_manhack", "npc_cscanner"]
+        tbl = QTableWidget(len(entries), 2)
+        tbl.setHorizontalHeaderLabels(["NPC / класс", "Вес"])
+        tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        tbl.verticalHeader().setVisible(False)
+
+        def sync_npcs(*_):
+            out = []
+            for rr in range(tbl.rowCount()):
+                n_ = tbl.cellWidget(rr, 0).currentText().strip()
+                w_ = tbl.cellWidget(rr, 1).value()
+                if n_:
+                    out.append("%s:%d" % (n_, w_) if w_ != 1 else n_)
+            kvs["npcs"] = ";".join(out)
+            ch()
+        for rr, (n_, w_) in enumerate(entries):
+            cb = QComboBox()
+            cb.setEditable(True)
+            cb.addItems(npc_names)
+            cb.setCurrentText(n_)
+            cb.currentTextChanged.connect(sync_npcs)
+            tbl.setCellWidget(rr, 0, cb)
+            sp = QSpinBox()
+            sp.setRange(1, 100)
+            sp.setValue(w_)
+            sp.valueChanged.connect(sync_npcs)
+            tbl.setCellWidget(rr, 1, sp)
+        tbl.setMaximumHeight(40 + 30 * max(2, len(entries)))
+        gl.addWidget(tbl)
+        brow = QHBoxLayout()
+        ab = QPushButton("+ NPC")
+
+        def add_npc():
+            cur = [x for x in kvs.get("npcs", "").split(";") if x.strip()]
+            cur.append(npc_names[0] if npc_names else "npc_zombie")
+            kvs["npcs"] = ";".join(cur)
+            ch()
+            insp.rebuild_soon()
+        ab.clicked.connect(add_npc)
+        brow.addWidget(ab)
+        db = QPushButton("− выбранный")
+
+        def del_npc():
+            r_ = tbl.currentRow()
+            cur = [x for x in kvs.get("npcs", "").split(";") if x.strip()]
+            if 0 <= r_ < len(cur):
+                del cur[r_]
+                kvs["npcs"] = ";".join(cur)
+                ch()
+                insp.rebuild_soon()
+        db.clicked.connect(del_npc)
+        brow.addWidget(db)
+        brow.addStretch(1)
+        gl.addLayout(brow)
+        lay.addWidget(g)
+        g, gl = _group("Когда и сколько")
+        sf = _form()
+
+        def ispin(key, lo, hi, dflt, special=None, suffix=""):
+            sp = QSpinBox()
+            sp.setRange(lo, hi)
+            if special:
+                sp.setSpecialValueText(special)
+            sp.setSuffix(suffix)
+            try:
+                sp.setValue(int(float(kvs.get(key, dflt))))
+            except ValueError:
+                sp.setValue(dflt)
+            sp.valueChanged.connect(lambda v: (kvs.__setitem__(key, str(v)), ch(), ctx.worldview.invalidate_overlay()))
+            return sp
+        crow = QHBoxLayout()
+        crow.addWidget(ispin("count_min", 0, 64, 1))
+        crow.addWidget(QLabel("–"))
+        crow.addWidget(ispin("count_max", 1, 64, 3))
+        crow.addStretch(1)
+        sf.addRow("Сколько живых:", crow)
+        sf.addRow("Радиус:", ispin("radius", 32, 8192, 384, suffix=" ед."))
+        sf.addRow("Включается с расстояния:", ispin("activate_dist", 256, 16384, 2500, suffix=" ед."))
+        hrow = QHBoxLayout()
+        hrow.addWidget(ispin("from_hour", -1, 23, -1, "всегда"))
+        hrow.addWidget(QLabel("–"))
+        hrow.addWidget(ispin("to_hour", -1, 24, -1, "всегда"))
+        hrow.addStretch(1)
+        sf.addRow("Часы (с–до):", hrow)
+        sf.addRow("Пополнение через:", ispin("respawn_hours", 0, 24 * 30, 24, "никогда", " ч"))
+        fl = QLineEdit(kvs.get("require_flag", ""))
+        fl.setPlaceholderText("флаг мира (пусто — всегда)")
+        fl.editingFinished.connect(lambda: (kvs.__setitem__("require_flag", fl.text().strip()) if fl.text().strip() else kvs.pop("require_flag", None), ch()))
+        sf.addRow("Только при флаге:", fl)
+        gl.addLayout(sf)
+        gl.addWidget(hint("NPC появляются вне поля зрения игрока и не ближе 400 ед. от него. Когда все убиты — новые "
+                          "появятся через «пополнение» игровых часов."))
+        lay.addWidget(g)
     elif ref.type == "path":
         g, gl = _group("Точки (%d)" % len(ref.points))
         tbl = QTableWidget(len(ref.points), 4)
@@ -1034,6 +1659,52 @@ def ref_page(insp, layer, ref):
         lay.addWidget(g)
         users = [n.targetname for n in p.npcs for pk in n.actor.packages if pk.type == "patrol" and pk.path == ref.name and ref.name]
         lay.addWidget(hint(("Патрулируют: " + ", ".join(sorted(set(users)))) if users else "Пока никто не патрулирует. Пакет «Патруль» в распорядке NPC → выберите этот маршрут."))
+    elif ref.type == "zone":
+        g, gl = _group("Зона")
+        gl.addWidget(hint("Коробка с именем: события «вошёл / вышел из зоны», цели заданий «дойти до», условие «игрок в зоне». "
+                          "В игре невидима. Поворачивается вместе с объектом (Alt+тащить)."))
+        zf = _form()
+        zrow = QHBoxLayout()
+        for i, tip in enumerate(("ширина (X)", "глубина (Y)", "высота")):
+            sp = QSpinBox()
+            sp.setRange(16, 16384)
+            sp.setSingleStep(32)
+            sp.setToolTip(tip)
+            sp.setValue(int(ref.size[i]))
+            sp.valueChanged.connect(lambda v, i=i: (ref.size.__setitem__(i, float(v)), ch(), ctx.worldview.invalidate_overlay()))
+            zrow.addWidget(sp)
+        zf.addRow("Размер, ед.:", zrow)
+        gl.addLayout(zf)
+        users = []
+        for e in p.events:
+            if e.on in ("zone_enter", "zone_leave") and ref.name and e.target == ref.name:
+                users.append("событие " + e.id)
+        for q in p.quests:
+            for o in q.all_objectives():
+                if o.type == "go" and ref.name and o.target == ref.name:
+                    users.append("задание %s, цель %s" % (q.id, o.id))
+        gl.addWidget(hint(("Используют: " + ", ".join(users)) if users else
+                          "Пока не используется. «Логика» → событие «Игрок вошёл в зону», или цель задания «Дойти до»."))
+        bz = QPushButton("+ событие «вошёл в зону»")
+
+        def new_zone_event():
+            if not ref.name:
+                QMessageBox.information(w, "Зона", "Сначала дайте зоне имя.")
+                return
+            ctx.new_event("zone_enter")
+            e = p.events[-1] if p.events else None
+            if e is not None and e.on == "zone_enter":
+                e.target = ref.name
+                insp.changed(True)
+                insp.show_target(("event", e.id))
+        bz.clicked.connect(new_zone_event)
+        gl.addWidget(bz)
+        lay.addWidget(g)
+        from .sound_pages import zone_location_group
+        lay.addWidget(zone_location_group(insp, ref, ch))
+    elif ref.type == "sound":
+        from .sound_pages import sound_ref_group
+        lay.addWidget(sound_ref_group(insp, ref, ch))
     elif ref.type == "entity":
         f = _form()
         cl = QLineEdit(ref.classname)
@@ -1046,11 +1717,21 @@ def ref_page(insp, layer, ref):
         kvt.changed.connect(ch)
         gl.addWidget(kvt)
         lay.addWidget(g)
-    if ref.type in ("item", "container", "prop", "npc", "marker"):
+    if ref.type in ("item", "container", "prop", "npc", "marker", "terminal"):
         g, gl = _group("Дополнительные ключи")
         kvt = KVTable(ref.keyvalues)
         kvt.changed.connect(ch)
         gl.addWidget(kvt)
+        lay.addWidget(g)
+    if ref.type not in ("path", "transition", "zone"):
+        g, gl = _group("Условие присутствия")
+        gl.addWidget(hint("Объект есть в игре, только пока условия верны: появляется и исчезает сам (баррикада после задания, "
+                          "NPC переехал, торговец ночью дома). NPC не исчезает на глазах у игрока. Убитый NPC или взятый "
+                          "предмет не возвращаются."))
+        pl = LogicList(ctx, ref.conditions, self_label="этот объект",
+                       empty_text="Нет условий — объект есть всегда.")
+        pl.changed.connect(lambda: (ch(), ctx.worldview.invalidate_overlay()))
+        gl.addWidget(pl)
         lay.addWidget(g)
     bl = QHBoxLayout()
     fb = QPushButton("Показать")
@@ -1069,38 +1750,325 @@ def ref_page(insp, layer, ref):
     return w, lay
 
 
-def hammer_page(insp, scene, idx):
+PROP_CLASSES = ["prop_static", "prop_dynamic", "prop_dynamic_override", "prop_physics", "prop_physics_override",
+                "prop_physics_multiplayer", "prop_ragdoll", "prop_door_rotating"]
+SOLIDS = [("6", "по модели (VPhysics)"), ("2", "ограничивающий бокс"), ("0", "без столкновений")]
+# keys shown with their own fields (the table lists the rest)
+_OWN_KEYS = {"id", "classname", "origin", "angles", "targetname", "model", "skin", "solid", "diffuse", "radius", "power",
+             "spot_cone_inner", "spot_cone_outer", "autoshadow", "enable_from_hour", "enable_to_hour", "light_type",
+             "rpm_key", "rpm_lock_level"}
+
+
+def mapobj_page(insp, scene, key):
+    """An object placed in Hammer (from the map's VMF): position, model, keys; lights get
+    their own fields. Without a VMF - what the BSP says, read only."""
     ctx = insp.ctx
-    ent = None
-    for (i, cls, o, a, e) in scene.entities:
-        if i == idx:
-            ent = (cls, o, a, e)
-    if ent is None:
-        return insp._page("Сущность не найдена")
-    cls, o, a, e = ent
-    tn = e.get("targetname", "")
-    w, lay = insp._page("Hammer: %s" % cls, "Стоит в карте (из Hammer) — двигать её можно только в Hammer. "
-                                            "Распорядок, фракцию и диалог она получает из NPC проекта с тем же targetname.")
-    rows = ["targetname: %s" % (tn or "— нет —"), "позиция: %.0f %.0f %.0f" % tuple(o)]
-    for k in ("model", "loot_displayname", "loot_items", "ftag", "squadname", "additionalequipment"):
-        if e.get(k):
-            rows.append("%s: %s" % (k, e[k]))
-    l = QLabel("\n".join(rows))
-    l.setTextInteractionFlags(Qt.TextSelectableByMouse)
-    l.setWordWrap(True)
-    lay.addWidget(l)
-    if tn:
-        npc = ctx.project.npc(tn)
-        if npc is not None:
+    ob = scene.find(key)
+    if ob is None:
+        return insp._page("Объект не найден")
+    cls = ob.classname
+    tn = ob.get("targetname")
+    title = "Hammer: %s%s" % (cls, ("  #%d" % key[1]) if key[0] == "v" else "")
+    if ob.editable:
+        sub = ("Стоит в самой карте (VMF). Правки записываются в VMF при сохранении (Ctrl+S); в игре они появятся после "
+               "сборки карты — «⚙ Собрать карту» (F9). Гизмо: стрелки, ПКМ — кольца поворота, End — приземлить.")
+    else:
+        sub = ("VMF этой карты не найден (папки исходников карт — Проект → Настройки), поэтому объект только для просмотра. "
+               "Двигать его можно в Hammer.")
+    w, lay = insp._page(title, sub)
+
+    def changed(regroup=False):
+        if regroup:
+            ctx.worldview.refresh_objects()
+        else:
+            ctx.worldview.object_moved(ob)
+            ctx.worldview.invalidate_overlay()
+        insp.changed(False)
+        ctx.world_changed("obj")
+
+    f = _form()
+    if ob.editable:
+        known = PROP_CLASSES if cls.startswith("prop_") else (["light_deferred", "light_deferred_spot"] if cls.startswith("light_deferred") else [cls])
+        cc = combo([(c, c) for c in known], cls, editable=True)
+
+        def set_cls():
+            v = cc.currentText().strip()
+            if v and v != ob.classname:
+                ob.set_key("classname", v)
+                changed(True)
+                insp.rebuild_soon()
+        bind_combo(cc, set_cls)
+        f.addRow("Класс:", cc)
+        tl = QLineEdit(tn)
+        tl.setPlaceholderText("targetname (необязательно)")
+        tl.editingFinished.connect(lambda: (ob.set_key("targetname", tl.text().strip()), changed()) if tl.text().strip() != ob.get("targetname") else None)
+        f.addRow("Имя:", tl)
+        if cls.startswith("prop_") or ob.model:
+            mrow = QHBoxLayout()
+            ml = QLineEdit(ob.model)
+            ml.editingFinished.connect(lambda: (ob.set_key("model", ml.text().strip().replace("\\", "/")), scene.model(ob.model), changed(True))
+                                       if ml.text().strip() != ob.model else None)
+            mrow.addWidget(ml, 1)
+            br = QToolButton(text="…")
+            br.setToolTip("Выбрать модель из игры")
+
+            def browse():
+                m = ctx.browse_model(ob.model, "models/")
+                if m:
+                    ob.set_key("model", m)
+                    scene.model(m)
+                    changed(True)
+                    insp.rebuild_soon()
+            br.clicked.connect(browse)
+            mrow.addWidget(br)
+            f.addRow("Модель:", mrow)
+            sk = QSpinBox()
+            sk.setRange(0, 64)
+            sk.setValue(ob.skin)
+            sk.valueChanged.connect(lambda v: (ob.set_key("skin", str(v)), changed(True)))
+            f.addRow("Скин:", sk)
+            so = combo(SOLIDS, ob.get("solid", "6"))
+            so.currentIndexChanged.connect(lambda _: (ob.set_key("solid", so.currentData()), changed()))
+            f.addRow("Столкновения:", so)
+    else:
+        f.addRow("Имя:", QLabel(tn or "— нет —"))
+        if ob.model:
+            f.addRow("Модель:", QLabel(ob.model))
+    # position / angles
+    prow = QHBoxLayout()
+    spins = []
+    for i in range(3):
+        sp = QDoubleSpinBox()
+        sp.setRange(-65536, 65536)
+        sp.setDecimals(1)
+        sp.setValue(ob.origin[i])
+        sp.setEnabled(ob.editable)
+        spins.append(sp)
+        prow.addWidget(sp)
+
+    def set_pos():
+        v = [s.value() for s in spins]
+        if v != ob.origin:
+            ob.set_transform(v, None)
+            changed()
+    for sp in spins:
+        sp.editingFinished.connect(set_pos)
+    if ob.editable:
+        lb = QToolButton(text="⤓")
+        lb.setToolTip("Приземлить (End)")
+        lb.clicked.connect(lambda: (ctx.worldview.select(("obj", key), emit=False), ctx.worldview.land_selected()))
+        prow.addWidget(lb)
+    f.addRow("Позиция:", prow)
+    arow = QHBoxLayout()
+    aspins = []
+    for i, name in enumerate(("тангаж", "рыскание", "крен")):
+        sp = QDoubleSpinBox()
+        sp.setRange(-360, 360)
+        sp.setDecimals(1)
+        sp.setSuffix("°")
+        sp.setToolTip(name)
+        sp.setValue(ob.angles[i])
+        sp.setEnabled(ob.editable)
+        aspins.append(sp)
+        arow.addWidget(sp)
+
+    def set_ang():
+        v = [s.value() for s in aspins]
+        if v != ob.angles:
+            ob.set_transform(None, v)
+            changed()
+    for sp in aspins:
+        sp.editingFinished.connect(set_ang)
+    f.addRow("Поворот:", arow)
+    lay.addLayout(f)
+
+    # lights
+    if ob.editable and cls in ("light_deferred", "light_deferred_spot"):
+        g, gl = _group("Свет")
+        lf = _form()
+        col = [int(float(x)) for x in (ob.get("diffuse", "255 255 255 255").split() + ["255"] * 4)[:4]]
+        cb = QPushButton("  ")
+        cb.setStyleSheet("background: rgb(%d,%d,%d); min-width: 60px;" % tuple(col[:3]))
+
+        def pick_color():
+            from PySide6.QtWidgets import QColorDialog
+            c = QColorDialog.getColor(QColor(*col[:3]), w, "Цвет света")
+            if c.isValid():
+                ob.set_key("diffuse", "%d %d %d %d" % (c.red(), c.green(), c.blue(), col[3]))
+                changed()
+                insp.rebuild_soon()
+        cb.clicked.connect(pick_color)
+        crow = QHBoxLayout()
+        crow.addWidget(cb)
+        br = QSpinBox()
+        br.setRange(0, 4000)
+        br.setValue(col[3])
+        br.setToolTip("Яркость (четвёртое число цвета; 255 — обычная)")
+        br.valueChanged.connect(lambda v: (ob.set_key("diffuse", "%d %d %d %d" % (col[0], col[1], col[2], v)), changed()))
+        crow.addWidget(QLabel("яркость"))
+        crow.addWidget(br)
+        crow.addStretch(1)
+        lf.addRow("Цвет:", crow)
+
+        def fspin(key, lo, hi, dflt, step=1.0, dec=0, suffix=""):
+            sp = QDoubleSpinBox()
+            sp.setRange(lo, hi)
+            sp.setDecimals(dec)
+            sp.setSingleStep(step)
+            sp.setSuffix(suffix)
+            try:
+                sp.setValue(float(ob.get(key, dflt) or dflt))
+            except ValueError:
+                sp.setValue(float(dflt))
+            sp.valueChanged.connect(lambda v: (ob.set_key(key, ("%d" % v) if dec == 0 else ("%g" % v)), changed()))
+            return sp
+        lf.addRow("Радиус:", fspin("radius", 8, 8192, 256, 16))
+        lf.addRow("Затухание:", fspin("power", 0.1, 8, 2, 0.1, 1))
+        if cls.endswith("spot"):
+            lf.addRow("Конус внутр.:", fspin("spot_cone_inner", 1, 179, 30, 1, 0, "°"))
+            lf.addRow("Конус внешн.:", fspin("spot_cone_outer", 1, 179, 45, 1, 0, "°"))
+        sh = QCheckBox("Тень (свет не проходит сквозь стены)")
+        sh.setChecked(ob.get("autoshadow", "1") != "0")
+        sh.toggled.connect(lambda v: (ob.set_key("autoshadow", "1" if v else "0"), changed()))
+        lf.addRow("", sh)
+        hrow = QHBoxLayout()
+        h0 = fspin("enable_from_hour", -1, 24, -1, 0.5, 1)
+        h1 = fspin("enable_to_hour", -1, 24, -1, 0.5, 1)
+        hrow.addWidget(h0)
+        hrow.addWidget(QLabel("–"))
+        hrow.addWidget(h1)
+        lf.addRow("Горит с–до (ч):", hrow)
+        lf.addRow("", hint("−1 — всегда. Например 20 – 6: включается вечером, гаснет утром."))
+        gl.addLayout(lf)
+        lay.addWidget(g)
+
+    # doors: lock with a key item / lockpick skill (rpm_key, rpm_lock_level; "Starts locked" = spawnflag 2048)
+    if ob.editable and (cls.startswith("prop_door") or cls in ("func_door", "func_door_rotating")):
+        g, gl = _group("Замок")
+        df = _form()
+        try:
+            sf = int(ob.get("spawnflags", "0") or 0)
+        except ValueError:
+            sf = 0
+        lk = QCheckBox("Заперта с начала")
+        lk.setChecked(bool(sf & 2048))
+
+        def set_locked(v):
+            try:
+                cur = int(ob.get("spawnflags", "0") or 0)
+            except ValueError:
+                cur = 0
+            ob.set_key("spawnflags", str((cur | 2048) if v else (cur & ~2048)))
+            changed()
+        lk.toggled.connect(set_locked)
+        df.addRow("", lk)
+        p = ctx.project
+        keys = [("", "— без ключа —")] + [(x.id, "%s  (%s)" % (x.label(ctx.display_lang, p.base_language), x.id))
+                                          for x in p.items if x.category == "key" or x.base == "key"]
+        kc = combo(keys, ob.get("rpm_key"), editable=True)
+
+        def set_key():
+            v = kc.currentData() if kc.currentIndex() >= 0 and kc.currentText() == kc.itemText(kc.currentIndex()) else kc.currentText().strip()
+            if v:
+                ob.set_key("rpm_key", v)
+            elif ob.ent is not None:
+                ob.ent.delete_key("rpm_key")
+            changed()
+        bind_combo(kc, set_key)
+        df.addRow("Ключ:", kc)
+        lv = QSpinBox()
+        lv.setRange(0, 100)
+        lv.setSpecialValueText("не взломать")
+        try:
+            lv.setValue(int(ob.get("rpm_lock_level", "0") or 0))
+        except ValueError:
+            pass
+        lv.valueChanged.connect(lambda v: (ob.set_key("rpm_lock_level", str(v)) if v else ob.ent.delete_key("rpm_lock_level"), changed()))
+        df.addRow("Взлом (навык):", lv)
+        gl.addLayout(df)
+        gl.addWidget(hint("Запертая дверь открывается ключом из инвентаря игрока или навыком «Взлом» не ниже уровня."))
+        lay.addWidget(g)
+
+    # NPC placed in Hammer: the project's NPC with the same targetname
+    if ob.is_npc():
+        if tn and ctx.project.npc(tn):
             b = QPushButton("Открыть NPC проекта «%s»" % tn)
             b.clicked.connect(lambda: ctx.open_npc(tn))
             lay.addWidget(b)
-        elif cls.startswith("npc_"):
+        elif tn:
             b = QPushButton("Добавить в проект (распорядок, диалог, фракция)")
-            b.clicked.connect(lambda: ctx.npc_from_hammer(tn, cls, e))
+            b.clicked.connect(lambda: ctx.npc_from_hammer(tn, cls, ob))
             lay.addWidget(b)
+        else:
+            lay.addWidget(hint("Без targetname игра не сможет дать ему распорядок или диалог — задайте имя."))
+
+    # the other keys
+    other = {}
+    if ob.ent is not None:
+        for k, v in ob.ent.kv:
+            if k.lower() not in _OWN_KEYS:
+                other[k] = v
     else:
-        lay.addWidget(hint("Без targetname игра не сможет дать ему распорядок или диалог — задайте имя в Hammer."))
+        other = {k: v for k, v in ob.kv.items() if k.lower() not in _OWN_KEYS}
+    if other or ob.editable:
+        g, gl = _group("Остальные ключи")
+        if ob.editable:
+            tbl = KVTable(other)
+
+            def kv_changed():
+                cur = {k for k, _ in ob.ent.kv if k.lower() not in _OWN_KEYS}
+                for k in cur - set(other):
+                    ob.ent.delete_key(k)
+                for k, v in other.items():
+                    ob.set_key(k, v)
+                changed()
+            tbl.changed.connect(kv_changed)
+            gl.addWidget(tbl)
+        else:
+            l = QLabel("\n".join("%s: %s" % kv for kv in sorted(other.items())))
+            l.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            l.setWordWrap(True)
+            gl.addWidget(l)
+        lay.addWidget(g)
+    outs = ob.ent.outputs if ob.ent is not None else []
+    if outs:
+        g, gl = _group("Выходы (правятся в Hammer)")
+        l = QLabel("\n".join("%s → %s" % (o, t.replace("\x1b", ",")) for o, t in outs))
+        l.setWordWrap(True)
+        l.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        gl.addWidget(l)
+        lay.addWidget(g)
+    row = QHBoxLayout()
+    b = QPushButton("Показать")
+    b.clicked.connect(lambda: (ctx.worldview.select(("obj", key), emit=False), ctx.worldview.focus_selected()))
+    row.addWidget(b)
+    if ob.editable:
+        b = QPushButton("Дублировать")
+        b.clicked.connect(lambda: (ctx.worldview.select(("obj", key), emit=False), ctx.duplicate_world_selected()))
+        row.addWidget(b)
+        b = QPushButton("Удалить")
+        b.clicked.connect(lambda: ctx.delete_targets([("obj", key)]))
+        row.addWidget(b)
+    row.addStretch(1)
+    lay.addLayout(row)
+    return w, lay
+
+
+def multi_page(insp, n):
+    ctx = insp.ctx
+    w, lay = insp._page("Выделено объектов: %d" % n, "Тащите любой из них — двигаются все; гизмо двигает и вращает группу "
+                                                        "(вокруг выделенного последним). End — приземлить каждый.")
+    row = QHBoxLayout()
+    for text, fn in (("Приземлить", ctx.worldview.land_selected), ("Повернуть на 90°", lambda: ctx.worldview.rotate_selected(90)),
+                     ("Дублировать", ctx.duplicate_world_selected), ("Копировать", ctx.copy_world_selected),
+                     ("Удалить", ctx.delete_world_selected)):
+        b = QPushButton(text)
+        b.clicked.connect(fn)
+        row.addWidget(b)
+    row.addStretch(1)
+    lay.addLayout(row)
+    names = [ctx.worldview.t_label(t) for t in ctx.worldview.selset][:40]
+    lay.addWidget(hint("\n".join(names)))
     return w, lay
 
 
@@ -1127,7 +2095,7 @@ def faction_page(insp, fac):
         insp.changed(True)
         ctx.world_changed("faction")
         if rebuild:
-            insp.show_target(insp.target)
+            insp.rebuild_soon()
     f = _form()
     idl = QLineEdit(fac.id)
 

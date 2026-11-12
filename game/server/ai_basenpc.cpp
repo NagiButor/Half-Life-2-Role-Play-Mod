@@ -6278,6 +6278,13 @@ bool CAI_BaseNPC::ShouldLookForBetterWeapon()
 	if( !(CapabilitiesGet() & bits_CAP_USE_WEAPONS) )
 		return false;
 
+	// HL2RPM: "pickup_weapons" of the Creation Kit, else rule npc_pickup_weapons (citizens grabbed every gun on the floor)
+	if ( !RPMWorld::NPCMayPickupWeapons( this ) )
+	{
+		m_flNextWeaponSearchTime = gpGlobals->curtime + 2.0f;
+		return false;
+	}
+
 	// Already armed and currently fighting. Don't try to upgrade.
 	if( GetActiveWeapon() && m_NPCState == NPC_STATE_COMBAT )
 		return false;
@@ -13671,7 +13678,8 @@ const char *CAI_BaseNPC::GetLootDisplayName() const
 		if ( pszName && pszName[0] )
 			return pszName;
 		// HL2RPM: an NPC of the Creation Kit without a dialog - the name of its definition
-		pszName = RPMWorld::GetNPCDisplayName( STRING( iszTargetname ) );
+		// (a random name of a template: the one picked when it spawned)
+		pszName = RPMWorld::GetNPCDisplayNameFor( const_cast<CAI_BaseNPC *>( this ) );
 		if ( pszName && pszName[0] )
 			return pszName;
 	}
@@ -15198,6 +15206,10 @@ void CAI_BaseNPC::TestPlayerPushing( CBaseEntity *pEntity )
 {
 	if ( HasSpawnFlags( SF_NPC_NO_PLAYER_PUSHAWAY ) )
 		return;
+	// HL2RPM: friendly NPCs don't step out of the player's way (a trader walked off when you came to talk);
+	// per NPC "yield" of the Creation Kit, else rule npc_yield
+	if ( !RPMWorld::NPCYieldsToPlayer( this ) )
+		return;
 
 	// Heuristic for determining if the player is pushing me away
 	CBasePlayer *pPlayer = ToBasePlayer( pEntity );
@@ -15236,7 +15248,7 @@ void CAI_BaseNPC::CascadePlayerPush( const Vector &push, const Vector &pushOrigi
 	for ( int i = 0; i < g_AI_Manager.NumAIs(); i++ )
 	{
 		CAI_BaseNPC *pOther = g_AI_Manager.AccessAIs()[i];
-		if ( pOther != this && pOther->IRelationType(this) == D_LI && !pOther->HasCondition( COND_PLAYER_PUSHING ) )
+		if ( pOther != this && pOther->IRelationType(this) == D_LI && !pOther->HasCondition( COND_PLAYER_PUSHING ) && RPMWorld::NPCYieldsToPlayer( pOther ) )
 		{
 			const Vector &friendOrigin = pOther->GetAbsOrigin();
 			if ( fabsf( friendOrigin.z - origin.z ) < MIN_Z_TO_TRANSMIT &&

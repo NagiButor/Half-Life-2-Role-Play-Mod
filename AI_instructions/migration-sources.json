@@ -1,0 +1,1086 @@
+{
+  "date": "2026-11-10",
+  "backup": "E:\\SourceModding\\HL2RPMSOURCE\\backups\\ai_instructions_before_20261110_041827.zip",
+  "files": [
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\animation.md",
+      "destination": "AI_instructions/topics/animation.md",
+      "sha256": "77805146e104fb3ebff174a4dbc14e073cf308db109c62a9e155d18763f014d6",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\audio.md",
+      "destination": "AI_instructions/topics/audio.md",
+      "sha256": "fdb43ba48924af1776ef9fba72f7ed445c586fbfe88bd9a99f99b9acbf04ab30",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\build.md",
+      "destination": "AI_instructions/topics/build.md",
+      "sha256": "81e68c4784e155d4df5191581d93e41f98088a40c709fa8275d601a5ff7e192b",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\ck-editor.md",
+      "destination": "AI_instructions/topics/ck-editor.md",
+      "sha256": "b9a693f0b8892c0d650d6928b9bcac5f6a65fe2e4d7632ea988ad9c3ea184e7c",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\content.md",
+      "destination": "AI_instructions/topics/content.md",
+      "sha256": "21ca230d8e56f8c8f8cef6fe2abc6345db3b25a37433f13509c57c0696d8ad48",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\debugging.md",
+      "destination": "AI_instructions/topics/debugging.md",
+      "sha256": "15699b633aac3c8dfd14f0a53840fa509fd0e5427b5f5d0f2679ecf43519966d",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\leaked-source.md",
+      "destination": "AI_instructions/topics/leaked-source.md",
+      "sha256": "0517da825c8dbce419946f666ec53c4e83e83154dc5a2db9bc211587943610da",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\mapping.md",
+      "destination": "AI_instructions/topics/mapping.md",
+      "sha256": "945fea61cb2aa9d4437b5e429fe4bf9fdb173b959888c1fabfdbb25d0c2b8ad8",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\renderer-core.md",
+      "destination": "AI_instructions/topics/renderer-core.md",
+      "sha256": "9615188866f174b54f5ae22af793da1d52e1a6c3d49bf7bfb285ed0f52c014ae",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\renderer-gi-post.md",
+      "destination": "AI_instructions/topics/renderer-gi-post.md",
+      "sha256": "bca58f57184b8ea0e5c8b14efa03d17d96d8e283371ecd57bc31f3cadec310e0",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\renderer-passes.md",
+      "destination": "AI_instructions/topics/renderer-passes.md",
+      "sha256": "21039cd1ad2661d05967535da643d13c277d69b5dffa6e19e9053cce1998fd9d",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\rpg-systems.md",
+      "destination": "AI_instructions/topics/rpg-systems.md",
+      "sha256": "8c1ca92d892b8da0a98a8c2534f0d17b51a29b56e39130480923f3e14dd80946",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\ui-hud.md",
+      "destination": "AI_instructions/topics/ui-hud.md",
+      "sha256": "a646838bafc795f403e696a5788ab6a92118ca765266a3867d37910f4923ea00",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\voice.md",
+      "destination": "AI_instructions/topics/voice.md",
+      "sha256": "5fcc5cc8b16054f5452637e8d10e11c06ad8daafbf54278d4bc491e4652fa8a0",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\weather.md",
+      "destination": "AI_instructions/topics/weather.md",
+      "sha256": "5271826a34991e3dfd441379a3b1b8f2283846011b7c10a4c3ba34c66166f2a0",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\claude_docs\\world-ai.md",
+      "destination": "AI_instructions/topics/world-ai.md",
+      "sha256": "2b367b81184d0e55fc6965c97973c474ca5809142f5aad025c3627fa110c0ab5",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-dialogs\\scripts\\dialog_check.py",
+      "destination": "AI_instructions/skills/hl2rpm-dialogs/scripts/dialog_check.py",
+      "sha256": "6b090af1b3fbc1fe8a60563e9281745763395e07d720ec85c2acaf6d50598284",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-dialogs\\SKILL.md",
+      "destination": "AI_instructions/skills/hl2rpm-dialogs/SKILL.md",
+      "sha256": "64a2667c4bc8e31b0da307a86f82fd20a7706f2ed0782533cc3a7408abcaa557",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-hammer\\scripts\\bsp.py",
+      "destination": "AI_instructions/skills/hl2rpm-hammer/scripts/bsp.py",
+      "sha256": "4745923f9605f050870db54b33fa54eabf31072811f1acca699ac8026428684c",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-hammer\\scripts\\compile_map.ps1",
+      "destination": "AI_instructions/skills/hl2rpm-hammer/scripts/compile_map.ps1",
+      "sha256": "c1471a6a0651983b693b2ac58d54cbeb7f8e8ff2232694facd146de03d2547ba",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-hammer\\scripts\\hammer_shot.py",
+      "destination": "AI_instructions/skills/hl2rpm-hammer/scripts/hammer_shot.py",
+      "sha256": "31e9669bb584de43eb499ac330f47316eae75cf2a2658f618876968cef4fa23a",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-hammer\\scripts\\new_test_map.py",
+      "destination": "AI_instructions/skills/hl2rpm-hammer/scripts/new_test_map.py",
+      "sha256": "26c59c9112a3af43a39f5168276868023a1d14c3fcbd2cd8d3877ee5e20d2b37",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-hammer\\scripts\\vmf.py",
+      "destination": "AI_instructions/skills/hl2rpm-hammer/scripts/vmf.py",
+      "sha256": "239e4d5fdbc47ffb987b518496eee7715f2c0e86b4a8f82bd44c2ee614433bee",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-hammer\\scripts\\vmf_shot.py",
+      "destination": "AI_instructions/skills/hl2rpm-hammer/scripts/vmf_shot.py",
+      "sha256": "a4085be05f10fbcb74e5b96990f82252ef7a42d8af6a72527cbd0969c87ca4e2",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-hammer\\SKILL.md",
+      "destination": "AI_instructions/skills/hl2rpm-hammer/SKILL.md",
+      "sha256": "070880ab2be4e88cdb58c41e00275d865abf8f1c89cdcb0318ed3a9b8831befa",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-playtest\\scripts\\capture_lib.ps1",
+      "destination": "AI_instructions/skills/hl2rpm-playtest/scripts/capture_lib.ps1",
+      "sha256": "d9645512744a8a3a76fe292533f08ff7e62a1d6013de26a72433581e33dabfc7",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-playtest\\scripts\\capture_rt.ps1",
+      "destination": "AI_instructions/skills/hl2rpm-playtest/scripts/capture_rt.ps1",
+      "sha256": "c5d4bf0824b0fb60ca6ca4a3b5f81c63c3780293cfa7c3d183f35b6338c2f04f",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-playtest\\scripts\\flash_detect.py",
+      "destination": "AI_instructions/skills/hl2rpm-playtest/scripts/flash_detect.py",
+      "sha256": "f3864957de80c0ca47b4ee28e6d2b090c2ed5775a9ac95c5cb7ecf1236512215",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-playtest\\scripts\\run_game.ps1",
+      "destination": "AI_instructions/skills/hl2rpm-playtest/scripts/run_game.ps1",
+      "sha256": "be38a79aa695d47817364d25890d62b0f3356245de45f7c3e4248964413cb507",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-playtest\\scripts\\shots.py",
+      "destination": "AI_instructions/skills/hl2rpm-playtest/scripts/shots.py",
+      "sha256": "399e84dc2d4dd2afbeaf9f6808d182ed737d41927008eb3556e2105ef3abcda7",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-playtest\\scripts\\ui_clicks.ps1",
+      "destination": "AI_instructions/skills/hl2rpm-playtest/scripts/ui_clicks.ps1",
+      "sha256": "7af277472f78808be2f8e4ab75bfd0657700c9e93a0b09ac2394fcc1de664568",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-playtest\\SKILL.md",
+      "destination": "AI_instructions/skills/hl2rpm-playtest/SKILL.md",
+      "sha256": "0a2bf8faed60ca05ad58ccb0deeaec7b16ae05409fda1a597cbce6de2878dc38",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\claude_skills\\hl2rpm-voice\\SKILL.md",
+      "destination": "AI_instructions/skills/hl2rpm-voice/SKILL.md",
+      "sha256": "c8cf3f9cd512ccfa48c3c28013a9924b492fa95624f487f6ddccec85a15bf564",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\.trae\\documents\\bias_free_shadow_mapping_plan.md",
+      "destination": "AI_instructions/archive/legacy-trae/src/bias_free_shadow_mapping_plan.md",
+      "sha256": "a6a8d958afc27bc0ea58c30c8d4b85eb0d8e8e1e06a9f9b9ff868aa832ff7a59",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\.trae\\documents\\bias_free_shadow_mapping_plan_v3.md",
+      "destination": "AI_instructions/archive/legacy-trae/src/bias_free_shadow_mapping_plan_v3.md",
+      "sha256": "9fd5e517f5fc2766bbb625fb8ec290ad56b6828c8ead3c29a43a14656546b548",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\.trae\\documents\\dumka_plan.md",
+      "destination": "AI_instructions/archive/legacy-trae/src/dumka_plan.md",
+      "sha256": "cd7773cdd8b179bf456cfc61350f9d8aca88c1381486f7ded8ab6d6bd0ea927b",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\.trae\\documents\\fix_light_deferred_point_preset_shadow_bug_plan.md",
+      "destination": "AI_instructions/archive/legacy-trae/src/fix_light_deferred_point_preset_shadow_bug_plan.md",
+      "sha256": "157d6cb1edf6846209dfdadcd3fd5b3c98e8a55e97435ec2db7a49a0778ca0fe",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Add after_choreo to demo_npc_1 completion line.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Add after_choreo to demo_npc_1 completion line.md",
+      "sha256": "c0ff456056a0be7dd33007edc22099eaa61f0d6b51e2ba6f642131bc8a4d6288",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Add after_choreo_sound_sequence for completion lines.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Add after_choreo_sound_sequence for completion lines.md",
+      "sha256": "0b5c9c9faabc40d1724f4dccb658745f61dcaa64e2f6be0a332affff732d70f4",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Add alternative key to phys-grab items instead of inventory pickup.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Add alternative key to phys-grab items instead of inventory pickup.md",
+      "sha256": "c385725dad35435c3fd7ca4ecbc95352efc2cf3fb19749a0c6769a0d0d047d94",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Add Stack All and Ammo Split UI.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Add Stack All and Ammo Split UI.md",
+      "sha256": "df618f3f90e9621c067fc7931592a72b6dbadce7b37d3be3db296f8fa7e052cf",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Adjust reward toast styling and quest progress text.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Adjust reward toast styling and quest progress text.md",
+      "sha256": "e199ea3f05ec3dc220409566e5daa879d0518e600a2583460a68a91147d8fd18",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Change loot container use sound.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Change loot container use sound.md",
+      "sha256": "ba3a5493c4b3c010bee99f5d2986a93a8092e64a048202c3eadfcb37829814c5",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Chunk dialog_open_payload to avoid command length overflow.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Chunk dialog_open_payload to avoid command length overflow.md",
+      "sha256": "342cdd3275c1829ed0a0be4a6df24735693dd9e41f4be6eeee5b2b804fbcfd4f",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Day_Night Timecycle + Deferred Lighting для Mapbase (Source SDK 2013).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Day_Night Timecycle + Deferred Lighting для Mapbase (Source SDK 2013).md",
+      "sha256": "25476a626372f048676c3d8b774424d4f97c51324a570fd3443501c4e731eb89",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Debug quest rewards and stop inventory auto-open.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Debug quest rewards and stop inventory auto-open.md",
+      "sha256": "03340806ed5f55a2f8e2f332906e4f8543221d8878f19e83cc6da5749592ef5b",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Deferred fix + Hosek–Wilkie timecycle.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Deferred fix + Hosek–Wilkie timecycle.md",
+      "sha256": "ae3fc51af25a5860d04c5946c7abf387a5978838ab2d4611f880a4991198af19",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Disable auto-pickup for item_ drops while keeping inventory_use functional.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Disable auto-pickup for item_ drops while keeping inventory_use functional.md",
+      "sha256": "c7edbaa6bc1a76f470725bde6eb390078866025e54b57f56579d24b456e5fca1",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Displayable name в окне диалога.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Displayable name в окне диалога.md",
+      "sha256": "8bdc988e1824c076a5e5a0d713416d1789616e6936901cb35e39887b3d7aee03",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fallout-style reward toast and loot selection fix.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fallout-style reward toast and loot selection fix.md",
+      "sha256": "959ee0b339ef66e8280fc4e11e791007f4dfcb8eb6039cadbfa11ce6a3750f1d",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\FGD_ подсказки default Health для всех NPC.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/FGD_ подсказки default Health для всех NPC.md",
+      "sha256": "261a78f6ba8494b1ad29da8eba3e51097a40e70dffae89bb7da47ab614af51a1",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix build errors in quests_inventory.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix build errors in quests_inventory.md",
+      "sha256": "8d3c967185bc08dd1b99a2a144214d50e19e5b12825acd1ab07b46b6437a3cb6",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix C2039 в npc_metropolice.cpp (TraceFilter precriminal check).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix C2039 в npc_metropolice.cpp (TraceFilter precriminal check).md",
+      "sha256": "ddfff2e97a3a881e4715ad6f25fd6742100eafd2ab449dc879849a1d6ad3d152",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix C2248 in CSplitAmountTextEntry.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix C2248 in CSplitAmountTextEntry.md",
+      "sha256": "7fe9857b0b2c801c7397ac54a9c7fe1094c1776889151e74752003d4ea61c40b",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix C2446 в ai_basenpc.cpp (FireOutput activator type).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix C2446 в ai_basenpc.cpp (FireOutput activator type).md",
+      "sha256": "f8a2a588ef86e15b6fb71e0b577e24e8fd0b3f83e4d3b3ee365980c450da8d47",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix C4189 ty unused warning.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix C4189 ty unused warning.md",
+      "sha256": "958b4ab5090fb6978521d2f46a22ccb40564174383fce8390c9ec155a16c19bb",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix client toast compile errors.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix client toast compile errors.md",
+      "sha256": "0ae1de1bb8b7dc56a50815eea55c1c34cc5548f8e5b20eb91985e6bbc5fbf053",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix duplicate Inventory_Update registration.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix duplicate Inventory_Update registration.md",
+      "sha256": "f60a566b5c6ccb65c9d8c2d8ac56b03fc4040e29095dcc43d561dd795f4701e4",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix ESC GameUI + Loot Keyboard Input.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix ESC GameUI + Loot Keyboard Input.md",
+      "sha256": "f1635946457ee6c86a10241e6f8fcf519be46aa1402204bb5901b75928758624",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix hover highlight, loot arrows, ESC flicker.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix hover highlight, loot arrows, ESC flicker.md",
+      "sha256": "b51fa8177ef4c5ff65a597f3191776fb8396423743df5c6820398db1d5bb256a",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix inventory hotkey open.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix inventory hotkey open.md",
+      "sha256": "979ba979efcdec77a85446b86b8de3b7ea51edae57f7ea5c04b5c86acf5b4177",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix inventory_loot payload overflow.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix inventory_loot payload overflow.md",
+      "sha256": "3916a149b173400eb8e09e423d4eb60d5a0e248067653347c94395d860e00e22",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix Inventory_Update registration crash.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix Inventory_Update registration crash.md",
+      "sha256": "8083d89f2e14da621604bedf910066573f077e70f5a20cc93cac0d1580c06b5c",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix loot clicks + suppress ESC menu.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix loot clicks + suppress ESC menu.md",
+      "sha256": "1d9f13b376bd879f21c258a90482b1d86625aacff5bee36854ad6bae15290316",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix loot container E + loot UI hover + arrows.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix loot container E + loot UI hover + arrows.md",
+      "sha256": "40084f7cf88c276d5143fa497b71b58a0ec96e0f3af119b84f93ba509f1b2c19",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix pickup wording, dialog scroll overlap, and trigger_dialog_start LOS_movement.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix pickup wording, dialog scroll overlap, and trigger_dialog_start LOS_movement.md",
+      "sha256": "6ac774006e71fa1a8f31bbff7c07567ba0c737a633245665e09b91f4f0df793c",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix quest kill tracking and notifications.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix quest kill tracking and notifications.md",
+      "sha256": "938da80f713ddbb79af9bc574dbe35b072fc65a5615eab5e350ee068c310f461",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix QuestDef copy and LNK4075 in VPC.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix QuestDef copy and LNK4075 in VPC.md",
+      "sha256": "3e81b3e698df1a4b5d3b0ee6e050d70c925b51360bd3e09b89644a9c23215d72",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix reward parsing and keep dialog open on quest turn-in.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix reward parsing and keep dialog open on quest turn-in.md",
+      "sha256": "b839ee0d54963c1e1b2e759f3e32b72725ec6229fe3b037a3c103fd04a2e6af8",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix rewards, hover tabs, dialog branching, quest list layout.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix rewards, hover tabs, dialog branching, quest list layout.md",
+      "sha256": "36a2b779280d8e3a8026f374f94f526a17822b4fc53bfb450c4552711cf9a3c7",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix rewards, quest colors, dialog scroll, and dialog_quest gating.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix rewards, quest colors, dialog scroll, and dialog_quest gating.md",
+      "sha256": "ad871b4c3cfa3558ae934250d1a4fa8d1671ddfc13a583e976417a793da28f5c",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix rewards.Count=0 reliably and improve quest turn-in UX.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix rewards.Count=0 reliably and improve quest turn-in UX.md",
+      "sha256": "ab5fa83bd6fc66c3dbcab4013f7e368ac4b88fdb3f697ed7de06485e9c163283",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix Sky Godrays, Stars, Twilight, and Time-Gated Deferred Lights.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix Sky Godrays, Stars, Twilight, and Time-Gated Deferred Lights.md",
+      "sha256": "4580314822add54aba4281b434c111c2dc3d6de13fc5e1a999a2d47f5ce4a7de",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix Split popup colors and label layout.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix Split popup colors and label layout.md",
+      "sha256": "6c8e691384f2e16f6c20e46995560f68476b5e0b42af483c07139be4bdcac78c",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix split TextEntry visibility and restrict inventory_sort stacking.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix split TextEntry visibility and restrict inventory_sort stacking.md",
+      "sha256": "2305a3bd5715a390fc5db30e1c2aa97ebf8165b19ba9a4865f739edbb15a4bcc",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix unused aGray warning.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix unused aGray warning.md",
+      "sha256": "61ebee5554a851ee4a7611b35ced3d608e4df424941728895a5f6d4d3b79c4ab",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Fix vvis ParseEpar + диалог UI overlap.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Fix vvis ParseEpar + диалог UI overlap.md",
+      "sha256": "fb5541f3b0f0170825c75f8163bfadbbca0432478f3f823046581e6c7afdd921",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Force Split UI labels to gold.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Force Split UI labels to gold.md",
+      "sha256": "a1a1e6a140906c43110308a7e6339392e06dafbcc1d87325eca3751799a2475d",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Gordon pre-criminal per-NPC + отключение по урону (faction).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Gordon pre-criminal per-NPC + отключение по урону (faction).md",
+      "sha256": "936f9b989ac907feb3fcc640890504702695c841d77789f4003e3ba8d89d9f8b",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Improve quests UI, stages, rewards, and tab styling.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Improve quests UI, stages, rewards, and tab styling.md",
+      "sha256": "7d972b7396d1592c9ccd8940cc64ae8a12a6c495881e89566410c56928a105c1",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Inventory Overweight System.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Inventory Overweight System.md",
+      "sha256": "a59dd5d08f069e1a40ca39ffef93b4bbca9966668af9f616b3132e6322f566db",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Inventory scroll + loot keyboard visuals + ESC priority.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Inventory scroll + loot keyboard visuals + ESC priority.md",
+      "sha256": "c976fb57b4c1bed0c5048233c26aa5b9782ccf3ad4ff293fa0a15a4a4e26f1a9",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Loot panel_ подсветка и управление (episodic).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Loot panel_ подсветка и управление (episodic).md",
+      "sha256": "4fbb7f77dfad06d82fafaeafe182f6214051aca6ee5974436b90c2a094182729",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Loot UI Fixes.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Loot UI Fixes.md",
+      "sha256": "045f5ae3813851ee71a31ae3a4781398fcba5b06c19e130b07e06c6f723c4b4b",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Loot UI hover suppression.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Loot UI hover suppression.md",
+      "sha256": "1d8a0a5b54594eafdcbf10cfd61dbc6623368ad5e5778ba66bcfafc092184850",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Loot UI scrolling, keyboard, ESC close.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Loot UI scrolling, keyboard, ESC close.md",
+      "sha256": "a736b4186de84f1f30897717a43aee1b159142ca381da231e47aace638d9e039",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Loot UI_ hover + arrows.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Loot UI_ hover + arrows.md",
+      "sha256": "18ed909245cd1eb065265776411ad5a474e0f785435157b18264baff69f73fc6",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\LootPanel_ анализ нового лога и правка двойного шага клавиш.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/LootPanel_ анализ нового лога и правка двойного шага клавиш.md",
+      "sha256": "c209a749f336168c5c5886321ce251896becb21f71cd2f0e76b2eaf71a5f8f0d",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\LootPanel_ дебаг без консоли + фикс Enter_подсветки.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/LootPanel_ дебаг без консоли + фикс Enter_подсветки.md",
+      "sha256": "6c204c8a3ba696e7a52ef6fa0c33dbd001022dafe102ceb7aca3fd5e363dcf8c",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Make returning_line jump to options node.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Make returning_line jump to options node.md",
+      "sha256": "f4102ea3e844a07a7c2f7bd3bad10605cff744ed042115365b4b4b7033196bc7",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Make Split labels gold.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Make Split labels gold.md",
+      "sha256": "8528e336c563015f50363bd6f334dc9ccff76d98f28171f31664d312d12eb04b",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\NPC keyvalue_ hate_spoils_faction агро.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/NPC keyvalue_ hate_spoils_faction агро.md",
+      "sha256": "f12f4e2a2d32f5bf541a304ddd21a2923c9a88ce43c6f8795c4b5b4fc4bd1260",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Sun Volumetrics, Time-Gated Lights, Hammer Spot Preview, Optimization, and Better Sunsets.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Sun Volumetrics, Time-Gated Lights, Hammer Spot Preview, Optimization, and Better Sunsets.md",
+      "sha256": "09c56e9bcee1e565c6f323832d00cb99718df9479a4528c630c398c8cc68b82a",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Support after_next node for quest completion.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Support after_next node for quest completion.md",
+      "sha256": "546a27ab4f35ad7aedd474e9710c70f4d0f746c30282dc4af1503b18e3632804",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\UI polish_ ESC flash, action highlight, loot arrows.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/UI polish_ ESC flash, action highlight, loot arrows.md",
+      "sha256": "b9050fa5052e5055fa0ce77852d80c8e89ac5789b8248c7c18dc661dbaa85349",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\UI фикс SpeakerLabel (без белой полосы).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/UI фикс SpeakerLabel (без белой полосы).md",
+      "sha256": "5e9fe87922f2a7feac2fe919a0a7ff6efb2c977ff82f17b52d856bbae834ab76",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Анализ lootdebug.txt и следующий шаг дебага.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Анализ lootdebug.txt и следующий шаг дебага.md",
+      "sha256": "f8016e5b4253ffc2336ee63b255789c11ca1706b6aa988bc9a99256801537c2e",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Антлион-гибы не исчезают + кровь по трупам через ConVar.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Антлион-гибы не исчезают + кровь по трупам через ConVar.md",
+      "sha256": "82f85e40d4952ef841be4f998ad626f86ae0dd92611974ba151c9ca16fc08cfd",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Восстановить забытые FGD-правки (default Health подсказки + faction_gpc keyvalues).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Восстановить забытые FGD-правки (default Health подсказки + faction_gpc keyvalues).md",
+      "sha256": "2f1f7f53c8113b0f459604202c87af105fdf8f3535f9294e18029b1e3a940410",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Восстановление потерянных правок FGD и диалоговых .txt из Git.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Восстановление потерянных правок FGD и диалоговых .txt из Git.md",
+      "sha256": "046b74bd036bccb37615c0ca58b8bc07d2bfef9eb9aeb88b27fe87a6a8e798d8",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Всегда оставлять кровавые декали на NPC и рэгдоллах.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Всегда оставлять кровавые декали на NPC и рэгдоллах.md",
+      "sha256": "96c6f31be878669521bafc51cbf6dc767c9649c7a144733ad9525bae0b1ef3a5",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Декали крови на лице у всех NPC (включая citizen).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Декали крови на лице у всех NPC (включая citizen).md",
+      "sha256": "580a5a0a46c2a7ee705208d1d8d99896676278b4c78f9db8a28ddebe8ed5cc48",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Декали на лицах NPC_ решение через материалы ($nodecal).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Декали на лицах NPC_ решение через материалы ($nodecal).md",
+      "sha256": "d2cc91cf203335f45b15a11b6812ab34adea96f12a693e8d9c8d521fd0ef6436",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Декали на лице у citizen_barney (PlayerCompanion).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Декали на лице у citizen_barney (PlayerCompanion).md",
+      "sha256": "fbb2b797d174ff974434924bbbe61c377ce432e0d041696532d65e1e35183ebb",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Дефолт cl_clear_nodecal=1 и декали у живой Alyx.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Дефолт cl_clear_nodecal=1 и декали у живой Alyx.md",
+      "sha256": "694865e3c2137cdb1f22f4b7eaecf8320d5d71cf0c33320a8f31d3389faf5a1b",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Диагностика и усиление снятия $nodecal (клиент).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Диагностика и усиление снятия $nodecal (клиент).md",
+      "sha256": "da9e380e023973f7ab86a0fa9fb1453a44565f782f874a36282e32eec25d94e4",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Диагностика_ почему не стартует test_npc_2.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Диагностика_ почему не стартует test_npc_2.md",
+      "sha256": "c70b3d11bd6c49d71f7dffbc925fbd334aed0ed6ffb70594011ac9812880afea",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Диалоги_ отложенный spoils, подбег NPC, автоповорот камеры.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Диалоги_ отложенный spoils, подбег NPC, автоповорот камеры.md",
+      "sha256": "11f2b7d004fa449b6374ffb720c5a9d0b8bc9ee96382a20f02177a0ae91addc4",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Жёлтые декали для монстров (живые и мёртвые).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Жёлтые декали для монстров (живые и мёртвые).md",
+      "sha256": "488b7770a84f8c79bd878ca751b6db81c1a809b8aef93802eab3cb92cc89ee1b",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Звуки, UI и блок движения для Inventory_Loot.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Звуки, UI и блок движения для Inventory_Loot.md",
+      "sha256": "03e4769c9bd2095e035356d2d088bc04ddfa0d83243894d7f56254cd33de22e4",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Инвентарь_ подсветка первой строки и управление стрелками_Enter.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Инвентарь_ подсветка первой строки и управление стрелками_Enter.md",
+      "sha256": "f5f40bb2431b1756e4bc66d45351d86e5d84208df6db6417f77034039594ca88",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Исправить подход NPC в trigger_dialog_start и улучшить подсказки FGD.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Исправить подход NPC в trigger_dialog_start и улучшить подсказки FGD.md",
+      "sha256": "726acb6ab0141b1579d00c91e6f156aeb0e1814808ee7ac8d146b1ba44dfe415",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Исправление deferred солнца_spot и порт Light Editor.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Исправление deferred солнца_spot и порт Light Editor.md",
+      "sha256": "301777b0f61b1df82ab4281bb73ef5153d55e7b88944bc813145a8c3991c05ac",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Исправление команды inventory_grab для физического захвата предметов.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Исправление команды inventory_grab для физического захвата предметов.md",
+      "sha256": "dd9ecfd722e5870ea1e48b8232e9ea9561e1cf0d8d100fd8dd50d27a7867860d",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Исправление_ (1) nodecal без рестарта, (2) кровь от лома по живым, (3) кровь у Alyx.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Исправление_ (1) nodecal без рестарта, (2) кровь от лома по живым, (3) кровь у Alyx.md",
+      "sha256": "da3672c77791f7ffe074267b2476789bf7e5e7d9203bbb4872358a71bcfdd32b",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Кровь по оторванным частям тела (break gibs).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Кровь по оторванным частям тела (break gibs).md",
+      "sha256": "aab2a0477a296d12ffbd8f9dcae321e2ced4098a6096c1e4df4833ae3ddfbeac",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Лутание ящиков + новые FGD поля для ragdoll.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Лутание ящиков + новые FGD поля для ragdoll.md",
+      "sha256": "a52bb394b200e6fce5094d50a2a6583726b09e61abfde49b1fd2ce0951df68ce",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Переделать управление lootpanel по принципам inventorypanel.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Переделать управление lootpanel по принципам inventorypanel.md",
+      "sha256": "8ae56515185107549e6503206f7e78e135c763eed4e4361de828d3df3a90f23c",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Подсветка и навигация стрелками в lootpanel.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Подсветка и навигация стрелками в lootpanel.md",
+      "sha256": "6c9721bf025d58eb37cf156e1b9acd8c237315197ed978007395752ed27bf2dd",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Порт Alien Swarm Deferred (Light Editor + тени_споты) в hl2rpm.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Порт Alien Swarm Deferred (Light Editor + тени_споты) в hl2rpm.md",
+      "sha256": "39934ab455fa9ec6f59f0ea66f83906097fe665ac0ec7619569486428b752f2f",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Починить health для npc_breen_npc_alyx (Hammer + реально применяется в игре).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Починить health для npc_breen_npc_alyx (Hammer + реально применяется в игре).md",
+      "sha256": "1a6469d3bc538f3a0e1d4d5c2d18d2cbf3a8b221244f9683dfcac97593d28f7e",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Починить стрелки_ENTER в lootpanel (Typed vs Pressed).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Починить стрелки_ENTER в lootpanel (Typed vs Pressed).md",
+      "sha256": "9f9c1a64d4866e70adac982f33b32703bcb23dd511d184f8b4e6e31cf13818f9",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Починка синхронизации лута (ragdoll loot_items).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Починка синхронизации лута (ragdoll loot_items).md",
+      "sha256": "652c20a36373eaf2aa2eedd9d34bd900888d38e5690647578a2ec9bf531c034a",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Проставить дефолтный Health из skill.cfg в подсказках FGD.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Проставить дефолтный Health из skill.cfg в подсказках FGD.md",
+      "sha256": "12955290f83e1935c5a08f8003ba9c229507b49dbf255361a4db2c256762c4b3",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Расширение диалогов_ инициатива NPC, цепочки реплик, авто-закрытие, скип.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Расширение диалогов_ инициатива NPC, цепочки реплик, авто-закрытие, скип.md",
+      "sha256": "deed3c593a3b0b69b5a687df06bf2caadb82d63f8bd4f1238f5fe89076f21131",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Сделать подсветку inventorypanel как lootpanel.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Сделать подсветку inventorypanel как lootpanel.md",
+      "sha256": "4a3e147026f029ca5f89b109e365f64918ba37cad95d8ef55ad971c46ff8fc03",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Система качества теней point_spot и cubemap atlas.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Система качества теней point_spot и cubemap atlas.md",
+      "sha256": "921b06c2628983664f11034e428469b7c0ef96d432951055540edd85f59a4070",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Система квестов через TAB-инвентарь + интеграция с диалогами и уведомлениями.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Система квестов через TAB-инвентарь + интеграция с диалогами и уведомлениями.md",
+      "sha256": "c43a24c6e2b3a07323899ee075dce1c7b5fb8232c64631d62def71dfc4350006",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Убрать алиас gpc_off_ff_dmg.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Убрать алиас gpc_off_ff_dmg.md",
+      "sha256": "7fc2d215b0aeeaff9cf0abf8208790bc493dc32401b248173d8d522247aaee2b",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Упрощение системы диалогов + Displayable Name для диалога и лута.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Упрощение системы диалогов + Displayable Name для диалога и лута.md",
+      "sha256": "6778849cba0e43d245caaa5eca42c835167568537364be157cb784dc66839294",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Фикс ваншота Breen по голове (hitgroup scaling).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Фикс ваншота Breen по голове (hitgroup scaling).md",
+      "sha256": "436dc6006f4f2136d290db82efff299943d2d42ba9975162914c09facc490992",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Фикс декалей на лице и на рэгдоллах (metropolice маска).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Фикс декалей на лице и на рэгдоллах (metropolice маска).md",
+      "sha256": "76a6f04b4aecb8caab6aa44bddc342ff6019515d508f3c619d9aa0ca713a42be",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Фикс декалей на лице у citizen_barney (через принудительный surfaceprop).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Фикс декалей на лице у citizen_barney (через принудительный surfaceprop).md",
+      "sha256": "7786d0280f45ce32a3ba21cc52a8c685a41a76768242e2dba6c642ec76e4865b",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Фикс краша_ опции без битых указателей.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Фикс краша_ опции без битых указателей.md",
+      "sha256": "d2cc052b462704cab0d0e0be5e51118938850a5c3663dd2206a7fd94c4c45fe9",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Фикс линковки_ dialog_debug ConVar.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Фикс линковки_ dialog_debug ConVar.md",
+      "sha256": "8ccfc291b075e9e4a5d6dad98bfd0752ef9d61609587db83c8973b211705c7e4",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Фикс подсветки основной кнопки при открытых actions в lootpanel.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Фикс подсветки основной кнопки при открытых actions в lootpanel.md",
+      "sha256": "2a7e684aed823a0be108702712e5ceffcd62770e9035d7ee01bc20e6c55bcfaf",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Фикс порчи loot_items (string_t vs MAKE_STRING).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Фикс порчи loot_items (string_t vs MAKE_STRING).md",
+      "sha256": "55fa78d92262faa6c835c16be2d6a2a665099dec8027431415a2d6eda416c3ea",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Фикс сборки_ vgui_dialogpanel.cpp (ready, скобки, лишний RemoveTickSignal).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Фикс сборки_ vgui_dialogpanel.cpp (ready, скобки, лишний RemoveTickSignal).md",
+      "sha256": "28a5cd5bc88fd6e5d4fd9914f69dfe8253866288b6151136dc00deebbb352aee",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Фикс_ пустой текст у некоторых ответов.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Фикс_ пустой текст у некоторых ответов.md",
+      "sha256": "e4c31615f96a9d66eede447fd06796d2476f7621ce0a1d64861e0257d9155174",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Фиксы_ автонаводка 1 раз и снятие friendly-damage блокировки (player hate all).md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Фиксы_ автонаводка 1 раз и снятие friendly-damage блокировки (player hate all).md",
+      "sha256": "148b6e435022d48ba2687e1e957c36de9deb935795fc8fc810196cb831bc29e8",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Фиксы_ камера ниже, spoils не закрывает сразу, trigger_dialog_start стартует после подбега.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Фиксы_ камера ниже, spoils не закрывает сразу, trigger_dialog_start стартует после подбега.md",
+      "sha256": "25737445167960285eb0998c28d5159bc822d66f2ffd8999a710e4c5f8923e55",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Фиксы_ плавная автонаводка и авто-появление опций_автопереходы.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Фиксы_ плавная автонаводка и авто-появление опций_автопереходы.md",
+      "sha256": "0981824067f694b360e1645f191b41a40a5027da550c8fefe30f5b34bbdad160",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.trae\\documents\\Фиксы_ плавная камера, корректный spoils, рабочий подбег, devmsg.md",
+      "destination": "AI_instructions/archive/legacy-trae/game/Фиксы_ плавная камера, корректный spoils, рабочий подбег, devmsg.md",
+      "sha256": "a9e152d4c9eb66bf2dbc486fd56d6d5564d6494c90a99d6d3a22174e9813f543",
+      "action": "move"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\SHADER_RESEARCH_SUMMARY.md",
+      "destination": "AI_instructions/archive/SHADER_RESEARCH_SUMMARY.md",
+      "sha256": "a5cc1a47e71e5052e1e64adeaf50a9d311a7a0c7369b174ec9ce50967265fc3f",
+      "action": "move"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\feedback-heredoc-escapes.md",
+      "destination": "AI_instructions/history/feedback-heredoc-escapes.md",
+      "sha256": "6d007f3ff7cce20c4bcea2eab7062e8ac32229946f0a4c34d512305a6f3c2bba",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\gemini-image-gen.md",
+      "destination": "AI_instructions/history/gemini-image-gen.md",
+      "sha256": "c459d2b6ba0e8ddb9bdee0f18ae886a1cc948b1b0cb1549c39e82163fe456ead",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-anims-2026-11-03-status.md",
+      "destination": "AI_instructions/history/hl2rpm-anims-2026-11-03-status.md",
+      "sha256": "6f1a223e1664f8a62d86eac99cb9e263eb19b21f37f57796dea12e15d6136acf",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-beretta-2026-11-03-status.md",
+      "destination": "AI_instructions/history/hl2rpm-beretta-2026-11-03-status.md",
+      "sha256": "17192ea478d00f970da369a91119541bcd6f6e3d47c13875e3a196c217d7fc17",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-big-request-status.md",
+      "destination": "AI_instructions/history/hl2rpm-big-request-status.md",
+      "sha256": "96bc6dc3bd850cbfcca231ee42aab8ce98f8c07ccbef7ade21b077fba18ec731",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-bugs-2026-10-10-status.md",
+      "destination": "AI_instructions/history/hl2rpm-bugs-2026-10-10-status.md",
+      "sha256": "ca23379d422146f77fa6304c80584870f25df1385cb17df041bbaf4023b9f958",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-bugs-2026-10-17-status.md",
+      "destination": "AI_instructions/history/hl2rpm-bugs-2026-10-17-status.md",
+      "sha256": "8472eaaf01877717a0990373f14fd71a7dbb76a79dd4e4f720b3bc97f5460471",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-ck-plan-m1-m2-status.md",
+      "destination": "AI_instructions/history/hl2rpm-ck-plan-m1-m2-status.md",
+      "sha256": "9169f88a0631a3453b02177c670d47e92eda6e915ac70542e1db402b8f4eaef9",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-compilers-occlusion-2026-10-30-status.md",
+      "destination": "AI_instructions/history/hl2rpm-compilers-occlusion-2026-10-30-status.md",
+      "sha256": "1572d2d981844a08ce80830496331010ed5b4346dcf5107a335a997fb3d3f972",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-dialog-editor-2026-10-30-status.md",
+      "destination": "AI_instructions/history/hl2rpm-dialog-editor-2026-10-30-status.md",
+      "sha256": "6fc671de8ce5f07084fd5c648a3f7493b04a944c65991826ed6e013fc64bfcdc",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-final-gfx-2026-10-23-status.md",
+      "destination": "AI_instructions/history/hl2rpm-final-gfx-2026-10-23-status.md",
+      "sha256": "995cfad05577673986eb9f743387cfd559f9618d52895f2dbe0d389358b8c322",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-final-graphics-2026-10-11-status.md",
+      "destination": "AI_instructions/history/hl2rpm-final-graphics-2026-10-11-status.md",
+      "sha256": "00f66af54c55f748e0c45f6870149b3b2646f74ab446f34f84c65a58d280947d",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-gi-v3-2026-10-30-status.md",
+      "destination": "AI_instructions/history/hl2rpm-gi-v3-2026-10-30-status.md",
+      "sha256": "084a568b3a1ef2cdd3f77e94af177216cbe4d804d1bbed6e0c9eb816a9c1b9d3",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-hammer-ck-2026-11-04-status.md",
+      "destination": "AI_instructions/history/hl2rpm-hammer-ck-2026-11-04-status.md",
+      "sha256": "e06ab0d8164afc3ceb217b15724bde35b451d26dabecdc89ceb42045973f428b",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-keep-demo-content.md",
+      "destination": "AI_instructions/history/hl2rpm-keep-demo-content.md",
+      "sha256": "45ad90061ed04b95d2e166f4d15efd1da64523ae82a20591bbac6de17584c5d3",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-level-building-guidance.md",
+      "destination": "AI_instructions/history/hl2rpm-level-building-guidance.md",
+      "sha256": "163305ad636a4c996a6ab0ece77f20c853553966edc0950aba5ac9c466237b12",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-menu-content-2026-11-02-status.md",
+      "destination": "AI_instructions/history/hl2rpm-menu-content-2026-11-02-status.md",
+      "sha256": "9e735d42b19b2d5b7eb78a2eaa130c17e59819df63ea38e46891bbc35245e911",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-no-design-doc.md",
+      "destination": "AI_instructions/history/hl2rpm-no-design-doc.md",
+      "sha256": "9bfceda8c0488248a17168b90897034e8e8d3705a52ce3090d6dfd44624ab1a4",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-original-mechanisms.md",
+      "destination": "AI_instructions/history/hl2rpm-original-mechanisms.md",
+      "sha256": "ab592eeb9307e6b0fd7e567601b23683d0bec9c8b7adf5e7e500158da36d8b86",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-pass-2026-10-24-status.md",
+      "destination": "AI_instructions/history/hl2rpm-pass-2026-10-24-status.md",
+      "sha256": "796cd49d56df073d4bf6da44823689429e6b539231aa5de4807749fafac26c4d",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-pom-occlusion-2026-10-12-status.md",
+      "destination": "AI_instructions/history/hl2rpm-pom-occlusion-2026-10-12-status.md",
+      "sha256": "174a8eb72de2903d355e8401f4e97928c3116ce079fcfe3483c35971f265c83d",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-release-procedure.md",
+      "destination": "AI_instructions/history/hl2rpm-release-procedure.md",
+      "sha256": "fd0cce4412e543361056c839aea50b10b3058e6ec4b7f4db5acfe78b9c6dbebc",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-session-2026-10-28-reverted.md",
+      "destination": "AI_instructions/history/hl2rpm-session-2026-10-28-reverted.md",
+      "sha256": "ead88a636a223a5eeea82970a358c4d475ac58524c602a3660cfc986ed61754b",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-shadows-phaseB-status.md",
+      "destination": "AI_instructions/history/hl2rpm-shadows-phaseB-status.md",
+      "sha256": "995e0d84fbbb95f7d2f3a7ea4d1fb2ec443ab84c5265dea52b725610e30766b1",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-visual-checklist-status.md",
+      "destination": "AI_instructions/history/hl2rpm-visual-checklist-status.md",
+      "sha256": "6fe853182a64bd4f95a36defcdc1da6f70a0c073a36672164ffa50313b075a61",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-vitals-2026-10-30-status.md",
+      "destination": "AI_instructions/history/hl2rpm-vitals-2026-10-30-status.md",
+      "sha256": "8b8eb823b153dde9d6a661e10e017876f620d89cea6c0cd18e1a284a87ba48bd",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-voice-2026-11-04-status.md",
+      "destination": "AI_instructions/history/hl2rpm-voice-2026-11-04-status.md",
+      "sha256": "bd5e81c655675757beb57a4b5c31aa62043ce80c3597a932987b3fd11f32b99b",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-weather-testing.md",
+      "destination": "AI_instructions/history/hl2rpm-weather-testing.md",
+      "sha256": "2a4f3f12d39e14c0eb2def9ee66e5da5c2b88d8d923b4cbc7ff83d0eb87b8d41",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\hl2rpm-x64-decision.md",
+      "destination": "AI_instructions/history/hl2rpm-x64-decision.md",
+      "sha256": "526e4aeb66ea309d95015dd94b6c92ed7d78bebe68b73a37ce7c6ce64683f272",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\MEMORY.md",
+      "destination": "AI_instructions/history/MEMORY.md",
+      "sha256": "2ee80ccb4d48ad1da89ba5d12aebc930f3a77b28d5ea64f8f3056efbbfe8d935",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\projects\\E--SourceModding-HL2RPMSOURCE\\memory\\user-hardware.md",
+      "destination": "AI_instructions/history/user-hardware.md",
+      "sha256": "db7e6bb9dcfe2ffaa94c5ac91c81d84ca91a3fecbd263cbe3fc9e4727e81ad62",
+      "action": "copy"
+    },
+    {
+      "source": "C:\\Users\\mikeo\\.claude\\plans\\peppy-mapping-wreath.md",
+      "destination": "AI_instructions/archive/creation-kit-plan-2026-10-31.md",
+      "sha256": "c2427a79265aca6c519591a150cda59acc513ed3ec467177a371379304f65883",
+      "action": "copy"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\kimodo.cpp\\HL2RPM_NOTES.md",
+      "destination": "AI_instructions/references/kimodo-hl2rpm-notes.md",
+      "sha256": "07d4afe2be068ae199ec097a7d13b6a48e4ad046d1b0a6696208c998bfc385ec",
+      "action": "copy"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\motion-bricks.cpp\\HL2RPM_NOTES.md",
+      "destination": "AI_instructions/references/motion-bricks-hl2rpm-notes.md",
+      "sha256": "0eb50fd7ded015f97977a592a7ab92984b72cd981f002b69f00020cc9fc709b8",
+      "action": "copy"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\game\\.github\\agents\\Source Engine Guru.md",
+      "destination": "AI_instructions/archive/source-engine-guru-original.md",
+      "sha256": "9a17cab1a42e413b7f83573983a0e1860ee266659d665f5acbe65f45d26e3735",
+      "action": "copy"
+    },
+    {
+      "source": "E:\\SourceModding\\HL2RPMSOURCE\\source-sdk-2013-mapbase-v8.0\\sp\\src\\hl2rpm_extras\\tools\\dialog_editor\\README.md",
+      "destination": "AI_instructions/references/creation-kit.md",
+      "sha256": "8408b08e4ffba08c1dd41f1f6cb34173b18f8a16ef1cae6a8092e78c18641f96",
+      "action": "copy"
+    }
+  ]
+}

@@ -168,9 +168,8 @@ class BSPMap:
         v = self._face_verts(f)
         if len(v) < 3:
             return
+        # vbsp writes the face's own plane into planenum ("side" is only its parity): no flip
         n = self.planes[f["plane"]]["n"].copy()
-        if f["side"]:
-            n = -n
         # fan triangulation
         tri = np.empty(((len(v) - 2) * 3, 3), dtype=np.float32)
         tri[0::3] = v[0]
@@ -209,7 +208,7 @@ class BSPMap:
         nrm = np.cross(gx, gy)
         ln = np.linalg.norm(nrm, axis=2, keepdims=True)
         nrm = nrm / np.maximum(ln, 1e-6)
-        face_n = self.planes[f["plane"]]["n"] * (-1 if f["side"] else 1)
+        face_n = self.planes[f["plane"]]["n"]
         if (nrm.reshape(-1, 3) @ face_n).mean() < 0:
             nrm = -nrm
         i, j = np.meshgrid(np.arange(n - 1), np.arange(n - 1), indexing="ij")

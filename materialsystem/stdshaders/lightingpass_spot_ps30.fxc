@@ -196,8 +196,8 @@ float4 DoSpotLightBasic( const int index, float3 normal,
 	float3 normalizedLightVec = vecWorldToLight / lightToWorldDist;
 	float litDot = dot( normalizedLightVec, normal );
 
-	float fade = 1.0f - saturate( lightToWorldDist / g_flMixedData[ index ].w );
-	fade *= fade;
+	float fade = DeferredLightFalloff( lightToWorldDist, g_flMixedData[ index ].w, g_flMixedData[ index + 1 ].w );
+	fade *= DeferredLightPeak( g_flMixedData[ index + 1 ].xyz, fade );
 
 	if ( bDoSpotAttn )
 	{
@@ -223,8 +223,10 @@ float4 DoSpotLightBasic( const int index, float3 normal,
 
 	float lightAmount = saturate( litDot );
 
-	float fade = 1.0f - saturate( lightToWorldDist / g_flMixedData[ index ].w );
-	fade = pow( fade, g_flMixedData[ index + 1 ].w );
+	// (HL2RPM: the curve of the light, or the engine's attenuation of a converted lamp - common_lighting_fxc.h)
+	float fade = DeferredLightFalloff( lightToWorldDist, g_flMixedData[ index ].w, g_flMixedData[ index + 1 ].w );
+	// (its strength softly limited before the cone and the edge: the penumbra stays - DeferredLightPeak)
+	fade *= DeferredLightPeak( g_flMixedData[ index + 1 ].xyz, fade );
 
 	if ( bDoSpotAttn )
 	{
@@ -320,9 +322,15 @@ PS_OUTPUT main( const PS_INPUT In )
 									-vecDelta, dist, worldRayInv,
 									litface, half_lambert, phong_exp, false );
 
-		localLight.y *= PerformProjectedShadow( sMixedSampler[ iSamplerIndex ],
+		// HL2RPM: no light reaches the point (outside the cone or the radius, turned away): the
+		// shadow can't change the result - its filter (25 compares) is skipped
+		float flShadow = 1.0f;
+		[branch]
+		if ( localLight.y * localLight.w > 0.0f )
+			flShadow = PerformProjectedShadow( sMixedSampler[ iSamplerIndex ],
 			float3( depthPos.xy, depthBiased ), g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
 			g_flMixedData[ iDataIndex + 4 ].x );
+		localLight.y *= flShadow;
 
 #if VENDOR == VENDOR_FXC_AMD
 		float3 AMDVec = abs( floor( depthPos.xyz ) );
@@ -381,9 +389,15 @@ PS_OUTPUT main( const PS_INPUT In )
 									-vecDelta, dist, worldRayInv,
 									litface, half_lambert, phong_exp, true );
 
-		localLight.y *= PerformProjectedShadow( sMixedSampler[ iSamplerIndex ],
+		// HL2RPM: no light reaches the point (outside the cone or the radius, turned away): the
+		// shadow can't change the result - its filter (25 compares) is skipped
+		float flShadow = 1.0f;
+		[branch]
+		if ( localLight.y * localLight.w > 0.0f )
+			flShadow = PerformProjectedShadow( sMixedSampler[ iSamplerIndex ],
 			float3( depthPos.xy, depthBiased ), g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
 			g_flMixedData[ iDataIndex + 4 ].x );
+		localLight.y *= flShadow;
 
 		flLight += DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,
 			g_flMixedData[ iDataIndex + 2 ].xyz,

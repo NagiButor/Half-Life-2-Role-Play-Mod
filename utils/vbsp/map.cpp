@@ -1784,6 +1784,17 @@ ChunkFileResult_t CMapFile::LoadEntityCallback(CChunkFile *pFile, int nParam)
 			return ( ChunkFile_Ok );
 		}
 
+		// HL2RPM: task markers for the AI assistant (rpm_claude_task, func_rpm_claude_area - hl2rpm.fgd) exist only in
+		// the editor: the entity and the brushes of the area are dropped, nothing of them reaches the BSP
+		if ( !Q_strnicmp( pClassName, "rpm_claude_", 11 ) || !Q_strnicmp( pClassName, "func_rpm_claude_", 16 ) )
+		{
+			if ( mapent->numbrushes )
+				Msg( "HL2RPM: task area '%s' (%d brushes) dropped - editor only\n", ValueForKey( mapent, "targetname" ), mapent->numbrushes );
+			mapent->numbrushes = 0;
+			mapent->epairs = NULL;
+			return ( ChunkFile_Ok );
+		}
+
 		// areaportal entities move their brushes, but don't eliminate
 		// the entity
 		if( IsAreaPortal( pClassName ) )

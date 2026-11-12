@@ -5,7 +5,7 @@ daily routine (AI packages), factions, dialogs, quests and voice-over.
     hl2rpm_creation_kit.py [project.hl2dlg]
 
 Screenshot mode (for reports/docs): --shot out.png [--npc name] [--select node:105 |
-option:105:0 | returning | quest:<id> | ref:<id> | hammer:<index> | faction:<id>]
+option:105:0 | returning | quest:<id> | ref:<id> | obj:<v|s|b>:<n> (v = VMF id) | faction:<id> | terminal:<id>]
 [--lang russian] [--size 1600x900] [--zoom 0.7 | --fit] [--center node:105] [--sim]
 [--tab map|dialog] [--map name] [--cam x,y,z,pitch,yaw] [--hour 23.5] [--npc-tab 0|1|2] [--left N]
 [--delay 800]
@@ -34,10 +34,12 @@ def parse_target(s):
         return ("node", int(parts[1]))
     if parts[0] == "option":
         return ("option", int(parts[1]), int(parts[2]))
-    if parts[0] in ("quest", "faction"):
+    if parts[0] in ("quest", "faction", "terminal"):
         return (parts[0], parts[1])
-    if parts[0] in ("ref", "hammer", "nav"):
+    if parts[0] in ("ref", "nav"):
         return (parts[0], int(parts[1]))
+    if parts[0] == "obj":
+        return ("obj", (parts[1], int(parts[2])))
     return (parts[0],)
 
 
@@ -119,9 +121,12 @@ def main():
             if sel[0] == "quest":
                 win.left_tabs.setCurrentWidget(win.quest_tab)
                 win.inspector.show_target(sel)
-            elif sel[0] in ("ref", "hammer", "nav"):
+            elif sel[0] in ("ref", "obj", "nav"):
                 win.worldview.select(sel)
             elif sel[0] == "faction":
+                win.inspector.show_target(sel)
+            elif sel[0] == "terminal":
+                win.left_tabs.setCurrentWidget(win.logic_tab)
                 win.inspector.show_target(sel)
             else:
                 win.navigate(sel)

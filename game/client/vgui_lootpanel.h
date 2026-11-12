@@ -19,8 +19,25 @@ public:
 
     void BeginLoot();
     void SetContext(const char *displayName, const char *soundOpen, const char *soundClose);
+    // HL2RPM: trade mode (a vendor): prices "p;p;.." per row of each column, -1 = not for sale
+    void SetTrade(bool bTrade, int playerMoney, int vendorMoney, const char *currency, const char *leftPrices, const char *rightPrices);
     void SetItems(const CUtlVector<CUtlString> &leftItems, const CUtlVector<CUtlString> &rightItems);
     void EndLoot();
+
+    // HL2RPM (M6): the data for the loot / trade window of the new look (hl2rpm_lootwin.cpp);
+    // while it is open this panel stays hidden and counts as visible for everyone else
+    virtual bool IsVisible() OVERRIDE;
+    const CUtlVector<CUtlString> &GetLeftItems() const { return m_LeftItems; }
+    const CUtlVector<CUtlString> &GetRightItems() const { return m_RightItems; }
+    const CUtlVector<int> &GetLeftPrices() const { return m_LeftPrices; }
+    const CUtlVector<int> &GetRightPrices() const { return m_RightPrices; }
+    bool IsTrade() const { return m_bTrade; }
+    int GetPlayerMoney() const { return m_nPlayerMoney; }
+    int GetVendorMoney() const { return m_nVendorMoney; }
+    const char *GetCurrency() const { return m_Currency.Get(); }
+    const char *GetDisplayName() const { return m_DisplayName.Get(); }
+    const char *GetSoundOpen() const { return m_SoundOpen.Get(); }
+    const char *GetSoundClose() const { return m_SoundClose.Get(); }
 
     bool IsLeftItemSelected(int idx);
     bool IsRightItemSelected(int idx);
@@ -97,6 +114,13 @@ private:
     CUtlString m_DisplayName;
     CUtlString m_SoundOpen;
     CUtlString m_SoundClose;
+
+    bool m_bTrade;
+    int m_nPlayerMoney;
+    int m_nVendorMoney;
+    CUtlString m_Currency;
+    CUtlVector<int> m_LeftPrices;
+    CUtlVector<int> m_RightPrices;
 };
 
 CVGuiLootPanel *GetGlobalLootPanel();

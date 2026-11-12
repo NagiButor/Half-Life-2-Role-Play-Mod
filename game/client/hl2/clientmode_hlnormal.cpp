@@ -90,9 +90,12 @@ void ClientModeHLNormal::Init()
 	}
 }
 
+extern bool RPMTerminal_HidesHud();
+extern bool RPMSeat_IsSeatedClient();
+
 bool ClientModeHLNormal::ShouldDrawCrosshair( void )
 {
-	return ( g_bRollingCredits == false );
+	return ( g_bRollingCredits == false ) && !RPMTerminal_HidesHud() && !RPMSeat_IsSeatedClient();
 }
 
 

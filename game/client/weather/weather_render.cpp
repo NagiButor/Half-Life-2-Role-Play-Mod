@@ -93,22 +93,12 @@ void InitWeatherRTs()
 
 	for ( int i = 0; i < 2; i++ )
 	{
-		g_tex_Clouds[i].Init( materials->CreateNamedRenderTargetTextureEx2(
-			VarArgs( "_rt_hl2rpm_clouds%d", i ),
-			128, 128,
-			RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP,
-			IMAGE_FORMAT_RGBA16161616F,
-			MATERIAL_RT_DEPTH_NONE,
-			cloudFlags, 0 ) );
+		g_tex_Clouds[i].Init( CreateFrameSizedRT( VarArgs( "_rt_hl2rpm_clouds%d", i ), 1,
+			IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE, cloudFlags ) );
 	}
 
-	g_tex_CloudRaw.Init( materials->CreateNamedRenderTargetTextureEx2(
-		"_rt_hl2rpm_clouds_raw",
-		128, 128,
-		RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP,
-		IMAGE_FORMAT_RGBA16161616F,
-		MATERIAL_RT_DEPTH_NONE,
-		cloudFlags | TEXTUREFLAGS_POINTSAMPLE, 0 ) );
+	g_tex_CloudRaw.Init( CreateFrameSizedRT( "_rt_hl2rpm_clouds_raw", 1,
+		IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE, cloudFlags | TEXTUREFLAGS_POINTSAMPLE ) );
 
 	g_tex_RainDepth.Init( materials->CreateNamedRenderTargetTextureEx2(
 		"_rt_hl2rpm_rainmap",
@@ -598,7 +588,11 @@ void WeatherRender_PostOpaque( const CViewSetup &view )
 	ITexture *pFB = NULL;
 	if ( ( bWet || bMirror ) && r_weather_ssr.GetInt() > 0 && CurrentViewID() == VIEW_MAIN )
 	{
-		pFB = materials->FindTexture( "_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET );
+		// (render scale: a copy of the frame's own size - the passes look it up by the main view's
+		// projection, 0..1 over the frame)
+		pFB = GetDefRT_SceneCopy();
+		if ( !pFB )
+			pFB = materials->FindTexture( "_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET );
 		if ( pFB && !pFB->IsError() )
 		{
 			Rect_t rect;

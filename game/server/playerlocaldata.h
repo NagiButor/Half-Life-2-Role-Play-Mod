@@ -75,6 +75,7 @@ public:
 
 	// Is the player wearing the HEV suit
 	CNetworkVar( bool, m_bWearingSuit );
+	CNetworkVar( int, m_iSuitTheme );	// HL2RPM (M6): colors / boot screen of the suit worn (hl2rpm_char.cpp sets it)
 	CNetworkVar( bool, m_bPoisoned );
 	CNetworkVar( float, m_flStepSize );
 	CNetworkVar( bool, m_bAllowAutoMovement );

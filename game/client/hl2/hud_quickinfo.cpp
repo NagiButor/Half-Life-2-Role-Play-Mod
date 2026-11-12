@@ -97,7 +97,7 @@ CHUDQuickInfo::CHUDQuickInfo( const char *pElementName ) :
 	vgui::Panel *pParent = g_pClientMode->GetViewport();
 	SetParent( pParent );
 
-	SetHiddenBits( HIDEHUD_CROSSHAIR );
+	SetHiddenBits( HIDEHUD_CROSSHAIR | HIDEHUD_NEEDSUIT );	// HL2RPM
 }
 
 void CHUDQuickInfo::ApplySchemeSettings( IScheme *scheme )

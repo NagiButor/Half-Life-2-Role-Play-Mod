@@ -301,6 +301,9 @@ static CUtlString s_PendingLootDisplayName;
 static CUtlString s_PendingLootSoundOpen;
 static CUtlString s_PendingLootSoundClose;
 static bool s_bIgnoreLootUpdate = false;
+static bool s_bPendingTrade = false;
+static int s_nPendingTradeMoney[2];
+static CUtlString s_PendingTradeCurrency, s_PendingTradeLeft, s_PendingTradeRight;
 
 static void __MsgFunc_Inventory_Update( bf_read &msg )
 {
@@ -360,11 +363,26 @@ static void __MsgFunc_Inventory_Update( bf_read &msg )
 			s_PendingLootDisplayName = displayName;
 			s_PendingLootSoundOpen = soundOpen;
 			s_PendingLootSoundClose = soundClose;
+			s_bPendingTrade = false;
 
 			s_bIgnoreLootUpdate = false;
 			CVGuiInventoryPanel *invPanel = GetGlobalInventoryPanel();
 			if ( invPanel && invPanel->IsVisible() )
 				s_bIgnoreLootUpdate = true;
+			break;
+		}
+		case kInventoryUpdate_TradeInfo:
+		{
+			char cur[256], left[2048], right[2048];
+			s_nPendingTradeMoney[0] = msg.ReadLong();
+			s_nPendingTradeMoney[1] = msg.ReadLong();
+			msg.ReadString( cur, sizeof( cur ) );
+			msg.ReadString( left, sizeof( left ) );
+			msg.ReadString( right, sizeof( right ) );
+			s_PendingTradeCurrency = cur;
+			s_PendingTradeLeft = left;
+			s_PendingTradeRight = right;
+			s_bPendingTrade = true;
 			break;
 		}
 		case kInventoryUpdate_LootAddLeft:
@@ -390,6 +408,8 @@ static void __MsgFunc_Inventory_Update( bf_read &msg )
 				CVGuiLootPanel *panel = GetGlobalLootPanel();
 				if ( panel )
 				{
+					panel->SetTrade( s_bPendingTrade, s_nPendingTradeMoney[0], s_nPendingTradeMoney[1], s_PendingTradeCurrency.Get(),
+						s_PendingTradeLeft.Get(), s_PendingTradeRight.Get() );
 					panel->SetContext( s_PendingLootDisplayName.Get(), s_PendingLootSoundOpen.Get(), s_PendingLootSoundClose.Get() );
 					panel->SetItems( s_PendingLootLeftItems, s_PendingLootRightItems );
 				}
@@ -433,6 +453,14 @@ static void __MsgFunc_Quests_Update( bf_read &msg )
 			msg.ReadString( buf, sizeof( buf ) );
 			q.stageDescription = buf;
 			s_PendingQuests.AddToTail( q );
+			break;
+		}
+		case kQuestsUpdate_QuestDescMore:
+		{
+			char buf[1024];
+			msg.ReadString( buf, sizeof( buf ) );
+			if ( s_PendingQuests.Count() )
+				s_PendingQuests.Tail().stageDescription.Append( buf );
 			break;
 		}
 		case kQuestsUpdate_QuestsEnd:
@@ -611,6 +639,12 @@ bool ClientModeShared::CreateMove( float flInputSampleTime, CUserCmd *cmd )
 // Purpose: 
 // Input  : *pSetup - 
 //-----------------------------------------------------------------------------
+extern void RPMTerminal_OverrideView( CViewSetup *pSetup );	// HL2RPM: the camera at the screen of a terminal
+extern bool RPMTerminal_HidesHud();
+extern void RPMSeat_OverrideView( CViewSetup *pSetup );		// HL2RPM: third person while sitting (hl2rpm_seat_cam.cpp)
+extern void RPMTP_OverrideView( CViewSetup *pSetup );		// HL2RPM: third person like Fallout 4 (hl2rpm_tpcam.cpp)
+extern bool RPMSeat_IsSeatedClient();
+
 void ClientModeShared::OverrideView( CViewSetup *pSetup )
 {
 	QAngle camAngles;
@@ -663,6 +697,10 @@ void ClientModeShared::OverrideView( CViewSetup *pSetup )
 		pSetup->m_OrthoRight  = w;
 		pSetup->m_OrthoBottom = h;
 	}
+
+	RPMTP_OverrideView( pSetup );
+	RPMSeat_OverrideView( pSetup );
+	RPMTerminal_OverrideView( pSetup );
 }
 
 //-----------------------------------------------------------------------------
@@ -695,7 +733,7 @@ void ClientModeShared::OverrideMouseInput( float *x, float *y )
 //-----------------------------------------------------------------------------
 bool ClientModeShared::ShouldDrawViewModel()
 {
-	return true;
+	return !RPMTerminal_HidesHud() && !RPMSeat_IsSeatedClient();
 }
 
 bool ClientModeShared::ShouldDrawDetailObjects( )

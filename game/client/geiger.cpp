@@ -58,7 +58,7 @@ CHudGeiger::CHudGeiger( const char *pElementName ) :
 	SetParent( pParent );
 	m_flLastSoundTestTime = -9999;
 
-	SetHiddenBits( HIDEHUD_HEALTH );
+	SetHiddenBits( HIDEHUD_HEALTH | HIDEHUD_NEEDSUIT );	// HL2RPM: a counter of the suit
 }
 
 void CHudGeiger::ApplySchemeSettings( IScheme *scheme )
@@ -89,11 +89,23 @@ void CHudGeiger::VidInit(void)
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
+static int s_iRPMGeigerRange = 0;
+static float s_flRPMGeigerTime = -100.0f;
+
+// HL2RPM: the dosimeter of the work suits (hl2rpm_suithud.cpp) reads what the counter last heard:
+// the range (smaller - nearer to the source; 0 - nothing), and it fades if no message comes
+int RPMHud_GeigerRange()
+{
+	return gpGlobals->curtime - s_flRPMGeigerTime < 2.0f ? s_iRPMGeigerRange : 0;
+}
+
 void CHudGeiger::MsgFunc_Geiger( bf_read &msg )
 {
 	// update geiger data
 	m_iGeigerRange = msg.ReadByte();
 	m_iGeigerRange = m_iGeigerRange << 2;
+	s_iRPMGeigerRange = m_iGeigerRange;
+	s_flRPMGeigerTime = gpGlobals->curtime;
 }
 
 //-----------------------------------------------------------------------------

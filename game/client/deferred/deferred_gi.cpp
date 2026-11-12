@@ -347,7 +347,7 @@ static Vector s_vecCamera( 0, 0, 0 );
 // before a job that could read an entry is given out; never reallocated.
 static Vector s_Albedo[ GI_MAX_ALBEDO ];
 static int s_nAlbedo = 1;
-static CUtlMap< uintp, unsigned short > s_AlbedoMap( DefLessFunc( uintp ) );
+static CUtlMap< uintp, unsigned short, int > s_AlbedoMap( DefLessFunc( uintp ) );
 static uintp s_SurfaceCacheKey[ GI_SURFACE_CACHE ];
 static unsigned short s_SurfaceCacheVal[ GI_SURFACE_CACHE ];
 
@@ -444,21 +444,8 @@ void InitGIRTs()
 	}
 
 	// half resolution indirect light in the top left of a full size target (like the SSAO)
-	g_tex_GI.Init( materials->CreateNamedRenderTargetTextureEx2(
-		"_rt_hl2rpm_gi",
-		128, 128,
-		RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP,
-		IMAGE_FORMAT_RGBA16161616F,
-		MATERIAL_RT_DEPTH_NONE,
-		flags, 0 ) );
-
-	g_tex_GIBlur.Init( materials->CreateNamedRenderTargetTextureEx2(
-		"_rt_hl2rpm_gi_blur",
-		128, 128,
-		RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP,
-		IMAGE_FORMAT_RGBA16161616F,
-		MATERIAL_RT_DEPTH_NONE,
-		flags, 0 ) );
+	g_tex_GI.Init( CreateFrameSizedRT( "_rt_hl2rpm_gi", 1, IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE, flags ) );
+	g_tex_GIBlur.Init( CreateFrameSizedRT( "_rt_hl2rpm_gi_blur", 1, IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE, flags ) );
 }
 
 static IMaterial *CreateGIMaterial( const char *pszName, const char *pszShader, int iDirection )
@@ -1890,7 +1877,7 @@ static unsigned short SurfaceAlbedo( const char *pszSurface )
 		return s_SurfaceCacheVal[ iCache ];
 
 	unsigned short iAlbedo = 0;
-	const unsigned short idx = s_AlbedoMap.Find( key );
+	const int idx = s_AlbedoMap.Find( key );
 	if ( idx != s_AlbedoMap.InvalidIndex() )
 		iAlbedo = s_AlbedoMap[ idx ];
 	else

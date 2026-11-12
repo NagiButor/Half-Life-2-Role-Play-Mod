@@ -281,6 +281,7 @@ class LangTexts(QWidget):
         self.edits = {}
         self.voice_widgets = {}
         self.counters = {}
+        self.mt_labels = {}
         p = ctx.project
         for lang in p.languages:
             box = QFrame()
@@ -292,6 +293,11 @@ class LangTexts(QWidget):
             name = QLabel("<b>%s</b> %s" % (short_lang(lang), LANGUAGE_NAMES.get(lang, lang)) +
                           ("  <span style='color:#8d97a4'>(основной)</span>" if lang == p.base_language else ""))
             head.addWidget(name)
+            mt = QLabel("МП")
+            mt.setToolTip("Машинный перевод — проверьте и поправьте; пометка исчезнет после ручной правки")
+            mt.setStyleSheet("color:#1d2127; background:#d9a441; border-radius:3px; padding:0 4px; font-size:10px; font-weight:600;")
+            head.addWidget(mt)
+            self.mt_labels[lang] = mt
             head.addStretch(1)
             if byte_limit:
                 cnt = QLabel()
@@ -315,6 +321,12 @@ class LangTexts(QWidget):
                 self.voice_widgets[lang] = vw
             lay.addWidget(box)
             self._count(lang)
+            self._mt(lang)
+
+    def _mt(self, lang):
+        from ..translate import is_mt
+        if lang in self.mt_labels:
+            self.mt_labels[lang].setVisible(is_mt(self.ctx.project, lang, self.texts.get(lang, "")))
 
     def _edit(self, lang, t):
         t = clean_text(t)
@@ -323,6 +335,7 @@ class LangTexts(QWidget):
         elif lang in self.texts:
             del self.texts[lang]
         self._count(lang)
+        self._mt(lang)
         for vw in self.voice_widgets.values():
             vw.refresh() if vw.lang == lang else None
         self.changed.emit()

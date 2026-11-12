@@ -769,6 +769,18 @@ static bool FindEngineLeaves()
 	return false;
 }
 
+bool DeferredOcclusion_GetLeafBounds( int iLeaf, Vector &vecMins, Vector &vecMaxs, bool &bSolid )
+{
+	if ( !EnsureWorldLeaves() || iLeaf < 0 || iLeaf >= s_WorldLeaves.Count() )
+		return false;
+	const OccWorldLeaf_t &leaf = s_WorldLeaves[ iLeaf ];
+	// (a unit more: the bounds in the .bsp are rounded to whole units)
+	vecMins = leaf.vecMins - Vector( 1, 1, 1 );
+	vecMaxs = leaf.vecMaxs + Vector( 1, 1, 1 );
+	bSolid = leaf.nCluster < 0;
+	return true;
+}
+
 void DeferredOcclusion_HideWorldLeaves( const Vector &vecOrigin, const QAngle &angles )
 {
 	s_HiddenLeaves.RemoveAll();

@@ -1530,9 +1530,18 @@ static RenderGroup_t DetectBucketedRenderGroup( RenderGroup_t group, float fDime
 	return bucketedGroup;
 }
 
+// HL2RPM: a view whose leaves did not come from the engine's world lists (a shadow view that
+// collects its renderables from the leaves in its frustum - CRendering3dView::BuildLeafListsOnly):
+// the area portal frustums the engine has are another view's - the main frustum test only
+static bool s_bNoPortalTestEnts = false;
+void ClientLeafSystem_SetNoPortalTest( bool bNoTest )
+{
+	s_bNoPortalTestEnts = bNoTest;
+}
+
 void CClientLeafSystem::CollateRenderablesInLeaf( int leaf, int worldListLeafIndex,	const SetupRenderInfo_t &info )
 {
-	bool portalTestEnts = r_PortalTestEnts.GetBool() && !r_portalsopenall.GetBool();
+	bool portalTestEnts = r_PortalTestEnts.GetBool() && !r_portalsopenall.GetBool() && !s_bNoPortalTestEnts;
 	
 	// Place a fake entity for static/opaque ents in this leaf
 	AddRenderableToRenderList( *info.m_pRenderList, NULL, worldListLeafIndex, RENDER_GROUP_OPAQUE_STATIC, NULL );

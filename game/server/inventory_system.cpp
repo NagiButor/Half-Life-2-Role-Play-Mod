@@ -1,4 +1,5 @@
 #include "cbase.h"
+#include "hl2rpm_char.h"
 #include "inventory_system.h"
 #include "player.h"
 #include "util.h"
@@ -12,8 +13,12 @@
 #include "filesystem.h"
 #include "KeyValues.h"
 #include "isaverestore.h"
+#include "hl2rpm_items.h"
+#include "hl2rpm_weapons.h"
 
 extern ConVar quest_reward_debug;
+CBaseEntity *RPMItem_SpawnInWorld( const char *id, int count, const Vector &pos, const QAngle &ang );
+bool RPMItem_Use( CBasePlayer *pPlayer, const char *id );
 
 // Wrapper entity for dropped inventory ammo: stores an explicit bullet count
 // and model so pickups always grant the stored amount instead of the
@@ -451,6 +456,13 @@ namespace InventorySystem
         if (!classname || !classname[0])
             return 0.0f;
 
+        // HL2RPM: the item database (Creation Kit) decides, then the old weight table
+        const RPMItemDef_t *pDef = RPMItems::Find(classname);
+        if (pDef && pDef->weight >= 0.0f)
+            return pDef->weight;
+        if (!pDef && RPMItems::IsBuiltin(classname))
+            return 0.0f;    // the built-in currency weighs nothing (a project without an item database)
+
         if (!g_bWeightTableLoaded)
             LoadInventoryWeightTable();
 
@@ -486,6 +498,10 @@ namespace InventorySystem
                     const int bullets = Max(0, it.bullets);
                     total += GetClassUnitWeightKg(cls, true) * (float)bullets;
                 }
+                else if (RPMItems::IsStackable(cls))
+                {
+                    total += GetClassUnitWeightKg(cls, false) * (float)Max(1, it.bullets);
+                }
                 else
                 {
                     total += GetClassUnitWeightKg(cls, false);
@@ -517,7 +533,11 @@ namespace InventorySystem
 
     float GetPlayerMaxCarryWeight(CBasePlayer *pPlayer)
     {
-        return sv_inventory_weight_max.GetFloat();
+        // HL2RPM: the carry weight of the character (Strength, perks; hl2rpm_char.cpp);
+        // sv_inventory_weight_max set to something else than its default overrides it
+        if (Q_strcmp(sv_inventory_weight_max.GetString(), sv_inventory_weight_max.GetDefault()))
+            return sv_inventory_weight_max.GetFloat();
+        return RPMChar::CarryWeight();
     }
 
     bool IsPlayerOverencumbered(CBasePlayer *pPlayer)
@@ -574,6 +594,11 @@ namespace InventorySystem
             DevMsg("Inventory: AddItemToPlayer player=%d item='%s'\n", pPlayer->entindex(), itemName);
         PlayerInv *inv = FindOrCreateInventory(pPlayer);
         if (!inv) return;
+        if (RPMItems::IsStackable(itemName))
+        {
+            AddItemToPlayerWithBullets(pPlayer, itemName, 1);
+            return;
+        }
         InvItem it;
         it.classname = itemName;
         if (IsAmmoItem(itemName))
@@ -620,7 +645,8 @@ namespace InventorySystem
         PlayerInv *inv = FindOrCreateInventory(pPlayer);
         if (!inv) return;
         // If an existing ammo entry of the same classname exists, stack bullets
-        if (IsAmmoItem(itemName))
+        // (and the count of a stackable item of the database: money)
+        if (IsAmmoItem(itemName) || RPMItems::IsStackable(itemName))
         {
             for (int i = 0; i < inv->items.Count(); ++i)
             {
@@ -638,7 +664,7 @@ namespace InventorySystem
         // No existing entry found (or not an ammo item) - create a new entry
         InvItem it;
         it.classname = itemName;
-        if (IsAmmoItem(itemName))
+        if (IsAmmoItem(itemName) || RPMItems::IsStackable(itemName))
             it.bullets = bullets;
         else
             it.bullets = 0;
@@ -653,6 +679,44 @@ namespace InventorySystem
         {
             SyncPlayerAmmoWithInventory(pPlayer);
         }
+    }
+
+    int CountItem(CBasePlayer *pPlayer, const char *itemName)
+    {
+        if (!pPlayer || !itemName || !itemName[0]) return 0;
+        PlayerInv *inv = FindOrCreateInventory(pPlayer);
+        if (!inv) return 0;
+        const bool stack = IsAmmoItem(itemName) || RPMItems::IsStackable(itemName);
+        int n = 0;
+        for (int i = 0; i < inv->items.Count(); ++i)
+            if (!Q_stricmp(inv->items[i].classname.Get(), itemName))
+                n += stack ? Max(0, inv->items[i].bullets) : 1;
+        return n;
+    }
+
+    int TakeItems(CBasePlayer *pPlayer, const char *itemName, int count)
+    {
+        if (!pPlayer || !itemName || !itemName[0] || count <= 0) return 0;
+        PlayerInv *inv = FindOrCreateInventory(pPlayer);
+        if (!inv) return 0;
+        const bool stack = IsAmmoItem(itemName) || RPMItems::IsStackable(itemName);
+        int taken = 0;
+        for (int i = inv->items.Count() - 1; i >= 0 && taken < count; --i)
+        {
+            if (Q_stricmp(inv->items[i].classname.Get(), itemName))
+                continue;
+            if (stack && inv->items[i].bullets > count - taken)
+            {
+                inv->items[i].bullets -= count - taken;
+                taken = count;
+                break;
+            }
+            taken += stack ? Max(0, inv->items[i].bullets) : 1;
+            inv->items.Remove(i);
+        }
+        if (IsAmmoItem(itemName))
+            SyncPlayerAmmoWithInventory(pPlayer);
+        return taken;
     }
 
     int RemoveItemFromPlayer(CBasePlayer *pPlayer, const char *itemName)
@@ -917,6 +981,12 @@ namespace InventorySystem
         static char buf[256];
         if (!classname || !classname[0])
             return "(unknown)";
+        // HL2RPM: the database name in the game's language
+        if (RPMItems::Find(classname))
+        {
+            Q_strncpy(buf, RPMItems::Name(classname), sizeof(buf));
+            return buf;
+        }
 
         // Weapons: strip "weapon_" and prettify
         if (!Q_strnicmp(classname, "weapon_", 7))
@@ -1124,6 +1194,13 @@ static void CC_Inventory_Use(const CCommand &args)
     CBasePlayer *pPlayer = UTIL_GetCommandClient();
     if (!pPlayer) return;
     
+    // HL2RPM: notes, food, medicine, keys, money of the item database
+    if (RPMItem_Use(pPlayer, item))
+    {
+        InventorySystem::SendInventoryToPlayer(pPlayer);
+        return;
+    }
+
     // AMMO ITEMS CANNOT BE USED - they can only be picked up and dropped
     // Ammo is automatically synced with weapon ammo counts
     if (InventorySystem::IsAmmoItem(item))
@@ -1165,6 +1242,16 @@ static void CC_Inventory_Use(const CCommand &args)
     }
 
 
+    // HL2RPM: one weapon at a time - the one in the hands goes back into the inventory. What the player
+    // carries in ammo doesn't change: a weapon comes with its magazine, not with its default ammo.
+    int ammoBefore[MAX_AMMO_SLOTS];
+    if (entryIsWeapon)
+    {
+        RPMWeapons::StowAll(pPlayer, NULL);
+        for (int i = 0; i < MAX_AMMO_SLOTS; ++i)
+            ammoBefore[i] = pPlayer->GetAmmoCount(i);
+    }
+
     // Prefer giving the item/weapon directly to the player so it is added to
     // their loadout immediately. `GiveNamedItem` handles weapons and many
     // items correctly. For generic items that return a world entity, parent
@@ -1179,13 +1266,21 @@ static void CC_Inventory_Use(const CCommand &args)
             CBaseCombatWeapon *pWeap = dynamic_cast<CBaseCombatWeapon*>(pGiven);
             if (pWeap)
             {
-                pPlayer->Weapon_Equip(pWeap);
+                // (GiveNamedItem has normally equipped it by its touch: a second Weapon_Equip took a second slot)
+                if (pWeap->GetOwner() != pPlayer)
+                    pPlayer->Weapon_Equip(pWeap);
                 // If we popped a stored inventory weapon entry, restore its clips
                 // and the player's reserve ammo that was recorded at drop time.
                 if (entryIsWeapon && poppedItem.classname.Get()[0])
                 {
                     pWeap->m_iClip1 = poppedItem.weaponClip1;
                     pWeap->m_iClip2 = poppedItem.weaponClip2;
+                    // (a new weapon without a magazine - a grenade - keeps what it came with)
+                    if (pWeap->UsesClipsForAmmo1() || poppedItem.reserveAmmoIndex >= 0)
+                    {
+                        for (int i = 0; i < MAX_AMMO_SLOTS; ++i)
+                            pPlayer->SetAmmoCount(ammoBefore[i], i);
+                    }
                     if (poppedItem.reserveAmmoIndex >= 0)
                     {
                         pPlayer->SetAmmoCount(poppedItem.reserveAmmoCount, poppedItem.reserveAmmoIndex);
@@ -1284,6 +1379,16 @@ static void CC_Inventory_Drop(const CCommand &args)
     CBasePlayer *pPlayer = UTIL_GetCommandClient();
     if (!pPlayer) return;
 
+    // HL2RPM: quest items of the database stay with the player
+    const RPMItemDef_t *pRpmDef = RPMItems::Find(item);
+    if (pRpmDef && pRpmDef->quest)
+    {
+        bool ru = !Q_stricmp(RPMItems::Language(), "russian");
+        CUtlString msg = InventorySystem::EscapeForQuotedArg(ru ? "Это нужно для задания" : "You need this for a quest");
+        engine->ClientCommand(pPlayer->edict(), UTIL_VarArgs("ui_toast \"inventory\" \"%s\" \"\"\n", msg.Get()));
+        return;
+    }
+
     // Debug: dump player's inventory before removal so we can see stored bullets
     InventorySystem::DebugDumpPlayerInventory(pPlayer);
 
@@ -1330,6 +1435,14 @@ static void CC_Inventory_Drop(const CCommand &args)
     Vector spawnPos = pPlayer->EyePosition() + forward * 48.0f;
     QAngle ang = pPlayer->GetAbsAngles();
 
+    // HL2RPM: items of the database without an entity class of their own
+    if (RPMItems::IsGeneric(item))
+    {
+        RPMItem_SpawnInWorld(item, Max(1, droppedBullets), spawnPos, ang);
+        InventorySystem::SendInventoryToPlayer(pPlayer);
+        return;
+    }
+
     // Create the entity by classname.
     // For weapons: use GiveNamedItem + Weapon_Drop for proper physics/placement.
     // For items (item_*): directly create in world to avoid triggering item effects
@@ -1339,6 +1452,12 @@ static void CC_Inventory_Drop(const CCommand &args)
     
     if (isWeapon)
     {
+        // HL2RPM: the weapon on the player has no part in this: nothing is put back, and it ends as it was
+        // (in the hands or away)
+        CBaseCombatWeapon *pWasActive = pPlayer->GetActiveWeapon();
+        const bool bWasAway = RPMWeapons::IsAway(pPlayer);
+        RPMWeapons::SetBusy(true);
+
         // Weapon: give it, then drop it using normal weapon drop logic
         CBaseEntity *pGiven = NULL;
         if (poppedItem.classname.Get()[0])
@@ -1421,6 +1540,12 @@ static void CC_Inventory_Drop(const CCommand &args)
                 pEnt->SetTouch(NULL);
             }
         }
+
+        RPMWeapons::SetBusy(false);
+        if (bWasAway)
+            RPMWeapons::PutAway(pPlayer);
+        else if (pWasActive && pPlayer->GetActiveWeapon() != pWasActive)
+            pPlayer->Weapon_Switch(pWasActive);
     }
     else
     {
@@ -1903,7 +2028,8 @@ static void CC_Inventory_Split(const CCommand &args)
         InventorySystem::InvItem &src = InventorySystem::g_PlayerInventories[i].items[slotIndex];
         if (src.isWeapon)
             return;
-        if (!InventorySystem::IsAmmoItem(src.classname.Get()))
+        // HL2RPM: ammo and the stacks of the item database (tokens, bobby pins, rations)
+        if (!InventorySystem::IsAmmoItem(src.classname.Get()) && !RPMItems::IsStackable(src.classname.Get()))
             return;
 
         if (src.bullets <= 1)
@@ -1924,7 +2050,7 @@ static void CC_Inventory_Split(const CCommand &args)
         return;
     }
 }
-static ConCommand inventory_split_cc("inventory_split", CC_Inventory_Split, "Split ammo stack at slot: inventory_split <slot> <amount>", FCVAR_GAMEDLL | FCVAR_CLIENTCMD_CAN_EXECUTE);
+static ConCommand inventory_split_cc("inventory_split", CC_Inventory_Split, "Split an ammo / item stack at slot: inventory_split <slot> <amount>", FCVAR_GAMEDLL | FCVAR_CLIENTCMD_CAN_EXECUTE);
 
 // Server testing commands
 static void CC_Inventory_Add(const CCommand &args)

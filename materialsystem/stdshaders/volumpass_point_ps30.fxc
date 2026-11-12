@@ -191,9 +191,7 @@ PS_OUTPUT main( const PS_INPUT In )
 	{
 		float dist = length( vecStartShadow );
 
-		float flRadiusFalloff = 1.0f - min( 1, dist / g_flMixedData[ 0 ].w );
-
-		flRadiusFalloff = pow( flRadiusFalloff, g_flMixedData[ 1 ].w );
+		float flRadiusFalloff = DeferredLightFalloff( dist, g_flMixedData[ 0 ].w, g_flMixedData[ 1 ].w );
 
 		float3 sample = 1.0f.xxx;
 #if NUM_SHADOWED || NUM_SHADOWED_COOKIE

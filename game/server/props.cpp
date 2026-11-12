@@ -7,6 +7,7 @@
 
 
 #include "cbase.h"
+#include "hl2rpm_rpg.h"
 #include "BasePropDoor.h"
 #include "ai_basenpc.h"
 #include "npcevent.h"
@@ -4255,6 +4256,8 @@ BEGIN_DATADESC_NO_BASE(locksound_t)
 END_DATADESC()
 
 BEGIN_DATADESC(CBasePropDoor)
+	DEFINE_KEYFIELD(m_iszRPMKey, FIELD_STRING, "rpm_key"),
+	DEFINE_KEYFIELD(m_iRPMLockLevel, FIELD_INTEGER, "rpm_lock_level"),
 	//DEFINE_FIELD(m_bLockedSentence, FIELD_CHARACTER),
 	//DEFINE_FIELD(m_bUnlockedSentence, FIELD_CHARACTER),	
 	DEFINE_KEYFIELD(m_nHardwareType, FIELD_INTEGER, "hardware"),
@@ -4742,6 +4745,12 @@ void CBasePropDoor::OnUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TY
 
 	if (IsDoorClosed() || (IsDoorOpen() && HasSpawnFlags(SF_DOOR_USE_CLOSES)))
 	{
+		// HL2RPM: a locked door with a key item / lockpick level (Creation Kit) opens for the player who can
+		if (m_bLocked && (m_iszRPMKey != NULL_STRING || m_iRPMLockLevel > 0) && pActivator && pActivator->IsPlayer() &&
+			RPMLock::TryOpen(this, ToBasePlayer(pActivator), STRING(m_iszRPMKey), m_iRPMLockLevel))
+		{
+			Unlock();
+		}
 		// Ready to be opened or closed.
 		if (m_bLocked)
 		{

@@ -1,0 +1,5 @@
+# perf scenario: demo_map_rus (open map, spawn view)
+|cl_weather_tour_step 10; r_hl2rpm_gpuprof 1; sv_weather partlycloudy 0; sv_timecycle_set_time 13
+|wait 1
+shot|
+shot|sv_weather clear 0

@@ -23,6 +23,8 @@ bool DeferredWorldMesh_AlsoEngine();
 // current one - and the render stage the shadow pass). False = no meshes for this map: the
 // caller draws the world the engine's way.
 bool DeferredWorldMesh_DrawShadowCasters();
+// the meshes of this map are built (DeferredWorldMesh_DrawShadowCasters will draw the world)
+bool DeferredWorldMesh_IsReady();
 
 // Dev: the meshes as a wireframe in the view being drawn (r_deferred_shadow_worldmesh_show)
 void DeferredWorldMesh_DebugDraw();

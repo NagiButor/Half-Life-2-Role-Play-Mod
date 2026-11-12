@@ -2,6 +2,9 @@
 #include "deferred_includes.h"
 #include "hl2rpm_pbr.h"
 
+#include "deferred_decal_vs30.inc"
+#include "hl2rpm_itempreview_ps30.inc"
+
 #include "tier0/memdbgon.h"
 
 
@@ -147,6 +150,137 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 #endif
 	}
 
+	// HL2RPM: the model alone, on the card of an item (hl2rpm_itempreview_ps30.fxc): lit by itself,
+	// there is no scene around it - no G-buffer, no light buffer
+	void DrawPreview( IMaterialVar **params, IShaderShadow *pShaderShadow, IShaderDynamicAPI *pShaderAPI,
+		VertexCompressionType_t vertexCompression )
+	{
+		const bool bBump = params[ BUMPMAP ]->IsTexture();
+		const bool bBlend = IS_FLAG_SET( MATERIAL_VAR_TRANSLUCENT );
+		const bool bBase = params[ BASETEXTURE ]->IsTexture();
+		const bool bSelfIllum = IS_FLAG_SET( MATERIAL_VAR_SELFILLUM );
+		const bool bEnvmapMask = params[ ENVMAPMASK ]->IsDefined() && params[ ENVMAPMASK ]->IsTexture();
+		const bool bSelfIllumMask = bSelfIllum && params[ SELFILLUMMASK ]->IsDefined() && params[ SELFILLUMMASK ]->IsTexture();
+
+		SHADOW_STATE
+		{
+			pShaderShadow->SetDefaultState();
+			pShaderShadow->EnableSRGBWrite( true );
+			pShaderShadow->EnableAlphaWrites( true );
+			if ( bBlend )
+			{
+				pShaderShadow->EnableBlending( true );
+				pShaderShadow->BlendFunc( SHADER_BLEND_SRC_ALPHA, SHADER_BLEND_ONE_MINUS_SRC_ALPHA );
+				pShaderShadow->EnableDepthWrites( false );
+			}
+			if ( IS_FLAG_SET( MATERIAL_VAR_NOCULL ) )
+				pShaderShadow->EnableCulling( false );
+
+			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER1, false );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER2, false );
+
+			int pTexCoordDim[3] = { 2, 0, 3 };
+			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION | VERTEX_NORMAL | VERTEX_FORMAT_COMPRESSED, 1, pTexCoordDim, 0 );
+
+			DECLARE_STATIC_VERTEX_SHADER( deferred_decal_vs30 );
+			SET_STATIC_VERTEX_SHADER_COMBO( VERTEXCOLOR, 0 );
+			SET_STATIC_VERTEX_SHADER( deferred_decal_vs30 );
+
+			DECLARE_STATIC_PIXEL_SHADER( hl2rpm_itempreview_ps30 );
+			SET_STATIC_PIXEL_SHADER_COMBO( BUMPMAP, bBump );
+			SET_STATIC_PIXEL_SHADER( hl2rpm_itempreview_ps30 );
+
+			pShaderShadow->FogMode( SHADER_FOGMODE_DISABLED );
+		}
+		DYNAMIC_STATE
+		{
+			pShaderAPI->SetDefaultState();
+
+			if ( g_pHardwareConfig->HasFastVertexTextures() )
+				SetHWMorphVertexShaderState( VERTEX_SHADER_SHADER_SPECIFIC_CONST_10, VERTEX_SHADER_SHADER_SPECIFIC_CONST_11, SHADER_VERTEXTEXTURE_SAMPLER0 );
+
+			DECLARE_DYNAMIC_VERTEX_SHADER( deferred_decal_vs30 );
+			SET_DYNAMIC_VERTEX_SHADER_COMBO( COMPRESSED_VERTS, (int)vertexCompression );
+			SET_DYNAMIC_VERTEX_SHADER_COMBO( SKINNING, pShaderAPI->GetCurrentNumBones() > 0 ? 1 : 0 );
+			SET_DYNAMIC_VERTEX_SHADER_COMBO( MORPHING, pShaderAPI->IsHWMorphingEnabled() ? 1 : 0 );
+			SET_DYNAMIC_VERTEX_SHADER( deferred_decal_vs30 );
+
+			DECLARE_DYNAMIC_PIXEL_SHADER( hl2rpm_itempreview_ps30 );
+			SET_DYNAMIC_PIXEL_SHADER( hl2rpm_itempreview_ps30 );
+
+			if ( g_pHardwareConfig->HasFastVertexTextures() )
+			{
+				bool bUnusedTexCoords[3] = { false, false, !pShaderAPI->IsHWMorphingEnabled() };
+				pShaderAPI->MarkUnusedVertexFields( 0, 3, bUnusedTexCoords );
+			}
+
+			if ( bBase )
+				BindTexture( SHADER_SAMPLER0, BASETEXTURE, FRAME );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER0, TEXTURE_WHITE );
+			if ( bBump )
+				BindTexture( SHADER_SAMPLER1, BUMPMAP );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER1, TEXTURE_NORMALMAP_FLAT );
+			if ( bSelfIllumMask )
+				BindTexture( SHADER_SAMPLER2, SELFILLUMMASK );
+			else if ( bEnvmapMask )
+				BindTexture( SHADER_SAMPLER2, ENVMAPMASK );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER2, TEXTURE_WHITE );
+
+			float vEye[4] = { 0, 0, 0, 0 };
+			pShaderAPI->GetWorldSpaceCameraPosition( vEye );
+			pShaderAPI->SetPixelShaderConstant( 0, vEye, 1, true );
+
+			// (the vertex shader's G-buffer depth goes unused)
+			const float vForward[4] = { 1, 0, 0, 0 }, vScale[4] = { 1, 0, 0, 0 };
+			pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_0, vEye );
+			pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_1, vForward );
+			pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_2, vScale );
+
+			const bool bGlossMask = bBump && params[ PBR_GLOSSMASK ]->GetIntValue() != 0;
+			const float c1[4] = { 1.0f - clamp( params[ PHONG_EXP ]->GetFloatValue(), 0.0f, 1.0f ),
+				clamp( params[ PBR_METALNESS ]->GetFloatValue(), 0.0f, 1.0f ),
+				0.04f * clamp( params[ PBR_SPECULAR ]->GetFloatValue(), 0.0f, 4.0f ),
+				bGlossMask ? 1.0f : 0.0f };
+			pShaderAPI->SetPixelShaderConstant( 1, c1, 1, true );
+
+			float c2[4] = { 0, 0, 0, 0 };
+			if ( bSelfIllum )
+			{
+				params[ SELFILLUMTINT ]->GetVecValue( c2, 3 );
+				const bool bInMaskAlpha = !bSelfIllumMask && bEnvmapMask && params[ SELFILLUM_ENVMAPMASK_ALPHA ]->GetIntValue() != 0;
+				c2[3] = bInMaskAlpha ? 3.0f : bSelfIllumMask ? 2.0f : 1.0f;
+			}
+			pShaderAPI->SetPixelShaderConstant( 2, c2, 1, true );
+
+			// the mask of the reflections, as the stock shaders take it: 1 - the base alpha, or the
+			// base alpha for phong, or the alpha of the bump map
+			const bool bBaseAlphaEnvmap = IS_FLAG_SET( MATERIAL_VAR_BASEALPHAENVMAPMASK );
+			const bool bBaseAlphaPhong = params[ BASEMAPALPHAPHONGMASK ]->GetIntValue() != 0;
+			const bool bAlphaUsed = bSelfIllum && !bSelfIllumMask;
+			const float flRef = params[ ALPHATESTREFERENCE ]->GetFloatValue();
+			const float c3[4] = { IS_FLAG_SET( MATERIAL_VAR_ALPHATEST ) ? ( flRef > 0.0f ? flRef : 0.5f ) : 0.0f,
+				( bBaseAlphaEnvmap && !bAlphaUsed ) ? 1.0f : ( bBaseAlphaPhong && !bAlphaUsed ) ? 0.0f : 1.0f,
+				( bBaseAlphaEnvmap && !bAlphaUsed ) ? -1.0f : ( bBaseAlphaPhong && !bAlphaUsed ) ? 1.0f : 0.0f,
+				( bBump && IS_FLAG_SET( MATERIAL_VAR_NORMALMAPALPHAENVMAPMASK ) ) ? 1.0f : 0.0f };
+			pShaderAPI->SetPixelShaderConstant( 3, c3, 1, true );
+
+			const Vector vecRim = pShaderAPI->GetVectorRenderingParameter( VECTOR_RENDERPARM_HL2RPM_PREVIEW_RIM );
+			const float c4[4] = { vecRim.x, vecRim.y, vecRim.z, 0.0f };
+			pShaderAPI->SetPixelShaderConstant( 4, c4, 1, true );
+
+			const float c5[4] = { ( bEnvmapMask && !bSelfIllumMask ) ? 1.0f : 0.0f, bBlend ? 1.0f : 0.0f, 0.0f, 0.0f };
+			pShaderAPI->SetPixelShaderConstant( 5, c5, 1, true );
+		}
+		Draw();
+	}
+
 	SHADER_INIT_PARAMS()
 	{
 		SET_FLAGS2( MATERIAL_VAR2_SUPPORTS_HW_SKINNING );
@@ -281,6 +415,12 @@ BEGIN_VS_SHADER( DEFERRED_MODEL, "" )
 		else
 			Draw(false);
 #endif
+
+		if ( pShaderShadow != NULL ||
+			iDeferredRenderStage == DEFERRED_RENDER_STAGE_PREVIEW )
+			DrawPreview( params, pShaderShadow, pShaderAPI, vertexCompression );
+		else
+			Draw(false);
 
 		if ( pShaderAPI != NULL && pDefContext->m_bMaterialVarsChanged )
 			pDefContext->m_bMaterialVarsChanged = false;

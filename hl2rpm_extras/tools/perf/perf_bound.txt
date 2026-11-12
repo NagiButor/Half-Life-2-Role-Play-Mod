@@ -1,0 +1,14 @@
+# CPU vs GPU bound
+|cl_weather_tour_step 8; r_hl2rpm_gpuprof 1; sv_weather partlycloudy 0; sv_timecycle_set_time 13; r_deferred_treesway 0; r_deferred_taa_jitter 0; r_weather_motes 0; r_weather_cloud_wind_scale 0; ai_disable 1
+|setpos -2954 -3625 60; setang -5 69 0
+shot|setpos -2954 -3625 60; setang -5 69 0
+shot|mat_viewportscale 0.25; setpos -2954 -3625 60; setang -5 69 0
+|mat_viewportscale 1
+shot|setpos -2954 -3625 60; setang -5 69 0
+shot|r_drawstaticprops 0; setpos -2954 -3625 60; setang -5 69 0
+|r_drawstaticprops 1
+shot|r_drawentities 0; setpos -2954 -3625 60; setang -5 69 0
+|r_drawentities 1
+shot|mat_queue_mode 0; setpos -2954 -3625 60; setang -5 69 0
+|mat_queue_mode -1
+shot|setpos -2954 -3625 60; setang -5 69 0

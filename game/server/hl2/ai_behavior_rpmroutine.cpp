@@ -8,10 +8,12 @@
 #include "ai_navigator.h"
 #include "ai_motor.h"
 #include "hl2rpm_world.h"
+#include "hl2rpm_audio.h"
 #include "dialogsystem_server.h"
 #include "dialog_definitions.h"
 #include "player.h"
 #include "ndebugoverlay.h"
+#include "weapon_stunstick.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -132,7 +134,7 @@ void CAI_RPMRoutineBehavior::Evaluate( bool bForce )
 			const RPMPackage_t &pkg = pDef->packages[i];
 			if ( pkg.type == RPMPKG_NONE )
 				continue;
-			if ( !RPMWorld::IsPackageTime( pkg, flHours ) || !RPMWorld::PackageConditionsMet( pkg ) )
+			if ( !RPMWorld::IsPackageTime( pkg, flHours ) || !RPMWorld::PackageConditionsMet( pkg, GetOuter() ) )
 				continue;
 			if ( pkg.once && IsDone( pkg ) )
 				continue;
@@ -146,6 +148,9 @@ void CAI_RPMRoutineBehavior::Evaluate( bool bForce )
 		m_iPackage = iNew;
 		m_iszPackage = iszNew;
 		OnPackageChanged();
+		// HL2RPM: barks of the "package" event ("Time for lunch")
+		if ( iNew >= 0 )
+			RPMAudio::NotePackage( GetOuter(), pDef->packages[iNew].name );
 	}
 }
 
@@ -779,7 +784,17 @@ void RPMRoutine_DumpNPC( CAI_BaseNPC *pNPC )
 		return;
 	char sz[256];
 	pRoutine->GetDebugText( sz, sizeof( sz ) );
-	Msg( "  %s (%s) at %.0f %.0f %.0f\n", sz, pNPC->GetClassname(), pNPC->GetAbsOrigin().x, pNPC->GetAbsOrigin().y, pNPC->GetAbsOrigin().z );
+	static const char *s_pszStates[] = { "none", "idle", "alert", "combat", "script", "playdead", "prone", "dead" };
+	const int iState = pNPC->GetState();
+	CWeaponStunStick *pBaton = dynamic_cast<CWeaponStunStick *>( pNPC->GetActiveWeapon() );
+	Msg( "  %s (%s) at %.0f %.0f %.0f, state %s, enemy %s%s\n", sz, pNPC->GetClassname(),
+		pNPC->GetAbsOrigin().x, pNPC->GetAbsOrigin().y, pNPC->GetAbsOrigin().z,
+		( iState >= 0 && iState < (int)ARRAYSIZE( s_pszStates ) ) ? s_pszStates[iState] : "?",
+		pNPC->GetEnemy() ? pNPC->GetEnemy()->GetClassname() : "-",
+		pBaton ? ( pBaton->GetStunState() ? ", baton ON" : ", baton off" ) : "" );
+	const char *pszName = RPMWorld::GetNPCDisplayNameFor( pNPC );
+	Msg( "    \"%s\" %s skin %d, weapon %s\n", pszName ? pszName : "", STRING( pNPC->GetModelName() ), pNPC->GetSkin(),
+		pNPC->GetActiveWeapon() ? pNPC->GetActiveWeapon()->GetClassname() : "-" );
 }
 
 //-----------------------------------------------------------------------------

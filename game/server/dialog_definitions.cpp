@@ -12,6 +12,9 @@
 
 // BlockingLoadScene is defined in the shared SceneCache implementation; declare here.
 extern CChoreoScene *BlockingLoadScene( const char *filename );
+#if defined( GAME_DLL )
+extern void RPMTalkGesture_OnLine( CBaseEntity *pSpeaker, const char *pszText, float flDuration, const char *pszScene );	// hl2rpm_talkgest.cpp
+#endif
 
 #if defined( GAME_DLL )
 #include "baseflex.h"
@@ -19,6 +22,9 @@ extern CChoreoScene *BlockingLoadScene( const char *filename );
 // Scene helpers (InstancedScriptedScene, etc.)
 #include "sceneentity.h"
 #include "quest_system.h"
+#include "hl2rpm_logic.h"
+#include "hl2rpm_rpg.h"
+#include "tier1/fmtstr.h"
 #endif
 #ifndef NO_STEAM
 #include "steam/steam_api.h"
@@ -136,6 +142,9 @@ namespace DialogDefinitions
         g_LoadedDialogs.RemoveAll();
         g_DialogByEntity.RemoveAll();
         g_DialogsLoaded = false;
+#if defined( GAME_DLL )
+        RPMLogic::FreePool( RPMLogic::POOL_DIALOGS );
+#endif
     }
 
     static bool IsTrueString(const char *s)
@@ -173,6 +182,7 @@ namespace DialogDefinitions
         const char *seq = pOptKV->GetString("server_sequence", "");
         Q_strncpy(outOpt.serverSequenceName, seq ? seq : "", sizeof(outOpt.serverSequenceName));
         outOpt.spoils = IsTrueString(pOptKV->GetString("spoils", "0"));
+        outOpt.trade = IsTrueString(pOptKV->GetString("trade", "0"));
 
         const char *grantQuest = pOptKV->GetString("grant_quest", "");
         Q_strncpy(outOpt.grantQuestId, grantQuest ? grantQuest : "", sizeof(outOpt.grantQuestId));
@@ -241,6 +251,16 @@ namespace DialogDefinitions
         Q_strncpy(outOpt.afterSoundName, LocString(pOptKV, "after_sound"), sizeof(outOpt.afterSoundName));
         Q_strncpy(outOpt.afterSequenceName, pOptKV->GetString("after_sequence", ""), sizeof(outOpt.afterSequenceName));
         outOpt.afterNextId = pOptKV->GetInt("after_next", -1);
+
+#if defined( GAME_DLL )
+        outOpt.pConds = RPMLogic::Keep(pOptKV->FindKey("conditions"), RPMLogic::POOL_DIALOGS);
+        outOpt.pCheck = RPMLogic::Keep(pOptKV->FindKey("check"), RPMLogic::POOL_DIALOGS);
+        outOpt.pActions = RPMLogic::Keep(pOptKV->FindKey("actions"), RPMLogic::POOL_DIALOGS);
+        outOpt.pFailActions = RPMLogic::Keep(pOptKV->FindKey("fail_actions"), RPMLogic::POOL_DIALOGS);
+#endif
+        outOpt.failNextId = pOptKV->GetInt("fail_next", -1);
+        outOpt.checkOnce = IsTrueString(pOptKV->GetString("check_once", "1"));
+        outOpt.showUnmet = IsTrueString(pOptKV->GetString("show_unmet", "0"));
     }
 
     static void TrimWhitespaceInPlace( char *s )
@@ -281,6 +301,10 @@ namespace DialogDefinitions
             def.failOnKillRepPenalty = pQuestKV->GetInt("fail_rep_penalty", 0);
             def.stages.RemoveAll();
             def.rewards.RemoveAll();
+            def.xp = pQuestKV->GetInt("xp", 0);
+            def.pOnComplete = RPMLogic::Keep(pQuestKV->FindKey("on_complete"), RPMLogic::POOL_QUESTS);
+            def.pOnFail = RPMLogic::Keep(pQuestKV->FindKey("on_fail"), RPMLogic::POOL_QUESTS);
+            def.pFailConds = RPMLogic::Keep(pQuestKV->FindKey("fail_conditions"), RPMLogic::POOL_QUESTS);
 
             const char *killTargets = pQuestKV->GetString("kill_targets", "");
             if ( killTargets && killTargets[0] )
@@ -336,6 +360,27 @@ namespace DialogDefinitions
                     st.killTarget = pStageKV->GetString("kill_target", "");
                     st.killCount = pStageKV->GetInt("kill_count", 0);
                     st.killTargets.RemoveAll();
+                    // HL2RPM: objectives, actions of the stage, the stage that follows
+                    st.pActions = RPMLogic::Keep(pStageKV->FindKey("actions"), RPMLogic::POOL_QUESTS);
+                    st.next = pStageKV->GetInt("next", -1);
+                    st.final = IsTrueString(pStageKV->GetString("final", "0"));
+                    st.objectives.RemoveAll();
+                    KeyValues *pObjs = pStageKV->FindKey("objectives");
+                    for ( KeyValues *pO = pObjs ? pObjs->GetFirstTrueSubKey() : NULL; pO; pO = pO->GetNextTrueSubKey() )
+                    {
+                        QuestObjDef obj;
+                        obj.id = pO->GetString("id", pO->GetName());
+                        obj.text = LocString(pO, "text");
+                        obj.type = pO->GetString("type", "custom");
+                        obj.target = pO->GetString("target", "");
+                        obj.item = pO->GetString("item", "");
+                        obj.count = Max(1, pO->GetInt("count", 1));
+                        obj.radius = pO->GetFloat("radius", 128.0f);
+                        obj.optional = IsTrueString(pO->GetString("optional", "0"));
+                        obj.marker = IsTrueString(pO->GetString("marker", "1"));
+                        obj.pConds = RPMLogic::Keep(pO->FindKey("conditions"), RPMLogic::POOL_QUESTS);
+                        st.objectives.AddToTail(obj);
+                    }
 
                     const char *stageTargets = pStageKV->GetString("kill_targets", "");
                     if ( stageTargets && stageTargets[0] )
@@ -425,6 +470,9 @@ namespace DialogDefinitions
         outNode.autoNextId = pNodeKV->GetInt("auto_next", -1);
         outNode.autoClose = IsTrueString(pNodeKV->GetString("end", "0")) || IsTrueString(pNodeKV->GetString("close", "0")) ||
             IsTrueString(pNodeKV->GetString("auto_close", "0"));
+#if defined( GAME_DLL )
+        outNode.pActions = RPMLogic::Keep(pNodeKV->FindKey("actions"), RPMLogic::POOL_DIALOGS);
+#endif
 
         const char *delayStr = pNodeKV->GetString("option_delay", "");
         if (!delayStr[0] || !Q_stricmp(delayStr, "auto"))
@@ -514,6 +562,7 @@ namespace DialogDefinitions
             pNode->autoNextId = -1;
             pNode->autoClose = false;
             pNode->spoils = false;
+            pNode->pActions = NULL;
             ParseNodeKV(pNodeKV, *pNode);
             pDialog->nodes.AddToTail(pNode);
         }
@@ -605,6 +654,12 @@ namespace DialogDefinitions
         QuestSystem().ClearQuestDefs();
         GetDialogLanguage();
         LoadDialogsFromScripts();
+        // HL2RPM: the quests of the Creation Kit (scripts/rpg/quests.txt) - the same format as the
+        // "quests" block of a dialog file; a quest of the same id there wins
+        KeyValues *pQuests = new KeyValues("Quests");
+        if (pQuests->LoadFromFile(filesystem, "scripts/rpg/quests.txt", "MOD"))
+            ParseQuestsKV(pQuests);
+        pQuests->deleteThis();
         g_DialogsLoaded = true;
     }
 
@@ -792,6 +847,24 @@ namespace DialogDefinitions
         SendDialogNodeToPlayerEx(pPlayer, dialog, nodeId, entIndex, overrideLine, NULL, NULL, NULL, forceNoOptions, forcePendingSpoil, forcedAutoNextId, forcedAutoClose);
     }
 
+    // singleplayer: one player, one dialog window
+    static struct
+    {
+        char entity[128];
+        int nodeId;
+        int autoNextId;
+        int autoClose;
+    } s_LastScreen = { "", INT_MIN, -1, 0 };
+
+    bool GetLastScreenTransition(const char *entityName, int nodeId, int &autoNextId, int &autoClose)
+    {
+        if (!entityName || s_LastScreen.nodeId != nodeId || Q_stricmp(s_LastScreen.entity, entityName) != 0)
+            return false;
+        autoNextId = s_LastScreen.autoNextId;
+        autoClose = s_LastScreen.autoClose;
+        return true;
+    }
+
     void SendDialogNodeToPlayerEx(CBasePlayer *pPlayer, const DSDialog *dialog, int nodeId, int entIndex, const char *overrideLine, const char *overrideChoreo, const char *overrideSound, const char *overrideSequence, bool forceNoOptions, bool forcePendingSpoil, int forcedAutoNextId, int forcedAutoClose)
     {
         if (!pPlayer || !dialog) return;
@@ -830,6 +903,10 @@ namespace DialogDefinitions
             effectiveAutoNextId = -1;
             effectiveAutoClose = true;
         }
+        Q_strncpy(s_LastScreen.entity, dialog->entityName.Get(), sizeof(s_LastScreen.entity));
+        s_LastScreen.nodeId = node->id;
+        s_LastScreen.autoNextId = effectiveAutoNextId;
+        s_LastScreen.autoClose = effectiveAutoClose ? 1 : 0;
 
         // Pack entire dialog node into a single payload argument to avoid command ordering/timing issues.
         // Format: entityName|entIndex|displayName|nodeId|line|choreo|sound|sequenceName|delaySecs|opt;index~text~next~flags;...
@@ -1012,14 +1089,37 @@ namespace DialogDefinitions
                     if (st && (st->state == kQuestState_Active || st->state == kQuestState_Completed))
                         continue;
                 }
+                // HL2RPM (Creation Kit): conditions and the skill check of the option. Flags to the client:
+                // 2 - shown greyed (conditions unmet, show_unmet), 4 / 8 - a check the player passes / fails
+                bool bMet = true;
+                char label[96] = "";
+                int extraFlags = 0;
+#if defined( GAME_DLL )
+                RPMLogic::Ctx_t lctx;
+                lctx.pPlayer = pPlayer;
+                lctx.pSelf = pOwner;
+                if (opt.pConds && !RPMLogic::Check(opt.pConds, lctx))
+                {
+                    if (!opt.showUnmet)
+                        continue;
+                    bMet = false;
+                    extraFlags |= 2;
+                }
+                if (opt.pCheck)
+                {
+                    if (opt.checkOnce && RPMState::Section("checks")->GetInt(CFmtStr("%s.%d.%d", dialog->entityName.Get(), node->id, optIndex), 0))
+                        continue;
+                    extraFlags |= RPMLogic::CheckPasses(opt.pCheck, pPlayer, label, sizeof(label)) ? 4 : 8;
+                }
+#endif
                 const char *optText = opt.text[0] ? opt.text : "";
                 if (!firstOpt) payload.Append(";");
                 firstOpt = false;
-                char tmp[512];
+                char tmp[640];
                 int sendFlags = opt.flags;
-                if (opt.completeQuestId[0])
-                    sendFlags &= ~1;
-                Q_snprintf(tmp, sizeof(tmp), "%d~%s~%d~%d", optIndex, optText, opt.nextId, sendFlags);
+                if (opt.completeQuestId[0] || opt.pCheck)
+                    sendFlags &= ~1;		// the server decides where it goes (after_*, a failed check)
+                Q_snprintf(tmp, sizeof(tmp), "%d~%s%s~%d~%d", optIndex, label, optText, opt.nextId, sendFlags | extraFlags);
                 payload.Append(tmp);
             }
         }
@@ -1170,6 +1270,28 @@ namespace DialogDefinitions
                 DevMsg("DialogSystem: server sequence '%s' not found\n", node->serverSequenceName.Get());
             }
         }
+
+#if defined( GAME_DLL )
+        // HL2RPM: the window is open (actions that need it closed wait), the actions of the line
+        RPMLogic::NoteDialogOpen(pPlayer);
+        // HL2RPM: the speaker gestures through the line (hl2rpm_talkgest.cpp)
+        {
+            CBaseEntity *pSpeaker = pOwner;
+            if ( !pSpeaker && entIndex > 0 )
+                pSpeaker = UTIL_EntityByIndex( entIndex );
+            if ( !pSpeaker && dialog && dialog->entityName.Length() > 0 )
+                pSpeaker = gEntList.FindEntityByName( NULL, dialog->entityName.Get() );
+            const char *pszSaid = bOverrideLine ? overrideLine : ( node->speakerLine.Length() > 0 ? node->speakerLine.Get() : "" );
+            ::RPMTalkGesture_OnLine( pSpeaker, pszSaid, delay, choreoToUse );
+        }
+        if (node->pActions && !bOverrideLine)
+        {
+            RPMLogic::Ctx_t lctx;
+            lctx.pPlayer = pPlayer;
+            lctx.pSelf = pOwner;
+            RPMLogic::Run(node->pActions, lctx);
+        }
+#endif
 
         if (node && node->spoils)
         {

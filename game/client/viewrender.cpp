@@ -89,6 +89,8 @@
 #include "weather/weather_render.h"
 #include "hl2rpm_vitals.h"
 #include "deferred/deferred_worldlists.h"
+#include "deferred/deferred_occlusion.h"
+#include "bsptreedata.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -1969,6 +1971,10 @@ void CViewRender::RenderPlayerSprites()
 //-----------------------------------------------------------------------------
 // Sets up, cleans up the main 3D view
 //-----------------------------------------------------------------------------
+// HL2RPM: the render target of the main 3D view when it isn't the screen - the smaller frame of the
+// deferred renderer's render scale (deferred_rt.cpp, set around SetupMain3DView by its RenderView)
+ITexture *g_pMain3DViewTarget = NULL;
+
 void CViewRender::SetupMain3DView( const CViewSetup &view, int &nClearFlags )
 {
 	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
@@ -1992,7 +1998,7 @@ void CViewRender::SetupMain3DView( const CViewSetup &view, int &nClearFlags )
 	}
 	else
 	{
-		ITexture *pRTColor = NULL;
+		ITexture *pRTColor = g_pMain3DViewTarget;
 		ITexture *pRTDepth = NULL;
 		if( view.m_eStereoEye != STEREO_EYE_MONO )
 		{
@@ -4011,6 +4017,185 @@ void CRendering3dView::BuildWorldRenderLists( bool bDrawEntities, int iForceView
 	}
 }
 
+
+//-----------------------------------------------------------------------------
+// HL2RPM: the leaves of the map in the frustum of this view, without the engine's world lists
+// (see the declaration). The engine's BuildWorldLists walks the tree, gathers every surface of the
+// leaves in sight and sorts them, and a lamp's shadow view also had to set the visibility up for
+// it first (0.4 ms a light): 10 lamp shadows and the cascades spent ~11 ms a frame on lists of
+// surfaces nobody drew - the world of a shadow map comes from deferred_worldmesh.cpp. Here: the
+// leaves inside the box of the frustum (ISpatialQuery), those outside the frustum dropped by
+// their bounds. The renderables of the leaves are culled by the frustum one by one as before; no
+// visibility test - more of them can be drawn than the potentially visible set allowed, all
+// behind what the light sees first (the shadow map is the same).
+//-----------------------------------------------------------------------------
+class CShadowLeafCollector : public ISpatialLeafEnumerator
+{
+public:
+	CShadowLeafCollector( CUtlVector< LeafIndex_t > &leaves ) : m_Leaves( leaves ) {}
+	virtual bool EnumerateLeaf( int leaf, int context )
+	{
+		Vector vecMins, vecMaxs;
+		bool bSolid = false;
+		if ( DeferredOcclusion_GetLeafBounds( leaf, vecMins, vecMaxs, bSolid ) )
+		{
+			if ( bSolid || engine->CullBox( vecMins, vecMaxs ) )
+				return true;
+		}
+		m_Leaves.AddToTail( (LeafIndex_t)leaf );
+		return true;
+	}
+	CUtlVector< LeafIndex_t > &m_Leaves;
+};
+
+// The leaves of a view that stays where it is (a lamp's shadow views) are kept: they cost ~0.3 ms a
+// view to find (a box of a big lamp holds thousands of leaves)
+struct ShadowLeafCacheEntry_t
+{
+	Vector vecOrigin;
+	QAngle angAngles;
+	float flFov, flNear, flFar, flAspect;
+	const model_t *pWorld;
+	int iLastUsedFrame;
+	CUtlVector< LeafIndex_t > leaves;
+};
+static CUtlVector< ShadowLeafCacheEntry_t * > s_ShadowLeafCache;
+#define SHADOW_LEAF_CACHE_SIZE 96
+
+void ClearShadowLeafCache()
+{
+	s_ShadowLeafCache.PurgeAndDeleteElements();
+}
+
+bool CRendering3dView::BuildLeafListsOnly()
+{
+	VPROF_BUDGET( "BuildLeafListsOnly", VPROF_BUDGETGROUP_WORLD_RENDERING );
+	Assert( !m_pWorldRenderList && !m_pWorldListInfo );
+
+	Vector vecTest;
+	bool bSolid;
+	if ( !DeferredOcclusion_GetLeafBounds( 0, vecTest, vecTest, bSolid ) )
+		return false;
+
+	// a view seen before (perspective views only: the cascades follow the camera)
+	const model_t *pWorld = modelinfo->GetModel( 1 );
+	ShadowLeafCacheEntry_t *pCached = NULL;
+	if ( !m_bOrtho )
+	{
+		for ( int i = 0; i < s_ShadowLeafCache.Count(); i++ )
+		{
+			ShadowLeafCacheEntry_t *e = s_ShadowLeafCache[i];
+			if ( e->pWorld == pWorld && e->vecOrigin == origin && e->angAngles == angles && e->flFov == fov
+				&& e->flNear == zNear && e->flFar == zFar && e->flAspect == m_flAspectRatio )
+			{
+				pCached = e;
+				break;
+			}
+		}
+	}
+	if ( pCached )
+	{
+		pCached->iLastUsedFrame = gpGlobals->framecount;
+		m_pMainView->IncWorldListsNumber();
+		const int nLeaves = pCached->leaves.Count();
+		ClientWorldListInfo_t exemplar;
+		exemplar.m_LeafCount = Max( nLeaves, 1 );
+		m_pWorldListInfo = ClientWorldListInfo_t::AllocPooled( exemplar );
+		m_pWorldListInfo->m_ViewFogVolume = -1;
+		m_pWorldListInfo->m_LeafCount = nLeaves;
+		for ( int i = 0; i < nLeaves; i++ )
+		{
+			m_pWorldListInfo->m_pLeafList[i] = pCached->leaves[i];
+			m_pWorldListInfo->m_pLeafFogVolume[i] = -1;
+			m_pWorldListInfo->m_pActualLeafIndex[i] = pCached->leaves[i];
+		}
+		return true;
+	}
+
+	// the box of the frustum's corners (a little bigger: the leaves are tested against the frustum)
+	Vector vecForward, vecRight, vecUp;
+	AngleVectors( angles, &vecForward, &vecRight, &vecUp );
+	Vector vecMins, vecMaxs;
+	ClearBounds( vecMins, vecMaxs );
+	const float flDist[2] = { zNear, zFar };
+	for ( int i = 0; i < 2; i++ )
+	{
+		float flX0, flX1, flY0, flY1;
+		if ( m_bOrtho )
+		{
+			flX0 = m_OrthoLeft; flX1 = m_OrthoRight;
+			flY0 = m_OrthoTop; flY1 = m_OrthoBottom;
+		}
+		else
+		{
+			const float flHalfX = tanf( DEG2RAD( Clamp( fov, 1.0f, 179.0f ) * 0.5f ) ) * fabsf( flDist[i] ) * 1.05f;
+			const float flHalfY = flHalfX / Max( m_flAspectRatio, 0.01f );
+			flX0 = -flHalfX; flX1 = flHalfX;
+			flY0 = -flHalfY; flY1 = flHalfY;
+		}
+		const float flXs[2] = { flX0, flX1 };
+		const float flYs[2] = { flY0, flY1 };
+		for ( int x = 0; x < 2; x++ )
+		{
+			for ( int y = 0; y < 2; y++ )
+			{
+				const Vector vecCorner = origin + vecForward * flDist[i] + vecRight * flXs[x] + vecUp * flYs[y];
+				AddPointToBounds( vecCorner, vecMins, vecMaxs );
+			}
+		}
+	}
+	vecMins -= Vector( 16, 16, 16 );
+	vecMaxs += Vector( 16, 16, 16 );
+
+	static CUtlVector< LeafIndex_t > s_Leaves;
+	s_Leaves.RemoveAll();
+	CShadowLeafCollector collector( s_Leaves );
+	engine->GetBSPTreeQuery()->EnumerateLeavesInBox( vecMins, vecMaxs, &collector, 0 );
+
+	if ( !m_bOrtho )
+	{
+		// keep it (the least recently used entry makes room)
+		ShadowLeafCacheEntry_t *e = NULL;
+		if ( s_ShadowLeafCache.Count() < SHADOW_LEAF_CACHE_SIZE )
+		{
+			e = new ShadowLeafCacheEntry_t;
+			s_ShadowLeafCache.AddToTail( e );
+		}
+		else
+		{
+			e = s_ShadowLeafCache[0];
+			for ( int i = 1; i < s_ShadowLeafCache.Count(); i++ )
+			{
+				if ( s_ShadowLeafCache[i]->iLastUsedFrame < e->iLastUsedFrame )
+					e = s_ShadowLeafCache[i];
+			}
+		}
+		e->vecOrigin = origin;
+		e->angAngles = angles;
+		e->flFov = fov;
+		e->flNear = zNear;
+		e->flFar = zFar;
+		e->flAspect = m_flAspectRatio;
+		e->pWorld = pWorld;
+		e->iLastUsedFrame = gpGlobals->framecount;
+		e->leaves.CopyArray( s_Leaves.Base(), s_Leaves.Count() );
+	}
+
+	m_pMainView->IncWorldListsNumber();
+
+	ClientWorldListInfo_t exemplar;
+	exemplar.m_LeafCount = Max( s_Leaves.Count(), 1 );
+	m_pWorldListInfo = ClientWorldListInfo_t::AllocPooled( exemplar );
+	m_pWorldListInfo->m_ViewFogVolume = -1;
+	m_pWorldListInfo->m_LeafCount = s_Leaves.Count();
+	for ( int i = 0; i < s_Leaves.Count(); i++ )
+	{
+		m_pWorldListInfo->m_pLeafList[i] = s_Leaves[i];
+		m_pWorldListInfo->m_pLeafFogVolume[i] = -1;
+		m_pWorldListInfo->m_pActualLeafIndex[i] = s_Leaves[i];
+	}
+	return true;
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: Computes the actual world list info based on the render flags

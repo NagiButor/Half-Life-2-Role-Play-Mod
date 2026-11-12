@@ -9,6 +9,7 @@ and AI nodes). Game files:
     scripts/world/factions.txt      - faction relations
 """
 import copy
+import math
 import uuid
 
 # --- AI packages -------------------------------------------------------------------------
@@ -44,6 +45,18 @@ MARKER_COLORS = {k: c for k, _, c in MARKER_KINDS}
 
 # actbusy entries (scripts/actbusy.txt of the game) with a name a person understands
 ANIMS = [
+    # the animation library of the mod (hl2rpm_extras/tools/anims): fitted to the furniture by "seat_h"
+    ("rpm_sit_chair", "Стул: сесть, посидеть, встать (новое, по высоте сиденья)", "sit"),
+    ("rpm_sit_couch", "Диван / кресло: развалиться (новое, по высоте сиденья)", "sit"),
+    ("rpm_eat_chair", "За столом: есть из миски, пить (новое, по высоте сиденья)", "eat"),
+    ("rpm_sit_chair", "За столом на стуле (новое, по высоте сиденья)", "eat"),
+    ("rpm_lean_wall", "Спиной к стене: руки скрещены, нога на стене, руки в карманах (новое)", "lean"),
+    ("rpm_sit_ground", "Сесть на землю: колени, откинуться на руки, по-турецки (новое)", "ground"),
+    ("rpm_lie_bed", "Кровать: сесть на край, лечь, полежать, встать (новое, по высоте матраса)", "sleep"),
+    ("rpm_lie_ground", "Спать на земле: лечь на спину, полежать, встать (новое)", "sleep"),
+    ("rpm_lie_ground", "Лечь на землю (новое)", "ground"),
+    ("rpm_talk", "Разговаривать с жестами (новое, Kimodo; два маркера лицом друг к другу)", "work"),
+    ("rpm_search", "Обыскивать на корточках (новое, Kimodo)", "work"),
     ("laycouch1", "Лежать (кровать, диван)", "sleep"),
     ("d1_t03_Sit_Bed", "Сидеть на кровати", "sleep"),
     ("ACT_BUSY_SIT_CHAIR", "Сидеть на стуле", "sit"),
@@ -82,8 +95,8 @@ ANIMS = [
     ("Zombie_Slump_A", "Зомби: сидит у стены", "ground"),
 ]
 ANIM_NAMES = {a: n for a, n, _ in ANIMS}
-DEFAULT_MARKER_ANIM = {"sleep": "laycouch1", "sit": "ACT_BUSY_SIT_CHAIR", "eat": "sitchairtable1",
-                       "lean": "ACT_BUSY_LEAN_BACK", "ground": "ACT_BUSY_SIT_GROUND", "work": "", "guard": "", "idle": ""}
+DEFAULT_MARKER_ANIM = {"sleep": "rpm_lie_bed", "sit": "rpm_sit_chair", "eat": "rpm_eat_chair",
+                       "lean": "rpm_lean_wall", "ground": "rpm_sit_ground", "work": "", "guard": "", "idle": ""}
 
 # --- NPC classes -----------------------------------------------------------------------------
 NPC_CLASSES = [
@@ -115,11 +128,13 @@ CITIZEN_TYPES = [("", "Как задано моделью"), ("1", "Запуга
                  ("4", "Своя модель")]
 RELATIONS = [("", "По фракции / по классу"), ("friend", "Друг"), ("neutral", "Нейтрален"), ("enemy", "Враг")]
 RELATION_NAMES = dict(RELATIONS)
-WEAPONS = ["", "weapon_crowbar", "weapon_stunstick", "weapon_pistol", "weapon_357", "weapon_smg1", "weapon_ar2",
+WEAPONS = ["", "weapon_rpm_fists", "weapon_crowbar", "weapon_stunstick", "weapon_rpm_axe", "weapon_rpm_bottle", "weapon_rpm_brokenbottle", "weapon_rpm_hook", "weapon_rpm_pan", "weapon_rpm_pickaxe", "weapon_rpm_pipe", "weapon_rpm_pot", "weapon_rpm_shovel",
+           "weapon_pistol", "weapon_rpm_beretta", "weapon_357", "weapon_smg1", "weapon_ar2",
            "weapon_shotgun", "weapon_crossbow", "weapon_rpg", "weapon_annabelle", "weapon_alyxgun"]
 
-REF_TYPES = [("npc", "NPC"), ("marker", "Маркер"), ("item", "Предмет"), ("container", "Контейнер"),
-             ("prop", "Проп"), ("path", "Маршрут"), ("entity", "Сущность")]
+REF_TYPES = [("npc", "NPC"), ("marker", "Маркер"), ("item", "Предмет"), ("container", "Контейнер"), ("spawner", "Точка появления"),
+             ("transition", "Переход на другую карту"), ("zone", "Зона"), ("sound", "Звук"),
+             ("terminal", "Терминал"), ("prop", "Проп"), ("path", "Маршрут"), ("entity", "Сущность")]
 REF_TYPE_NAMES = dict(REF_TYPES)
 
 CONTAINER_MODELS = [
@@ -184,6 +199,7 @@ class Package:
         self.max_use = 90
         self.req_state = None         # [quest, state]
         self.req_stage = None         # [quest, stage]
+        self.conditions = []          # Creation Kit logic (logic.py)
         self.note = ""
 
     def always(self):
@@ -215,6 +231,8 @@ class Package:
             d["req_state"] = list(self.req_state)
         if self.req_stage:
             d["req_stage"] = list(self.req_stage)
+        if self.conditions:
+            d["conditions"] = self.conditions
         return d
 
     @staticmethod
@@ -238,6 +256,7 @@ class Package:
         p.path_mode = d.get("path_mode", "loop")
         p.target = d.get("target", "")
         p.once = bool(d.get("once", False))
+        p.conditions = list(d.get("conditions", []))
         ut = d.get("use_time")
         if ut:
             p.min_use, p.max_use = int(ut[0]), int(ut[1])
@@ -274,6 +293,26 @@ class Actor:
         self.loot_items = []          # [[classname, amount], ...]
         self.keyvalues = {}           # anything else for the spawn
         self.packages = []
+        # templates and variation (GECK templates / random NPCs)
+        self.template = ""            # targetname of another NPC: empty fields come from it
+        self.is_template = False      # only a template (not placed itself)
+        self.models = []              # random model per spawned NPC
+        self.weapons = []             # random weapon ("" = none)
+        self.names = []               # random names: [{language: text}] (male / any model)
+        self.names_female = []        # random names for female models
+        self.skin_max = 0             # random skin skin..skin_max
+        self.proficiency = -1         # weapon accuracy 0 poor .. 4 perfect, -1 by class
+        self.aggression = -1          # -1 by class / faction, 0 never attacks first, 1 attacks enemies, 2 attacks all but friends, 3 frenzied
+        self.confidence = -1          # -1 by class, 0 cowardly (flees at once), 1 cautious (< 50 % health), 2 average (< 25 %), 3 brave
+        self.xp = 0                   # experience for killing it
+        # behaviour (-1 = the rules of the game / by class)
+        self.yield_player = -1        # 0 stands its ground, 1 steps out of the player's way (HL2)
+        self.pickup_weapons = -1      # 0 never, 1 picks weapons up from the floor (HL2), 2 only in the player's squad
+        self.weapon_law = -1          # 0 not concerned, 1 civilian (may not carry weapons), 2 enforcer: warns, 3 enforcer: fires at once
+        self.vendor = None            # trade: {"list", "money", "markup", "pays", "restock_hours", "currency"} or None
+        self.stock_speech = ""        # HL2 lines: "" (combat only) / all / combat / none
+        self.bark_sets = []           # shared bark sets (project.bark_sets ids)
+        self.barks = []               # sounddata.Bark
 
     def model_or_default(self):
         return self.model or NPC_DEFAULT_MODEL.get(self.classname, "models/humans/group01/male_07.mdl")
@@ -282,7 +321,11 @@ class Actor:
         return (self.classname == "npc_citizen" and not self.model and not self.weapon and not self.faction
                 and not self.relation and not self.packages and not self.essential and not self.health
                 and not self.loot_items and not self.keyvalues and not self.squad and not self.commandable
-                and not self.citizen_type and self.hate_on_dmg and not self.spoil_on_dmg and not self.skin)
+                and not self.citizen_type and self.hate_on_dmg and not self.spoil_on_dmg and not self.skin
+                and not self.template and not self.is_template and not self.models and not self.weapons and not self.names and not self.names_female
+                and not self.skin_max and self.proficiency < 0 and self.aggression < 0 and self.confidence < 0 and not self.xp and not self.vendor
+                and self.yield_player < 0 and self.pickup_weapons < 0 and self.weapon_law < 0
+                and not self.stock_speech and not self.bark_sets and not self.barks)
 
     def to_dict(self):
         d = {"classname": self.classname}
@@ -303,6 +346,28 @@ class Actor:
             d["keyvalues"] = dict(self.keyvalues)
         if self.packages:
             d["packages"] = [p.to_dict() for p in self.packages]
+        for k in ("template", "models", "weapons", "names", "names_female", "skin_max", "xp"):
+            if getattr(self, k):
+                d[k] = getattr(self, k)
+        if self.is_template:
+            d["is_template"] = True
+        if self.proficiency >= 0:
+            d["proficiency"] = self.proficiency
+        if self.aggression >= 0:
+            d["aggression"] = self.aggression
+        if self.confidence >= 0:
+            d["confidence"] = self.confidence
+        for k in ("yield_player", "pickup_weapons", "weapon_law"):
+            if getattr(self, k) >= 0:
+                d[k] = getattr(self, k)
+        if self.vendor:
+            d["vendor"] = dict(self.vendor)
+        if self.stock_speech:
+            d["stock_speech"] = self.stock_speech
+        if self.bark_sets:
+            d["bark_sets"] = list(self.bark_sets)
+        if self.barks:
+            d["barks"] = [b.to_dict() for b in self.barks]
         return d
 
     @staticmethod
@@ -322,7 +387,57 @@ class Actor:
         a.loot_items = [[x[0], int(x[1])] for x in d.get("loot_items", [])]
         a.keyvalues = dict(d.get("keyvalues", {}))
         a.packages = [Package.from_dict(x) for x in d.get("packages", [])]
+        a.template = d.get("template", "")
+        a.is_template = bool(d.get("is_template", False))
+        a.models = list(d.get("models", []))
+        a.weapons = list(d.get("weapons", []))
+        a.names = [dict(x) for x in d.get("names", [])]
+        a.names_female = [dict(x) for x in d.get("names_female", [])]
+        a.skin_max = int(d.get("skin_max", 0))
+        a.proficiency = int(d.get("proficiency", -1))
+        a.aggression = int(d.get("aggression", -1))
+        a.confidence = int(d.get("confidence", -1))
+        a.yield_player = int(d.get("yield_player", -1))
+        a.pickup_weapons = int(d.get("pickup_weapons", -1))
+        a.weapon_law = int(d.get("weapon_law", -1))
+        a.xp = int(d.get("xp", 0))
+        a.vendor = dict(d["vendor"]) if d.get("vendor") else None
+        a.stock_speech = d.get("stock_speech", "")
+        a.bark_sets = list(d.get("bark_sets", []))
+        from .sounddata import Bark
+        a.barks = [Bark.from_dict(x) for x in d.get("barks", [])]
         return a
+
+    def resolved(self, project, depth=0):
+        """The actor with the empty fields filled from its template chain (what the game gets)."""
+        if not self.template or depth > 6:
+            return self
+        t = project.npc(self.template) if project else None
+        if t is None or t.actor is self:
+            return self
+        base = t.actor.resolved(project, depth + 1)
+        r = Actor.from_dict(self.to_dict())
+        dflt = Actor()
+        for k in ("model", "citizen_type", "weapon", "squad", "faction", "relation", "skin", "health", "loot_items",
+                  "packages", "models", "weapons", "names", "names_female", "skin_max", "xp", "vendor",
+                  "stock_speech", "bark_sets", "barks"):
+            if not getattr(r, k):
+                setattr(r, k, getattr(base, k))
+        for k in ("proficiency", "aggression", "confidence", "yield_player", "pickup_weapons", "weapon_law"):
+            if getattr(r, k) < 0:
+                setattr(r, k, getattr(base, k))
+        if r.classname == dflt.classname:
+            r.classname = base.classname
+        for k in ("essential", "commandable", "spoil_on_dmg"):
+            if getattr(r, k) == getattr(dflt, k):
+                setattr(r, k, getattr(base, k))
+        if r.hate_on_dmg == dflt.hate_on_dmg:
+            r.hate_on_dmg = base.hate_on_dmg
+        merged = dict(base.keyvalues)
+        merged.update(r.keyvalues)
+        r.keyvalues = merged
+        r.template = ""
+        return r
 
     def package_at(self, hour, quests_ok=None):
         """The package the game runs at that hour (first match, like GECK); conditions are
@@ -397,8 +512,10 @@ class Ref:
         self.kind = "idle"           # marker kind
         self.anim = ""               # marker animation
         self.owner = ""              # marker owner (NPC targetname)
+        self.seat_h = -1.0           # marker: the seat / bed height under it (the library's rpm_seat_h), -1 = not set
         self.classname = ""          # item / entity
-        self.model = ""              # container / prop
+        self.model = ""              # container / prop / terminal
+        self.terminal = ""           # terminal: id in the project's terminals (scripts/rpg/terminals.txt)
         self.skin = 0
         self.physics = False         # prop
         self.loot_items = []         # container
@@ -406,20 +523,46 @@ class Ref:
         self.points = []             # path
         self.keyvalues = {}
         self.note = ""
+        # presence (Creation Kit logic): the object exists in the game only while these hold
+        self.conditions = []
+        # transition (a door to another map): leads to the transition "target" on "target_map";
+        # who comes through the pair appears arrive_dist in front of this door, facing its yaw
+        self.target_map = ""
+        self.target = ""
+        self.size = [64.0, 64.0, 96.0]
+        self.arrive_dist = 80.0
+        # zone = location: name on discovery (display_name), experience, music, soundscape
+        self.discover_xp = 0
+        self.music = []              # track ids (kind "location")
+        self.soundscape = ""
+        self.soundscape_night = ""   # 21-6 h (empty - the same as by day)
+        self.soundscape_rain = ""    # drizzle / rain / thunderstorm (wins over the night one)
+        # sound on the map (ambient_generic)
+        self.sound = ""
+        self.volume = 1.0
+        self.radius = 1250.0
+        self.everywhere = False
 
     @property
     def yaw(self):
         return self.angles[1]
 
+    def arrive(self):
+        """Transition: where the player coming through the paired door appears, and his yaw."""
+        y = math.radians(self.angles[1])
+        return [self.pos[0] + math.cos(y) * self.arrive_dist, self.pos[1] + math.sin(y) * self.arrive_dist, self.pos[2]], self.angles[1]
+
     def to_dict(self):
         d = {"id": self.id, "type": self.type, "pos": [round(x, 2) for x in self.pos]}
         if any(self.angles):
             d["angles"] = [round(x, 2) for x in self.angles]
-        for k in ("name", "npc", "anim", "owner", "classname", "model", "note"):
+        for k in ("name", "npc", "anim", "owner", "classname", "model", "note", "terminal"):
             if getattr(self, k):
                 d[k] = getattr(self, k)
         if self.type == "marker":
             d["kind"] = self.kind
+            if self.seat_h >= 0:
+                d["seat_h"] = round(self.seat_h, 1)
         if self.skin:
             d["skin"] = self.skin
         if self.physics:
@@ -432,21 +575,61 @@ class Ref:
             d["points"] = [p.to_dict() for p in self.points]
         if self.keyvalues:
             d["keyvalues"] = dict(self.keyvalues)
+        if self.type == "transition":
+            d["target_map"] = self.target_map
+            d["target"] = self.target
+            d["size"] = [round(x, 1) for x in self.size]
+            d["arrive_dist"] = round(self.arrive_dist, 1)
+        if self.type == "zone":
+            d["size"] = [round(x, 1) for x in self.size]
+            if self.discover_xp:
+                d["discover_xp"] = self.discover_xp
+            if self.music:
+                d["music"] = list(self.music)
+            if self.soundscape:
+                d["soundscape"] = self.soundscape
+            if self.soundscape_night:
+                d["soundscape_night"] = self.soundscape_night
+            if self.soundscape_rain:
+                d["soundscape_rain"] = self.soundscape_rain
+        if self.type == "sound":
+            d["sound"] = self.sound
+            d["volume"] = round(self.volume, 2)
+            d["radius"] = round(self.radius, 1)
+            if self.everywhere:
+                d["everywhere"] = True
+        if self.conditions:
+            d["conditions"] = self.conditions
         return d
 
     @staticmethod
     def from_dict(d):
         r = Ref(int(d.get("id", 0)), d.get("type", "marker"), d.get("pos"))
         r.angles = _vec(d.get("angles"))
-        for k in ("name", "npc", "anim", "owner", "classname", "model", "note"):
+        for k in ("name", "npc", "anim", "owner", "classname", "model", "note", "terminal"):
             setattr(r, k, d.get(k, ""))
         r.kind = d.get("kind", "idle")
+        r.seat_h = float(d.get("seat_h", -1.0))
         r.skin = int(d.get("skin", 0))
         r.physics = bool(d.get("physics", False))
         r.loot_items = [[x[0], int(x[1])] for x in d.get("loot_items", [])]
         r.display_name = dict(d.get("display_name", {}))
         r.points = [PathPoint.from_dict(x) for x in d.get("points", [])]
         r.keyvalues = dict(d.get("keyvalues", {}))
+        r.target_map = d.get("target_map", "")
+        r.target = d.get("target", "")
+        r.size = [float(x) for x in d.get("size", [64, 64, 96])]
+        r.arrive_dist = float(d.get("arrive_dist", 80))
+        r.discover_xp = int(d.get("discover_xp", 0))
+        r.music = list(d.get("music", []))
+        r.soundscape = d.get("soundscape", "")
+        r.soundscape_night = d.get("soundscape_night", "")
+        r.soundscape_rain = d.get("soundscape_rain", "")
+        r.sound = d.get("sound", "")
+        r.volume = float(d.get("volume", 1.0))
+        r.radius = float(d.get("radius", 1250))
+        r.everywhere = bool(d.get("everywhere", False))
+        r.conditions = list(d.get("conditions", []))
         return r
 
     def clone(self, new_id):
@@ -465,6 +648,14 @@ class Ref:
             return self.name or self.classname
         if self.type in ("container", "prop"):
             return self.name or (self.model.rsplit("/", 1)[-1][:-4] if self.model else self.type)
+        if self.type == "transition":
+            return "→ " + (self.target_map or "?")
+        if self.type == "zone":
+            return self.name or "зона"
+        if self.type == "sound":
+            return self.name or (self.sound.rsplit("/", 1)[-1] if self.sound else "звук")
+        if self.type == "terminal":
+            return self.name or ("терминал " + self.terminal if self.terminal else "терминал")
         return self.type
 
 
@@ -479,6 +670,12 @@ class MapLayer:
     def ref(self, rid):
         for r in self.refs:
             if r.id == rid:
+                return r
+        return None
+
+    def ref_by_name(self, name):
+        for r in self.refs:
+            if name and r.name.lower() == name.lower():
                 return r
         return None
 

@@ -62,6 +62,61 @@ const float2 g_vecHalfScreenTexel		: register( c6 );
 sampler sMixedSampler[FREE_LIGHT_SAMPLERS]			: register( FIRST_LIGHT_SAMPLER_FXC );
 const float4 g_flMixedData[78]						: register( FIRST_SHARED_LIGHTDATA_CONSTANT_FXC ); // MAX_LIGHTDATA_CONSTANT_ROWS
 
+// HL2RPM: what of the world each light reaches (client deferred_lightreach.cpp; the layout is in
+// deferred_global_common.h): the free distance from the light in the direction of the pixel, traced
+// against the world. 1 where the light gets to, 0 behind the first wall - its shadow maps (props,
+// people) are separate and only the near lamps have them; without this a lamp, its fill (ambient)
+// and its bounce light lit the far side of a wall. The light's parameter: -1 = no map (it moves, is
+// new, sits in a wall), else slot + 0.5 x how far the map has eased in.
+sampler sLightReach							: register( s15 );
+
+float LightReach( float flParam, float3 worldPos, float3 normal, float3 lightPos )
+{
+	if ( flParam < 0.0f )
+		return 1.0f;
+
+	float3 vecDelta = worldPos - lightPos;
+	const float flDist0 = length( vecDelta );
+	// (off the surface along its normal: a face turned to the light comes out of its wall, the far
+	// side of a wall goes deeper behind it)
+	vecDelta += normal * ( 4.0f + flDist0 * 0.01f );
+	const float flDist = length( vecDelta );
+
+	const float flSlot = floor( flParam );
+	const float flFade = saturate( frac( flParam ) * 2.0f );
+	const float3 a = abs( vecDelta );
+	float flFace, flMajor;
+	float2 uv;
+	if ( a.x >= a.y && a.x >= a.z )
+	{
+		flMajor = a.x;
+		flFace = vecDelta.x > 0.0f ? 0.0f : 1.0f;
+		uv = vecDelta.yz;
+	}
+	else if ( a.y >= a.z )
+	{
+		flMajor = a.y;
+		flFace = vecDelta.y > 0.0f ? 2.0f : 3.0f;
+		uv = vecDelta.xz;
+	}
+	else
+	{
+		flMajor = a.z;
+		flFace = vecDelta.z > 0.0f ? 4.0f : 5.0f;
+		uv = vecDelta.xy;
+	}
+	float2 tex = clamp( ( uv / max( flMajor, 0.001f ) * 0.5f + 0.5f ) * LIGHTREACH_N, 0.5f, LIGHTREACH_N - 0.5f );
+	const float flRow = floor( flSlot / LIGHTREACH_SLOTS_X + 0.001f );
+	const float flCol = flSlot - flRow * LIGHTREACH_SLOTS_X;
+	tex += float2( ( flCol * 6.0f + flFace ) * LIGHTREACH_N, flRow * LIGHTREACH_N );
+	const float flFree = tex2Dlod( sLightReach, float4( tex / float2( LIGHTREACH_ATLAS_W, LIGHTREACH_ATLAS_H ), 0, 0 ) ).r;
+
+	// full up to the wall (+ a margin for the coarse map), gone a little behind it
+	const float flBias = 2.0f + flDist * 0.02f;
+	const float flSoft = 4.0f + flDist * 0.03f;
+	return lerp( 1.0f, saturate( ( flFree + flBias - flDist ) / flSoft + 1.0f ), flFade );
+}
+
 
 struct PS_INPUT
 {
@@ -90,8 +145,8 @@ float4 DoPointLightBasic( const int index, float3 normal,
 	float3 normalizedLightVec = vecWorldToLight / lightToWorldDist;
 	float litDot = dot( normalizedLightVec, normal );
 
-	float distFade = 1.0f - saturate( lightToWorldDist / g_flMixedData[ index ].w );
-	distFade *= distFade;
+	float distFade = DeferredLightFalloff( lightToWorldDist, g_flMixedData[ index ].w, g_flMixedData[ index + 1 ].w );
+	distFade *= DeferredLightPeak( g_flMixedData[ index + 1 ].xyz, distFade );
 
 	return float4( 0, saturate( litDot ) * distFade, 0, 0 );
 #else
@@ -111,8 +166,10 @@ float4 DoPointLightBasic( const int index, float3 normal,
 
 	float lightAmount = saturate( litDot );
 
-	float distFade = 1.0f - saturate( lightToWorldDist / g_flMixedData[ index ].w );
-	distFade = pow( distFade, g_flMixedData[ index + 1 ].w );
+	// (HL2RPM: the curve of the light, or the engine's attenuation of a converted lamp - common_lighting_fxc.h)
+	float distFade = DeferredLightFalloff( lightToWorldDist, g_flMixedData[ index ].w, g_flMixedData[ index + 1 ].w );
+	// (its strength softly limited before the edge - DeferredLightPeak)
+	distFade *= DeferredLightPeak( g_flMixedData[ index + 1 ].xyz, distFade );
 
 	return float4( litDot, lightAmount, flSpecular, distFade );
 #endif
@@ -199,13 +256,20 @@ PS_OUTPUT main( const PS_INPUT In )
 			vecDeltaShadow = vecDeltaRotated;
 
 		float normalDotLight = dot( normalize( -vecDeltaWorld ), flNormal );
-		localLight.y *= PerformDualParaboloidShadow( sMixedSampler[ iSamplerIndex ],
+		// HL2RPM: no light reaches the point (outside the cone or the radius, turned away): the
+		// shadow can't change the result - its filter (25 compares) is skipped
+		float flShadow = 1.0f;
+		[branch]
+		if ( localLight.y * localLight.w > 0.0f )
+			flShadow = PerformDualParaboloidShadow( sMixedSampler[ iSamplerIndex ],
 			vecDeltaShadow, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
 			distOffset, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
+		localLight.y *= flShadow;
 
 		flLight += DoLightFinalCookied( g_flMixedData[ iDataIndex + 1 ].xyz,
 			g_flMixedData[ iDataIndex + 2 ].xyz,
-			localLight, DoCubemapCookie( sMixedSampler[ iSamplerIndex + 1 ], vecDeltaRotated ) );
+			localLight, DoCubemapCookie( sMixedSampler[ iSamplerIndex + 1 ], vecDeltaRotated ) )
+			* LightReach( g_flMixedData[ iDataIndex + 3 ].w, worldPos, flNormal, g_flMixedData[ iDataIndex ].xyz );
 	}
 
 	for ( int i = 0; i < NUM_SHADOWED; i++ )
@@ -237,13 +301,20 @@ PS_OUTPUT main( const PS_INPUT In )
 			vecDeltaShadow = vecDeltaRotated;
 
 		float normalDotLight = dot( normalize( -vecDeltaWorld ), flNormal );
-		localLight.y *= PerformDualParaboloidShadow( sMixedSampler[ iSamplerIndex ],
+		// HL2RPM: no light reaches the point (outside the cone or the radius, turned away): the
+		// shadow can't change the result - its filter (25 compares) is skipped
+		float flShadow = 1.0f;
+		[branch]
+		if ( localLight.y * localLight.w > 0.0f )
+			flShadow = PerformDualParaboloidShadow( sMixedSampler[ iSamplerIndex ],
 			vecDeltaShadow, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
 			distOffset, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
+		localLight.y *= flShadow;
 
 		flLight += DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,
 			g_flMixedData[ iDataIndex + 2 ].xyz,
-			localLight );
+			localLight )
+			* LightReach( g_flMixedData[ iDataIndex + 3 ].w, worldPos, flNormal, g_flMixedData[ iDataIndex ].xyz );
 	}
 
 	for ( int i = 0; i < NUM_COOKIE; i++ )
@@ -268,7 +339,8 @@ PS_OUTPUT main( const PS_INPUT In )
 
 		flLight += DoLightFinalCookied( g_flMixedData[ iDataIndex + 1 ].xyz,
 			g_flMixedData[ iDataIndex + 2 ].xyz,
-			localLight, DoCubemapCookie( sMixedSampler[ iSamplerIndex ], vecDeltaRotated ) );
+			localLight, DoCubemapCookie( sMixedSampler[ iSamplerIndex ], vecDeltaRotated ) )
+			* LightReach( g_flMixedData[ iDataIndex + 3 ].w, worldPos, flNormal, g_flMixedData[ iDataIndex ].xyz );
 	}
 
 	for ( int i = 0; i < NUM_SIMPLE; i++ )
@@ -287,7 +359,8 @@ PS_OUTPUT main( const PS_INPUT In )
 
 		flLight += DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,
 			g_flMixedData[ iDataIndex + 2 ].xyz,
-			localLight );
+			localLight )
+			* LightReach( g_flMixedData[ iDataIndex + 2 ].w, worldPos, flNormal, g_flMixedData[ iDataIndex ].xyz );
 	}
 
 	PS_OUTPUT Out;

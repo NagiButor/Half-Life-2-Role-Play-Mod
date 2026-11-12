@@ -14,6 +14,9 @@
 #include "c_sceneentity.h"
 #include "cliententitylist.h"
 #include "c_baseflex.h"
+#include "hl2rpm_ui.h"
+#include "hl2rpm_items.h"
+#include "tier1/fmtstr.h"
 
 using namespace vgui;
 
@@ -46,114 +49,80 @@ static float SmoothStep01(float t)
     return t * t * (3.0f - 2.0f * t);
 }
 
-// Custom dialog button that draws a pale red background when armed/pressed
+// HL2RPM (M6): an option of the dialog - a numbered row painted in the look of hl2rpm_ui.h;
+// a check label at the start of the text ("[Speech 50] ", added by the server) is green when
+// the player passes it and red when not (flags 4 / 8), greyed options (flag 2) can't be chosen
 class CDialogOptionButton : public Button
 {
 public:
-    CDialogOptionButton(Panel *parent, const char *panelName, const char *text)
-        : Button(parent, panelName, text)
+    CDialogOptionButton(CVGuiDialogPanel *parent, const char *panelName, const char *text, int index)
+        : Button(parent, panelName, text), m_pDialog(parent), m_iIndex(index)
     {
-        SetPaintBackgroundEnabled(true);
+        SetPaintBackgroundEnabled(false);
         SetPaintBorderEnabled(false);
+        m_iRPMFlags = 0;
+        m_Text = text ? text : "";
     }
 
-    virtual void PaintBackground() OVERRIDE
-    {
-        int w, h;
-        GetSize(w, h);
-        // pale reddish highlight when pressed/armed (semi-transparent)
-        if (IsDepressed() || IsArmed())
-        {
-            surface()->DrawSetColor(180, 50, 40, 200);
-            surface()->DrawFilledRect(0, 0, w, h);
-        }
-        else
-        {
-            // keep transparent background otherwise
-        }
-        // Draw gold/yellow outline around option buttons
-        surface()->DrawSetColor(255, 200, 30, 255);
-        surface()->DrawOutlinedRect(0, 0, w-1, h-1);
-    }
+    // flags from the server - 2 conditions unmet (shown greyed, can't be chosen),
+    // 4 / 8 a skill check the player passes / fails
+    int m_iRPMFlags;
+    CUtlString m_Text;
+    CVGuiDialogPanel *m_pDialog;
+    int m_iIndex;
+    bool IsGreyed() const { return ( m_iRPMFlags & 2 ) != 0; }
 
-    // Ensure the button text uses the same warm gold color as the dialog text
-    virtual void Paint() OVERRIDE
-    {
-        SetFgColor(Color(255, 200, 30, 255));
-        Button::Paint();
-    }
-};
-
-// Custom label that draws a solid black background and gold text to match HL2 DM style
-class CDialogLineLabel : public Label
-{
-public:
-    CDialogLineLabel(Panel *parent, const char *panelName, const char *text)
-        : Label(parent, panelName, text)
-    {
-        SetPaintBackgroundEnabled(false);
-    }
+    virtual void PaintBackground() OVERRIDE {}
 
     virtual void Paint() OVERRIDE
     {
-        int w, h;
-        GetSize(w, h);
-        // draw solid black background for the text area
-        surface()->DrawSetColor(0, 0, 0, 255);
-        surface()->DrawFilledRect(0, 0, w, h);
-
-        // ensure the label draws only the text (disable its own background drawing)
-        SetPaintBackgroundEnabled(false);
-        SetFgColor(Color(255, 196, 37, 255));
-        Label::Paint();
-    }
-};
-
-class CDialogSpeakerLabel : public Label
-{
-public:
-    CDialogSpeakerLabel(Panel *parent, const char *panelName, const char *text)
-        : Label(parent, panelName, text)
-    {
-        SetPaintBackgroundEnabled(false);
-        SetContentAlignment(Label::a_center);
-        SetFgColor(Color(255, 200, 30, 255));
-    }
-
-    virtual void Paint() OVERRIDE
-    {
-        wchar_t wtext[256];
-        wtext[0] = L'\0';
-        GetText(wtext, ARRAYSIZE(wtext));
-        if (!wtext[0])
+        using namespace RPMUI;
+        const Palette_t &p = Pal();
+        float a = m_pDialog->OptionAppear(m_iIndex);
+        if (a <= 0.0f)
             return;
-
-        HFont font = GetFont();
-        int textW = 0, textH = 0;
-        surface()->GetTextSize(font, wtext, textW, textH);
-
         int w, h;
         GetSize(w, h);
-
-        surface()->DrawSetTextFont(font);
-        int x = (w - textW) / 2;
-        int y = (h - textH) / 2;
-
-        surface()->DrawSetTextColor(0, 0, 0, 180);
-        surface()->DrawSetTextPos(x - 1, y);
-        surface()->DrawPrintText(wtext, wcslen(wtext));
-        surface()->DrawSetTextPos(x + 1, y);
-        surface()->DrawPrintText(wtext, wcslen(wtext));
-        surface()->DrawSetTextPos(x, y - 1);
-        surface()->DrawPrintText(wtext, wcslen(wtext));
-        surface()->DrawSetTextPos(x, y + 1);
-        surface()->DrawPrintText(wtext, wcslen(wtext));
-
-        surface()->DrawSetTextColor(255, 200, 30, 255);
-        surface()->DrawSetTextPos(x, y);
-        surface()->DrawPrintText(wtext, wcslen(wtext));
+        bool hl = !IsGreyed() && m_pDialog->HighlightedOption() == m_iIndex;
+        if (hl)
+            Highlight(0, 0, w, h, 1.0f - (gpGlobals->realtime - m_pDialog->HighlightTime()) / 0.35f, (int)(255 * a));
+        int ty = (h - surface()->GetFontTall(Font(F_TEXT))) / 2;
+        Color base = IsGreyed() ? p.grey : (hl ? p.text : p.accent);
+        Text(F_TEXT, Sc(14), ty, Fade(hl ? p.text : (IsGreyed() ? p.grey : p.dim), a), CFmtStr("%d.", m_iIndex + 1));
+        int tx = Sc(46);
+        const char *s = m_Text.Get();
+        if (s[0] == '[')
+        {
+            const char *end = strchr(s, ']');
+            if (end)
+            {
+                char label[128];
+                int n = Min((int)(end - s + 1), (int)sizeof(label) - 1);
+                Q_strncpy(label, s, n + 1);
+                Color lc = IsGreyed() ? p.grey : (m_iRPMFlags & 8) ? p.bad : (m_iRPMFlags & 4) ? p.good : base;
+                tx += Text(F_TEXT, tx, ty, Fade(lc, a), label) + Sc(8);
+                s = end + 1;
+                while (*s == ' ')
+                    s++;
+            }
+        }
+        Text(F_TEXT, tx, ty, Fade(base, a), s, hl, 0, w - tx - Sc(10));
     }
 };
+
+// HL2RPM: an option shown after the line ends - greyed ones stay disabled
+static void ShowOptionButton(vgui::Button *b)
+{
+    CDialogOptionButton *ob = dynamic_cast<CDialogOptionButton *>(b);
+    b->SetVisible(true);
+    b->SetEnabled(!(ob && ob->IsGreyed()));
+}
+
+static bool IsOptionGreyed(vgui::Panel *p)
+{
+    CDialogOptionButton *ob = dynamic_cast<CDialogOptionButton *>(p);
+    return ob && ob->IsGreyed();
+}
 
 CVGuiDialogPanel::CVGuiDialogPanel(vgui::Panel *parent) : BaseClass(parent, "DialogPanel")
 {
@@ -174,43 +143,31 @@ CVGuiDialogPanel::CVGuiDialogPanel(vgui::Panel *parent) : BaseClass(parent, "Dia
     m_autoFaceStartTime = 0.0f;
     m_autoFaceDuration = 0.0f;
     m_autoFaceConsumed = false;
+    m_flOpenTime = m_flLineTime = m_flOptionsTime = m_flSelTime = 0.0f;
+    m_iKeySel = -1;
+    m_iLastHighlight = -1;
+    m_iTabH = m_iBoxH = m_iOptTop = m_iRowH = m_iOptViewH = 0;
+    m_bEscapeBlocked = false;
+    m_bOptionsRevealed = false;
 
-    // Make a modest sized centered panel
-    int sx, sy;
-    surface()->GetScreenSize(sx, sy);
-    // Make dialog wider and positioned lower on screen (Fallout NV style)
-    int w = Max(700, (sx * 7) / 10);
-    int h = 260;
-    SetSize(w, h);
-    // place near bottom center with a modest margin
-    SetPos((sx - w) / 2, sy - h - 80);
-
-    // Frame provides its own background; ensure it's visible and has a distinct color/alpha
-    SetTitle("Dialog", true);
+    // a fixed window without a title bar: everything is painted (hl2rpm_ui.h)
+    SetTitle("", false);
+    SetTitleBarVisible(false);
     SetMenuButtonVisible(false);
-    // Remove the window close button and prevent resizing so this panel acts like a fixed dialog
     SetCloseButtonVisible(false);
     SetMinimizeButtonVisible(false);
     SetMaximizeButtonVisible(false);
     SetSizeable(false);
-    // Prevent the user from moving the window
     SetMoveable(false);
     SetAlpha(255);
-    // Black translucent background like the screenshot
-    SetBgColor(Color(0, 0, 0, 230));
-    // Warm yellow/gold text color for dialog
-    SetFgColor(Color(255, 200, 30, 255));
+    DisableFadeEffect();
     SetPaintBackgroundEnabled(true);
 
-    m_pSpeakerLabel = new CDialogSpeakerLabel(this, "SpeakerLabel", "");
-    m_pSpeakerLabel->SetVisible(true);
-    m_pSpeakerLabel->SetBounds(12, 8, w - 24, 20);
-
-    m_pLineLabel = new CDialogLineLabel(this, "LineLabel", "");
-    m_pLineLabel->SetVisible(true);
-    m_pLineLabel->SetWrap(true);
-    m_pLineLabel->SetBounds(12, 30, w - 24, 64);
-    m_pLineLabel->SetContentAlignment(Label::a_west);
+    // the old labels only keep the texts (the window paints them)
+    m_pSpeakerLabel = new Label(this, "SpeakerLabel", "");
+    m_pSpeakerLabel->SetVisible(false);
+    m_pLineLabel = new Label(this, "LineLabel", "");
+    m_pLineLabel->SetVisible(false);
 
     SetKeyBoardInputEnabled(false);
     SetMouseInputEnabled(true);
@@ -219,6 +176,102 @@ CVGuiDialogPanel::CVGuiDialogPanel(vgui::Panel *parent) : BaseClass(parent, "Dia
     m_waitForSceneEnd = false;
     m_sceneWasPlaying = false;
     m_nOptionsOffset = 0;
+    LayoutDialog();
+}
+
+void CVGuiDialogPanel::ApplySchemeSettings(vgui::IScheme *pScheme)
+{
+    BaseClass::ApplySchemeSettings(pScheme);
+    RPMUI::LoadFonts(pScheme);
+    SetBgColor(Color(0, 0, 0, 0));
+    SetBorder(NULL);
+    LayoutDialog();
+}
+
+// the window: the name of the NPC in a tab on the top right, under it the box with the
+// line and the numbered options; its height follows the text and the options
+void CVGuiDialogPanel::LayoutDialog()
+{
+    using namespace RPMUI;
+    int sw, sh;
+    surface()->GetScreenSize(sw, sh);
+    const int w = Min(Sc(1180), sw - Sc(120));
+    m_iTabH = Sc(46);
+    m_iRowH = Sc(36);
+    int lineH = m_Line.Length() ? WrapHeight(F_TEXT, w - Sc(68), m_Line.Get()) : LineHeight(F_TEXT);
+    m_iOptTop = Sc(24) + lineH + Sc(30);
+    int n = m_Options.Count();
+    int footer = Sc(44);
+    int maxBox = sh * 55 / 100;
+    m_iOptViewH = n * m_iRowH;
+    m_iBoxH = n ? m_iOptTop + m_iOptViewH + footer : Sc(24) + lineH + Sc(20) + footer;
+    if (m_iBoxH > maxBox)
+    {
+        m_iOptViewH = Max(m_iRowH * 2, m_iOptViewH - (m_iBoxH - maxBox));
+        m_iBoxH = m_iOptTop + m_iOptViewH + footer;
+    }
+    m_iBoxH = Max(m_iBoxH, Sc(140));
+    int totalH = m_iTabH + m_iBoxH;
+    SetBounds((sw - w) / 2, sh - Sc(70) - totalH, w, totalH);
+    PlaceOptions();
+}
+
+void CVGuiDialogPanel::PlaceOptions()
+{
+    using namespace RPMUI;
+    int w, h;
+    GetSize(w, h);
+    int top = m_iTabH + m_iOptTop;
+    for (int i = 0; i < m_Options.Count(); ++i)
+    {
+        int y = top + i * m_iRowH - m_nOptionsOffset;
+        m_Options[i]->SetBounds(Sc(26), y - Sc(3), w - Sc(52), m_iRowH - Sc(4));
+        bool inView = y >= top - 1 && y + m_iRowH <= top + m_iOptViewH + 1;
+        if (m_bOptionsRevealed)
+            m_Options[i]->SetVisible(inView);
+    }
+}
+
+// the line ended (or the player clicked): the options appear, greyed ones can't be chosen
+void CVGuiDialogPanel::RevealOptions()
+{
+    for (int i = 0; i < m_Options.Count(); ++i)
+        ShowOptionButton(m_Options[i]);
+    m_bOptionsRevealed = true;
+    PlaceOptions();
+}
+
+int CVGuiDialogPanel::HighlightedOption() const
+{
+    for (int i = 0; i < m_Options.Count(); ++i)
+        if (m_Options[i]->IsVisible() && m_Options[i]->IsEnabled() && m_Options[i]->IsArmed())
+            return i;
+    return m_iKeySel;
+}
+
+// options appear one after another once they are shown
+float CVGuiDialogPanel::OptionAppear(int index) const
+{
+    if (m_flOptionsTime <= 0.0f)
+        return 0.0f;
+    return RPMUI::Ramp(m_flOptionsTime, 0.18f, index * 0.05f);
+}
+
+void CVGuiDialogPanel::OnThink()
+{
+    BaseClass::OnThink();
+    if (!IsVisible())
+        return;
+    if (m_flOptionsTime <= 0.0f && m_bOptionsRevealed && m_Options.Count())
+        m_flOptionsTime = gpGlobals->realtime;
+    int hl = HighlightedOption();
+    if (hl != m_iLastHighlight)
+    {
+        if (hl >= 0)
+            RPMUI::Sound(RPMUI::SND_HOVER);
+        m_iLastHighlight = hl;
+        m_flSelTime = gpGlobals->realtime;
+    }
 }
 
 void CVGuiDialogPanel::SetCurrentNodeId(int nodeId)
@@ -274,43 +327,64 @@ void CVGuiDialogPanel::SetPayloadFlags(bool autoFaceNPC, bool pendingSpoil)
 
 void CVGuiDialogPanel::SetSpeakerName(const char *name)
 {
-    if (!m_pSpeakerLabel)
-        return;
-    m_pSpeakerLabel->SetText((name && name[0]) ? name : "");
-    m_pSpeakerLabel->SetVisible(name && name[0]);
+    m_Speaker = (name && name[0]) ? name : "";
 }
 
 void CVGuiDialogPanel::PaintBackground()
 {
+    using namespace RPMUI;
+    const Palette_t &p = Pal();
     int w, h;
     GetSize(w, h);
-    Color c = GetBgColor();
-    surface()->DrawSetColor(c.r(), c.g(), c.b(), c.a());
-    surface()->DrawFilledRect(0, 0, w, h);
-    // draw an outline
-    surface()->DrawSetColor(255, 255, 255, 32);
-    surface()->DrawOutlinedRect(0, 0, w-1, h-1);
+    // the box unfolds from its middle when the window opens
+    float open = Ramp(m_flOpenTime, 0.2f);
+    int boxH = Max(Sc(6), (int)(m_iBoxH * open));
+    int boxY = m_iTabH + (m_iBoxH - boxH) / 2;
+    Plate(0, boxY, w, boxH, 246);
+    FrameBox(0, boxY, w, boxH);
+    // the name of the NPC: a tab on the top right
+    if (m_Speaker.Length())
+    {
+        float a = Ramp(m_flOpenTime, 0.2f, 0.1f);
+        int nw = Max(Sc(220), SpacedWidth(F_TAB, m_Speaker.Get(), Sc(3)) + Sc(40));
+        Plate(w - nw, 0, nw, m_iTabH - Sc(6), (int)(248 * a));
+        int th = surface()->GetFontTall(Font(F_TAB));
+        Spaced(F_TAB, w - nw / 2, (m_iTabH - Sc(6) - th) / 2, Fade(p.accent, a), m_Speaker.Get(), Sc(3), true, 1);
+    }
 }
 
 void CVGuiDialogPanel::Paint()
 {
-    // Draw background using configured background color (black translucent)
+    using namespace RPMUI;
+    const Palette_t &p = Pal();
     int w, h;
     GetSize(w, h);
-    Color c = GetBgColor();
-    surface()->DrawSetColor(c.r(), c.g(), c.b(), c.a());
-    surface()->DrawFilledRect(0, 0, w, h);
-    // subtle border (slightly lighter)
-    surface()->DrawSetColor(60, 60, 60, 200);
-    surface()->DrawOutlinedRect(0, 0, w-1, h-1);
+    float a = Ramp(m_flOpenTime, 0.2f, 0.12f) * Ramp(m_flLineTime, 0.25f);
+    Wrap(F_TEXT, Sc(34), m_iTabH + Sc(24), w - Sc(68), Fade(p.text, a), m_Line.Get());
+    if (m_Options.Count())
+        Line(Sc(30), m_iTabH + m_iOptTop - Sc(16), w - Sc(60), Fade(p.faint, a));
+    // more options than fit: a hint at the edge that the wheel scrolls
+    int top = m_iTabH + m_iOptTop;
+    if (m_nOptionsOffset > 0)
+        Text(F_SMALL, w - Sc(40), top - Sc(14), p.dim, "\xe2\x96\xb2", false, 1);
+    if (m_Options.Count() * m_iRowH - m_nOptionsOffset > m_iOptViewH + 1)
+        Text(F_SMALL, w - Sc(40), top + m_iOptViewH, p.dim, "\xe2\x96\xbc", false, 1);
+    // the hint at the bottom
+    const bool ru = !Q_stricmp(RPMItems::Language(), "russian");
+    CFmtStr hint;
+    if (m_Options.Count() == 1 && m_flOptionsTime > 0.0f)
+        hint.sprintf("%s", ru ? "1 — ответить    ·    Esc — закрыть" : "1 - answer    ·    Esc - close");
+    else if (m_Options.Count() && m_flOptionsTime > 0.0f)
+        hint.sprintf(ru ? "1–%d — ответить    ·    Esc — закрыть" : "1-%d - answer    ·    Esc - close", Min(9, m_Options.Count()));
+    else
+        hint.sprintf("%s", ru ? "Щелчок или пробел — дальше    ·    Esc — закрыть" : "Click or space - continue    ·    Esc - close");
+    Text(F_SMALL, w / 2, h - Sc(30), Fade(p.grey, a), hint, false, 1);
 
     if (!m_bPaintCalled)
     {
         Msg("CVGuiDialogPanel::Paint called (first time) GetVPanel()=%p parent=%p\n", (void*)GetVPanel(), (void*)GetParent());
         m_bPaintCalled = true;
     }
-
-    BaseClass::Paint();
 }
 
 CVGuiDialogPanel *GetGlobalDialogPanel()
@@ -356,9 +430,22 @@ void CVGuiDialogPanel::BeginDialog(const char *entityName, int entIndex)
     }
     m_Options.RemoveAll();
     m_nOptionsOffset = 0;
+    m_flOptionsTime = 0.0f;
+    m_bOptionsRevealed = false;
+    m_iKeySel = -1;
+    m_iLastHighlight = -1;
+    if (!continuing || !IsVisible())
+        m_flOpenTime = gpGlobals->realtime;
+    m_flLineTime = gpGlobals->realtime;
+    m_Line.Clear();
+    // Esc closes the window instead of opening the game menu
+    if (!m_bEscapeBlocked)
+    {
+        engine->ClientCmd_Unrestricted("gameui_preventescapetoshow\n");
+        m_bEscapeBlocked = true;
+    }
 
     Msg("CVGuiDialogPanel::BeginDialog entity=%s\n", m_entityName.Get());
-    m_pLineLabel->SetText("...");
     // Ensure we have a parent (viewport) so the panel is actually displayed and receives input
     if (!GetParent())
     {
@@ -374,12 +461,8 @@ void CVGuiDialogPanel::BeginDialog(const char *entityName, int entIndex)
     }
 
     // Re-position in case screen size / parent changed: keep near bottom center
-    int sx, sy;
-    surface()->GetScreenSize(sx, sy);
+    LayoutDialog();
     int pw, ph;
-    GetSize(pw, ph);
-    Msg("CVGuiDialogPanel: screenSize=(%d,%d) panelSize=(%d,%d)\n", sx, sy, pw, ph);
-    SetPos((sx - pw) / 2, sy - ph - 80);
 
     // Try to make this panel popup/modal so it reliably receives input and shows cursor
     MakePopup();
@@ -440,8 +523,9 @@ void CVGuiDialogPanel::BeginDialog(const char *entityName, int entIndex)
 
 void CVGuiDialogPanel::SetLine(const char *line)
 {
-    if (m_pLineLabel)
-        m_pLineLabel->SetText(line ? line : "");
+    m_Line = line ? line : "";
+    m_flLineTime = gpGlobals->realtime;
+    LayoutDialog();
 }
 
 void CVGuiDialogPanel::SetChoreo(const char *choreo, const char *extraSequence)
@@ -537,17 +621,7 @@ void CVGuiDialogPanel::AddOption(int id, const char *text, int nextId, int flags
     int idx = m_Options.Count();
     char namebuf[64];
     Q_snprintf(namebuf, sizeof(namebuf), "OptionButton%d", idx);
-    CDialogOptionButton *btn = new CDialogOptionButton(this, namebuf, text ? text : "");
-
-    // Position buttons stacked under the line
-    int pw, ph;
-    GetSize(pw, ph);
-    int btnW = pw - 24;
-    int btnH = 28;
-    int x = 12;
-    int baseY = 30 + 64 + 12;
-    int y = baseY + idx * (btnH + 6) - m_nOptionsOffset;
-    btn->SetBounds(x, y, btnW, btnH);
+    CDialogOptionButton *btn = new CDialogOptionButton(this, namebuf, text ? text : "", idx);
 
     char cmd[256];
     // Include flags in the command so client and server know option attributes
@@ -561,9 +635,10 @@ void CVGuiDialogPanel::AddOption(int id, const char *text, int nextId, int flags
     btn->SetVisible(false);
     // Style button: no border, gold text. Background painting is handled by CDialogOptionButton
     btn->SetPaintBorderEnabled(false);
-    btn->SetFgColor(Color(255, 200, 30, 255));
+    btn->m_iRPMFlags = flags & ~1;
     m_Options.AddToTail(btn);
-    Msg("CVGuiDialogPanel: added option id=%d text='%s' bounds=(%d,%d,%d,%d)\n", id, text ? text : "", x, y, btnW, btnH);
+    LayoutDialog();
+    Msg("CVGuiDialogPanel: added option id=%d text='%s'\n", id, text ? text : "");
 }
 
 void CVGuiDialogPanel::OnMouseWheeled(int delta)
@@ -571,49 +646,18 @@ void CVGuiDialogPanel::OnMouseWheeled(int delta)
     if (!IsVisible() || m_Options.Count() == 0)
         return;
 
-    int mx, my;
-    input()->GetCursorPos(mx, my);
-    ScreenToLocal(mx, my);
-
-    int pw, ph;
-    GetSize(pw, ph);
-    int baseY = 30 + 64 + 12;
-    if (my < baseY || my > ph - 8)
-        return;
-
-    int btnH = 28;
-    int gap = 6;
-    int viewHeight = (ph - 8) - baseY;
-    int contentHeight = m_Options.Count() * (btnH + gap);
-    int maxOffset = contentHeight - viewHeight;
-    if (maxOffset < 0)
-        maxOffset = 0;
-
-    int step = 60;
-    int d = (delta > 0) ? -step : step;
-    m_nOptionsOffset += d;
-    if (m_nOptionsOffset < 0)
-        m_nOptionsOffset = 0;
-    if (m_nOptionsOffset > maxOffset)
-        m_nOptionsOffset = maxOffset;
-
-    for (int i = 0; i < m_Options.Count(); ++i)
-    {
-        int bx, by, bw, bh;
-        m_Options[i]->GetBounds(bx, by, bw, bh);
-        int y = baseY + i * (btnH + gap) - m_nOptionsOffset;
-        m_Options[i]->SetBounds(bx, y, bw, bh);
-        bool inView = (y >= baseY) && (y <= (ph - 8 - btnH));
-        if (m_Options[i]->IsEnabled())
-            m_Options[i]->SetVisible(inView);
-    }
-
-    InvalidateLayout();
+    int maxOffset = Max(0, m_Options.Count() * m_iRowH - m_iOptViewH);
+    m_nOptionsOffset += (delta > 0) ? -m_iRowH : m_iRowH;
+    m_nOptionsOffset = clamp(m_nOptionsOffset, 0, maxOffset);
+    PlaceOptions();
     Repaint();
 }
 
 void CVGuiDialogPanel::EndDialog()
 {
+    // HL2RPM: tell the server - actions that waited for the window to close run now (the NPC attacks...)
+    if (IsVisible())
+        engine->ClientCmd("dialog_closed\n");
     // Hide and release input capture
     SetVisible(false);
     SetKeyBoardInputEnabled(false);
@@ -627,6 +671,11 @@ void CVGuiDialogPanel::EndDialog()
     // stop ticking
     vgui::ivgui()->RemoveTickSignal( GetVPanel() );
     m_optionAvailableAt = 0.0;
+    if (m_bEscapeBlocked)
+    {
+        engine->ClientCmd_Unrestricted("gameui_allowescapetoshow\n");
+        m_bEscapeBlocked = false;
+    }
 }
 
 void CVGuiDialogPanel::SetOptionDelay(float seconds)
@@ -745,15 +794,7 @@ AutoAdvance:
     // First: time-based availability (server-provided or fallback)
     if (m_optionAvailableAt > 0.0 && now >= m_optionAvailableAt)
     {
-        for (int i = 0; i < m_Options.Count(); ++i)
-        {
-            vgui::Button *b = dynamic_cast<vgui::Button*>(m_Options[i]);
-            if (b)
-            {
-                b->SetVisible(true);
-                b->SetEnabled(true);
-            }
-        }
+        RevealOptions();
         if (!m_autoFaceActive)
             vgui::ivgui()->RemoveTickSignal( GetVPanel() );
         m_optionAvailableAt = 0.0;
@@ -773,15 +814,7 @@ AutoAdvance:
         else if (m_sceneWasPlaying && !playing)
         {
             // Scene finished — show options immediately
-            for (int i = 0; i < m_Options.Count(); ++i)
-            {
-                vgui::Button *b = dynamic_cast<vgui::Button*>(m_Options[i]);
-                if (b)
-                {
-                    b->SetVisible(true);
-                    b->SetEnabled(true);
-                }
-            }
+            RevealOptions();
             m_waitForSceneEnd = false;
             m_sceneWasPlaying = false;
             if (!m_autoFaceActive)
@@ -795,7 +828,14 @@ AutoAdvance:
 
 void CVGuiDialogPanel::OnMousePressed(vgui::MouseCode code)
 {
-    if (code == MOUSE_LEFT)
+    if (code == MOUSE_LEFT && ContinueOrReveal())
+        return;
+    BaseClass::OnMousePressed(code);
+}
+
+// a click / space: a line without options continues, options not shown yet appear
+bool CVGuiDialogPanel::ContinueOrReveal()
+{
     {
         if (m_Options.Count() == 0 && (m_autoNextId != -1 || m_autoClose))
         {
@@ -815,21 +855,22 @@ void CVGuiDialogPanel::OnMousePressed(vgui::MouseCode code)
                 char buf[320];
                 if (m_pendingSpoil)
                     Q_snprintf(buf, sizeof(buf), "dialog_finish_spoil %d \"%s\"\n", m_currentNodeId, m_entityName.Get());
-                else
-                    Q_snprintf(buf, sizeof(buf), "dialog_continue %d \"%s\"\n", m_currentNodeId, m_entityName.Get());
+                else  // the same transition as when the line ends by itself (OnTick)
+                    Q_snprintf(buf, sizeof(buf), "dialog_continue %d \"%s\" %d %d\n", m_currentNodeId, m_entityName.Get(), m_autoNextId, m_autoClose ? 1 : 0);
                 engine->ClientCmd(buf);
             }
             m_autoNextId = -1;
             m_autoClose = false;
             m_pendingSpoil = false;
-            return;
+            RPMUI::Sound(RPMUI::SND_CLICK);
+            return true;
         }
 
         bool hasHiddenOptions = false;
         for (int i = 0; i < m_Options.Count(); ++i)
         {
             vgui::Button *b = dynamic_cast<vgui::Button*>(m_Options[i]);
-            if (b && (!b->IsVisible() || !b->IsEnabled()))
+            if (b && (!b->IsVisible() || (!b->IsEnabled() && !IsOptionGreyed(b))))
             {
                 hasHiddenOptions = true;
                 break;
@@ -848,20 +889,75 @@ void CVGuiDialogPanel::OnMousePressed(vgui::MouseCode code)
             m_optionAvailableAt = 0.0;
             vgui::ivgui()->RemoveTickSignal( GetVPanel() );
 
-            for (int i = 0; i < m_Options.Count(); ++i)
-            {
-                vgui::Button *b = dynamic_cast<vgui::Button*>(m_Options[i]);
-                if (b)
-                {
-                    b->SetVisible(true);
-                    b->SetEnabled(true);
-                }
-            }
-            return;
+            RevealOptions();
+            return true;
         }
     }
+    return false;
+}
 
-    BaseClass::OnMousePressed(code);
+void CVGuiDialogPanel::ChooseOption(int index)
+{
+    if (index < 0 || index >= m_Options.Count())
+        return;
+    vgui::Button *b = m_Options[index];
+    if (!b->IsVisible() || !b->IsEnabled())
+    {
+        RPMUI::Sound(RPMUI::SND_DENY);
+        return;
+    }
+    RPMUI::Sound(RPMUI::SND_CLICK);
+    b->DoClick();
+}
+
+// keys: 1-9 answer, up / down + enter, space / enter continue, Esc closes
+void CVGuiDialogPanel::OnKeyCodeTyped(vgui::KeyCode code)
+{
+    if (code == KEY_ESCAPE)
+    {
+        EndDialog();
+        engine->ClientCmd_Unrestricted("gameui_hide\n");
+        engine->ClientCmd_Unrestricted("wait;gameui_hide\n");
+        return;
+    }
+    bool optionsShown = m_flOptionsTime > 0.0f;
+    if (code >= KEY_1 && code <= KEY_9)
+    {
+        if (optionsShown)
+            ChooseOption(code - KEY_1);
+        else
+            ContinueOrReveal();
+        return;
+    }
+    if ((code == KEY_UP || code == KEY_DOWN) && optionsShown && m_Options.Count())
+    {
+        int n = m_Options.Count();
+        int sel = HighlightedOption();
+        for (int step = 0; step < n; step++)
+        {
+            sel = (sel < 0) ? (code == KEY_DOWN ? 0 : n - 1) : (sel + (code == KEY_DOWN ? 1 : n - 1)) % n;
+            if (m_Options[sel]->IsEnabled())
+                break;
+        }
+        m_iKeySel = sel;
+        // keep it in view
+        int y = sel * m_iRowH;
+        if (y < m_nOptionsOffset)
+            m_nOptionsOffset = y;
+        else if (y + m_iRowH > m_nOptionsOffset + m_iOptViewH)
+            m_nOptionsOffset = y + m_iRowH - m_iOptViewH;
+        PlaceOptions();
+        return;
+    }
+    if (code == KEY_ENTER || code == KEY_PAD_ENTER || code == KEY_SPACE)
+    {
+        if (optionsShown && m_iKeySel >= 0)
+            ChooseOption(m_iKeySel);
+        else
+            ContinueOrReveal();
+        return;
+    }
+    BaseClass::OnKeyCodeTyped(code);
 }
 
 void CVGuiDialogPanel::OnCommand(const char *command)
@@ -1176,6 +1272,25 @@ static void __Cmd_Dialog_Set_Option_Delay(const CCommand &args)
     }
 }
 static ConCommand dialog_set_option_delay("dialog_set_option_delay", __Cmd_Dialog_Set_Option_Delay, "Set delay (seconds) before dialog options appear (client)", FCVAR_CLIENTDLL);
+
+// HL2RPM: the keys of the dialog window from the console (tests): dialog_key 1..9 | up | down | enter | esc
+static void __Cmd_Dialog_Key(const CCommand &args)
+{
+    if (args.ArgC() < 2 || !s_pDialogPanel || !s_pDialogPanel->IsVisible())
+        return;
+    const char *k = args.Arg(1);
+    vgui::KeyCode code = KEY_NONE;
+    if (k[0] >= '1' && k[0] <= '9' && !k[1])
+        code = (vgui::KeyCode)(KEY_1 + (k[0] - '1'));
+    else if (!Q_stricmp(k, "up")) code = KEY_UP;
+    else if (!Q_stricmp(k, "down")) code = KEY_DOWN;
+    else if (!Q_stricmp(k, "enter")) code = KEY_ENTER;
+    else if (!Q_stricmp(k, "space")) code = KEY_SPACE;
+    else if (!Q_stricmp(k, "esc")) code = KEY_ESCAPE;
+    if (code != KEY_NONE)
+        s_pDialogPanel->SimulateKey(code);
+}
+static ConCommand dialog_key("dialog_key", __Cmd_Dialog_Key, "HL2RPM: press a key of the dialog window (tests): 1-9 | up | down | enter | space | esc", FCVAR_CLIENTDLL);
 
 // HL2RPM: whether a dialog with an NPC is on screen (the depth of field focuses on the NPC
 // then: deferred_postfx.cpp)

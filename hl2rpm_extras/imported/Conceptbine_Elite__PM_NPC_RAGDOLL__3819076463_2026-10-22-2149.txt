@@ -1,0 +1,22 @@
+# E:\SourceModding\HL2RPMSOURCE\Downloaded models\Conceptbine elite model\Conceptbine_Elite_[PM_NPC_RAGDOLL]_3819076463_2026-10-22-2149.gma -> E:\Steam\steamapps\sourcemods\hl2rpm
+materials/models/conceptbine_elite/bags_cl.vmt
+materials/models/conceptbine_elite/fanny.vmt
+materials/models/conceptbine_elite/combine_elite.vmt
+materials/models/conceptbine_elite/combine_elite_phong.vtf
+materials/models/conceptbine_elite/headmask_cl.vmt
+materials/models/conceptbine_elite/maskgus_cl.vmt
+materials/models/conceptbine_elite/neak_cl.vmt
+materials/models/conceptbine_elite/fanny.vtf
+materials/models/conceptbine_elite/combine_elite_normal.vtf
+materials/models/conceptbine_elite/bags_cl.vtf
+materials/models/conceptbine_elite/combinesoldier_phong.vtf
+materials/models/conceptbine_elite/maskgus_cl.vtf
+materials/models/conceptbine_elite/headmask_cl_normal.vtf
+materials/models/conceptbine_elite/headmask_cl.vtf
+models/conceptbine_elite/conceptbine_elite_npc.phy
+models/conceptbine_elite/conceptbine_elite_npc.dx80.vtx
+materials/models/conceptbine_elite/neak_cl.vtf
+models/conceptbine_elite/conceptbine_elite_npc.dx90.vtx
+models/conceptbine_elite/conceptbine_elite_npc.mdl
+models/conceptbine_elite/conceptbine_elite_npc.vvd
+materials/models/conceptbine_elite/combine_elite.vtf

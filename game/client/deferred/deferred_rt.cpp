@@ -6,8 +6,12 @@
 #include "weather/weather_render.h"
 #include "deferred/deferred_ssao.h"
 #include "deferred/deferred_gi.h"
+#include "deferred/deferred_lightreach.h"
+#include "deferred/deferred_shadowcache.h"
+#include "tier0/icommandline.h"
 #include "deferred/deferred_postfx.h"
 #include "deferred/deferred_taa.h"
+#include "hl2rpm_itempreview.h"
 
 #include "tier0/memdbgon.h"
 
@@ -30,6 +34,18 @@ static CTextureReference g_tex_ShadowRad_Albedo_Ortho[ MAX_SHADOW_ORTHO ];
 static CTextureReference g_tex_ShadowRad_Normal_Ortho[ MAX_SHADOW_ORTHO ];
 static CTextureReference g_tex_ShadowColor_Proj[ MAX_SHADOW_PROJ ];
 static CTextureReference g_tex_ShadowDepth_Proj[ MAX_SHADOW_PROJ ];
+// HL2RPM: spot shadow maps kept between frames (deferred_shadowcache.cpp)
+static CTextureReference g_tex_ShadowCache_Proj[ MAX_SHADOW_CACHE_PROJ ];
+static int g_nShadowCacheProj = 0;
+static bool g_bShadowSampleUsesColor = false;
+static void OnShadowCacheCountChanged( IConVar *var, const char *pOldValue, float flOldValue )
+{
+	RequestDeferredRTRefresh();
+}
+static ConVar r_deferred_shadow_cache_spots( "r_deferred_shadow_cache_spots", "12", FCVAR_NONE,
+	"HL2RPM: spot lamps whose shadow map is kept between frames (each one a map of the spot shadow resolution: "
+	"2048^2 x 16 bit = 8 MB on Ultra; 0 = none; takes effect with the render targets - map change)", true, 0, true, MAX_SHADOW_CACHE_PROJ,
+	OnShadowCacheCountChanged );
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
 static CTextureReference g_tex_ShadowColor_Proj_LOD1[ MAX_SHADOW_PROJ ];
 static CTextureReference g_tex_ShadowDepth_Proj_LOD1[ MAX_SHADOW_PROJ ];
@@ -62,6 +78,86 @@ static ConVar r_deferred_shadow_ortho_depth24( "r_deferred_shadow_ortho_depth24"
 static float g_flDepthScalar = 65536.0f;
 static bool g_bDeferredRTRefreshPending = false;
 static bool g_bInDeferredRTInit = false;
+
+// HL2RPM: render scale (see deferred_rt.h)
+static void OnRenderScaleChanged( IConVar *var, const char *pOldValue, float flOldValue )
+{
+	RequestDeferredRTRefresh();
+}
+static ConVar r_hl2rpm_renderscale( "r_hl2rpm_renderscale", "0.75", FCVAR_ARCHIVE,
+	"HL2RPM: the 3D view is drawn at this part of the screen resolution and brought up to it by the TAA "
+	"(temporal upscale; 1 = native). Takes effect with the render targets (outside a map / the next start)",
+	true, 0.5f, true, 1.0f, OnRenderScaleChanged );
+static bool g_bRenderScaled = false;
+static int g_iFrameW = 0, g_iFrameH = 0;
+static int g_iScreenRTsW = -2, g_iScreenRTsH = -2;	// the frame the screen-sized targets were made for (-1 = full size)
+static CTextureReference g_tex_Scene;
+static CTextureReference g_tex_SceneCopy;
+static CTextureReference g_tex_UpscaleMask;
+
+bool DeferredRenderScale_IsActive()
+{
+	return g_bRenderScaled && g_tex_Scene.IsValid();
+}
+
+void DeferredRenderScale_GetFrameSize( int &w, int &h )
+{
+	if ( DeferredRenderScale_IsActive() )
+	{
+		w = g_iFrameW;
+		h = g_iFrameH;
+		return;
+	}
+	materials->GetBackBufferDimensions( w, h );
+}
+
+float DeferredRenderScale_GetScale()
+{
+	if ( !DeferredRenderScale_IsActive() )
+		return 1.0f;
+	int bw, bh;
+	materials->GetBackBufferDimensions( bw, bh );
+	return bw > 0 ? (float)g_iFrameW / (float)bw : 1.0f;
+}
+
+ITexture *GetDefRT_Scene()
+{
+	return DeferredRenderScale_IsActive() ? (ITexture *)g_tex_Scene : NULL;
+}
+
+ITexture *GetDefRT_SceneCopy()
+{
+	return DeferredRenderScale_IsActive() ? (ITexture *)g_tex_SceneCopy : NULL;
+}
+
+ITexture *GetDefRT_UpscaleMask()
+{
+	return DeferredRenderScale_IsActive() ? (ITexture *)g_tex_UpscaleMask : NULL;
+}
+
+ITexture *CreateFrameSizedRT( const char *pszName, int iDivisor, int iFormat, int iDepth, unsigned int nFlags )
+{
+	if ( g_bRenderScaled )
+		return materials->CreateNamedRenderTargetTextureEx2( pszName,
+			Max( 1, g_iFrameW / iDivisor ), Max( 1, g_iFrameH / iDivisor ), RT_SIZE_LITERAL,
+			(ImageFormat)iFormat, (MaterialRenderTargetDepth_t)iDepth, nFlags, 0 );
+	return materials->CreateNamedRenderTargetTextureEx2( pszName, 128, 128,
+		( iDivisor >= 4 ) ? RT_SIZE_HDR : RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP,
+		(ImageFormat)iFormat, (MaterialRenderTargetDepth_t)iDepth, nFlags, 0 );
+}
+
+// the size of the 3D frame for the render targets about to be made
+static void LatchRenderScale()
+{
+	int bw = 0, bh = 0;
+	materials->GetBackBufferDimensions( bw, bh );
+	const float s = r_hl2rpm_renderscale.GetFloat();
+	g_bRenderScaled = s < 0.995f && bw > 0 && bh > 0
+		&& g_pMaterialSystemHardwareConfig->GetHDRType() != HDR_TYPE_FLOAT
+		&& !CommandLine()->FindParm( "-norenderscale" );
+	g_iFrameW = g_bRenderScaled ? Max( 64, (int)( bw * s + 0.5f ) & ~1 ) : bw;
+	g_iFrameH = g_bRenderScaled ? Max( 64, (int)( bh * s + 0.5f ) & ~1 ) : bh;
+}
 static int g_iShadowSpotResActive = 2048;
 static int g_iShadowPointResActive = 2048;
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
@@ -138,11 +234,21 @@ void DefRTsOnModeChanged()
 void InitDeferredRTs( bool bInitial )
 {
 	g_bInDeferredRTInit = true;
+
+	// HL2RPM: the screen-sized targets are made at the first init and follow the frame buffer's size
+	// by themselves; with a render scale they have a literal size - made again when it changes
+	LatchRenderScale();
+	const int iWantW = g_bRenderScaled ? g_iFrameW : -1;
+	const int iWantH = g_bRenderScaled ? g_iFrameH : -1;
+	const bool bScreenRTs = bInitial || iWantW != g_iScreenRTsW || iWantH != g_iScreenRTsH;
+	if ( !bInitial && bScreenRTs )
+		DevMsg( "[deferred] render scale: the screen-sized targets are made again for %d x %d\n", g_iFrameW, g_iFrameH );
 	EnsurePointSpotShadowQualityInitialized();
 	LatchShadowResolutionsFromConVars();
 
 	//int screen_w, screen_h;
 	int dummy = 128;
+	NOTE_UNUSED( dummy );
 
 	//materials->GetBackBufferDimensions( screen_w, screen_h );
 
@@ -226,25 +332,41 @@ const ImageFormat fmt_gbuffer0 =
 	const bool bPointShadowLegacy = r_deferred_shadowpoint_legacy.GetBool();
 	generalShadowData.iPointShadowMode = bPointShadowLegacy ? 0 : 1;
 
-	if ( bInitial )
+	if ( bScreenRTs )
 	{
-		g_tex_Normals.Init( materials->CreateNamedRenderTargetTextureEx2( DEFRTNAME_GBUFFER0,
-			dummy, dummy,
-			RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP,
+		g_iScreenRTsW = iWantW;
+		g_iScreenRTsH = iWantH;
+
+		// HL2RPM: the 3D frame itself when scaled (the depth-stencil of the screen is shared: it is
+		// bigger, the frame uses its top left), a copy of it for the passes that look at the frame
+		// (SSR, mirrors) and the mask of what moves with the camera for the upscale
+		if ( g_bRenderScaled )
+		{
+			const unsigned int sceneFlags = TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_RENDERTARGET;
+			g_tex_Scene.Init( CreateFrameSizedRT( "_rt_hl2rpm_scene", 1, materials->GetBackBufferFormat(), MATERIAL_RT_DEPTH_SHARED, sceneFlags ) );
+			g_tex_SceneCopy.Init( CreateFrameSizedRT( "_rt_hl2rpm_scenecopy", 1, materials->GetBackBufferFormat(), MATERIAL_RT_DEPTH_NONE, sceneFlags ) );
+			g_tex_UpscaleMask.Init( CreateFrameSizedRT( "_rt_hl2rpm_upscalemask", 1, IMAGE_FORMAT_RGBA8888, MATERIAL_RT_DEPTH_SHARED, sceneFlags | TEXTUREFLAGS_POINTSAMPLE ) );
+		}
+		else
+		{
+			g_tex_Scene.Shutdown();
+			g_tex_SceneCopy.Shutdown();
+			g_tex_UpscaleMask.Shutdown();
+		}
+
+		g_tex_Normals.Init( CreateFrameSizedRT( DEFRTNAME_GBUFFER0, 1,
 			fmt_gbuffer0,
 #if DEFCFG_DEFERRED_SHADING == 1
 			MATERIAL_RT_DEPTH_NONE,
 #else
 			MATERIAL_RT_DEPTH_SHARED,
 #endif
-			gbufferFlags, 0 ) );
+			gbufferFlags ) );
 
-		g_tex_Depth.Init( materials->CreateNamedRenderTargetTextureEx2( DEFRTNAME_GBUFFER1,
-			dummy, dummy,
-			RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP,
+		g_tex_Depth.Init( CreateFrameSizedRT( DEFRTNAME_GBUFFER1, 1,
 			fmt_gbuffer1,
 			MATERIAL_RT_DEPTH_NONE,
-			gbufferFlags, 0 ) );
+			gbufferFlags ) );
 
 #if ( DEFCFG_LIGHTCTRL_PACKING == 0 )
 	g_tex_LightCtrl.Init( materials->CreateNamedRenderTargetTextureEx2( DEFRTNAME_GBUFFER2,
@@ -270,29 +392,23 @@ const ImageFormat fmt_gbuffer0 =
 		gbufferFlags, 0 ) );
 #endif
 
-		g_tex_Lightaccum.Init( materials->CreateNamedRenderTargetTextureEx2( DEFRTNAME_LIGHTACCUM,
-			dummy, dummy,
-			RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP,
+		g_tex_Lightaccum.Init( CreateFrameSizedRT( DEFRTNAME_LIGHTACCUM, 1,
 			fmt_lightAccum,
 			MATERIAL_RT_DEPTH_NONE,
-			lightAccumFlags, 0 ) );
+			lightAccumFlags ) );
 
 		for ( int i = 0; i < 2; i++ )
-			g_tex_VolumetricsBuffer[ i ].Init( materials->CreateNamedRenderTargetTextureEx2(
-				VarArgs( "%s%02i", DEFRTNAME_VOLUMACCUM, i ),
-				dummy, dummy,
-				RT_SIZE_HDR,
+			g_tex_VolumetricsBuffer[ i ].Init( CreateFrameSizedRT(
+				VarArgs( "%s%02i", DEFRTNAME_VOLUMACCUM, i ), 4,
 				fmt_volumAccum,
 				MATERIAL_RT_DEPTH_NONE,
-				volumAccumFlags, 0 ) );
+				volumAccumFlags ) );
 
-		g_tex_VolumePrepass.Init( materials->CreateNamedRenderTargetTextureEx2(
-			DEFRTNAME_VOLUMPREPASS,
-			dummy, dummy,
-			RT_SIZE_HDR,
+		g_tex_VolumePrepass.Init( CreateFrameSizedRT(
+			DEFRTNAME_VOLUMPREPASS, 4,
 			fmt_gbuffer1,
 			MATERIAL_RT_DEPTH_NONE,
-			gbufferFlags, 0 ) );
+			gbufferFlags ) );
 
 		g_tex_SkyAtmoLUT.Init( materials->CreateNamedRenderTargetTextureEx2(
 			"_rt_SkyAtmoLUT",
@@ -407,8 +523,10 @@ const ImageFormat fmt_gbuffer0 =
 		InitWeatherRTs();
 		InitSSAORTs();
 		InitGIRTs();
+		InitLightReachRTs();
 		InitPostFXRTs();
 		InitTAARTs();
+		InitItemPreviewRT();
 
 #if DEFCFG_ENABLE_RADIOSITY
 		for ( int i = 0; i < 2; i++ )
@@ -526,6 +644,29 @@ const ImageFormat fmt_gbuffer0 =
 		Assert( res == g_tex_ShadowDepth_Proj_LOD2[i]->GetActualWidth() );
 		Assert( res == g_tex_ShadowColor_Proj_LOD2[i]->GetActualWidth() );
 #endif
+	}
+
+	// HL2RPM: the spot shadow cache - same size and format as the spot slots (the hardware depth
+	// path only: with color shadow maps the light pass reads the color targets)
+	{
+		const int nCache = bShadowUseColor ? 0 : Clamp( r_deferred_shadow_cache_spots.GetInt(), 0, MAX_SHADOW_CACHE_PROJ );
+		const int res = GetShadowResolution_Spot();
+		for ( int i = 0; i < MAX_SHADOW_CACHE_PROJ; i++ )
+		{
+			if ( i < nCache )
+				g_tex_ShadowCache_Proj[i].Init( materials->CreateNamedRenderTargetTextureEx2(
+					VarArgs( "_rt_defShadowCacheProj%02i", i ),
+					res, res,
+					RT_SIZE_NO_CHANGE,
+					fmt_depth,
+					MATERIAL_RT_DEPTH_NONE,
+					depthFlags, 0 ) );
+			else
+				g_tex_ShadowCache_Proj[i].Shutdown();
+		}
+		g_nShadowCacheProj = nCache;
+		g_bShadowSampleUsesColor = bShadowUseColor;
+		DeferredShadowCache_InvalidateAll();
 	}
 
 	for ( int i = 0; i < MAX_SHADOW_DP; i++ )
@@ -757,6 +898,22 @@ ITexture *GetShadowDepthRT_Proj( int index )
 	Assert( index >= 0 && index < MAX_SHADOW_PROJ );
 	Assert( g_tex_ShadowDepth_Proj[ index ].IsValid() );
 	return g_tex_ShadowDepth_Proj[ index ];
+}
+
+ITexture *GetShadowSampleRT_Proj( int index )
+{
+	return g_bShadowSampleUsesColor ? GetShadowColorRT_Proj( index ) : GetShadowDepthRT_Proj( index );
+}
+
+int GetNumShadowCacheRT_Proj()
+{
+	return g_nShadowCacheProj;
+}
+
+ITexture *GetShadowCacheRT_Proj( int index )
+{
+	Assert( index >= 0 && index < g_nShadowCacheProj );
+	return g_tex_ShadowCache_Proj[ index ];
 }
 
 ITexture *GetShadowColorRT_DP( int index )

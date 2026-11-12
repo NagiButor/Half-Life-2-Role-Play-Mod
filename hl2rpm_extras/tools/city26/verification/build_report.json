@@ -1,0 +1,43 @@
+{
+  "vmf": "E:\\XBLAH's modding tool\\content\\Mapbase\\hl2rpm\\mapsrc\\test\\city26_test.vmf",
+  "reference": "E:/Google Map 3D Exporter v3.0/city-26-prototype.fbx",
+  "transform": {
+    "xy_scale": 1024,
+    "center": [
+      -1.5,
+      -3.0
+    ],
+    "ground": 128,
+    "water": -128,
+    "height_policy": "regularized 32/64-unit storeys; no vertical scan noise"
+  },
+  "brushes": 877,
+  "entities": 309,
+  "by_visgroup": {
+    "00 Sealing sky / river bed": 6,
+    "01 Continuous land / quay": 12,
+    "06 Water / piers / stairs": 76,
+    "03 Scan blocks / solid walls": 212,
+    "04 Roofs / cornices": 365,
+    "05 Station / rail platforms": 22,
+    "02 Streets / sidewalks": 177,
+    "07 Map boundary massing": 7
+  },
+  "bounds": [
+    [
+      -13856.0,
+      -11808.0,
+      -832.0
+    ],
+    [
+      13856.0,
+      11296.0,
+      3104.0
+    ]
+  ],
+  "spawn": [
+    1178,
+    614,
+    144
+  ]
+}

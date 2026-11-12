@@ -18,6 +18,10 @@ import json
 import os
 import re
 
+from .rpgdata import ItemDef, LootList
+from .sounddata import BarkSet, MusicTrack, Soundscape
+from .rpgchar import Perk, Trait
+from .termdata import TerminalDef
 from .worlddata import Actor, Faction, MapLayer
 
 FORMAT = "hl2rpm-dialog-project"
@@ -132,6 +136,7 @@ class Option:
         self.next = -1
         self.close = False
         self.spoils = False
+        self.trade = False                   # the dialog closes, the NPC's trade window opens
         self.server_sequence = ""
         # quest actions (the game runs all that are set, in this order)
         self.grant = ""
@@ -147,11 +152,33 @@ class Option:
         self.require_rep = None              # int or None
         self.require_state = None            # [quest, state] or None
         self.require_stage = None            # [quest, stage] or None
+        # Creation Kit logic (logic.py): conditions (unmet - hidden, or greyed with show_unmet),
+        # a skill / attribute check {"skill"|"stat": id, "value": n} (passed -> next + actions,
+        # failed -> fail_next + fail_actions; check_once - tried once, then hidden), actions
+        self.conditions = []
+        self.show_unmet = False
+        self.check = None
+        self.fail_next = -1
+        self.check_once = True
+        self.actions = []
+        self.fail_actions = []
         self.note = ""
 
     def to_dict(self):
         d = {"text": self.text, "next": self.next}
-        for k in ("close", "spoils"):
+        if self.conditions:
+            d["conditions"] = self.conditions
+        if self.show_unmet:
+            d["show_unmet"] = True
+        if self.check:
+            d["check"] = dict(self.check)
+            d["fail_next"] = self.fail_next
+            d["check_once"] = self.check_once
+        if self.actions:
+            d["actions"] = self.actions
+        if self.fail_actions:
+            d["fail_actions"] = self.fail_actions
+        for k in ("close", "spoils", "trade"):
             if getattr(self, k):
                 d[k] = True
         if self.server_sequence:
@@ -186,6 +213,7 @@ class Option:
         o.next = int(d.get("next", -1))
         o.close = bool(d.get("close", False))
         o.spoils = bool(d.get("spoils", False))
+        o.trade = bool(d.get("trade", False))
         o.server_sequence = d.get("server_sequence", "")
         o.grant = d.get("grant", "")
         o.complete = d.get("complete", "")
@@ -202,6 +230,13 @@ class Option:
         o.require_state = [rs[0], rs[1]] if rs else None
         rg = d.get("require_stage")
         o.require_stage = [rg[0], int(rg[1])] if rg else None
+        o.conditions = list(d.get("conditions", []))
+        o.show_unmet = bool(d.get("show_unmet", False))
+        o.check = dict(d["check"]) if d.get("check") else None
+        o.fail_next = int(d.get("fail_next", -1))
+        o.check_once = bool(d.get("check_once", True))
+        o.actions = list(d.get("actions", []))
+        o.fail_actions = list(d.get("fail_actions", []))
         o.note = d.get("note", "")
         return o
 
@@ -210,7 +245,7 @@ class Option:
         return bool(self.complete) and self.next == -1 and (self.after_next != -1 or any(self.after_line.values()))
 
     def leads_somewhere(self):
-        return self.next != -1 or self.close or self.spoils or self.has_after()
+        return self.next != -1 or self.close or self.spoils or self.has_after() or self.trade
 
     def quest_refs(self):
         refs = [q for q in (self.grant, self.complete, self.fail) if q]
@@ -220,6 +255,10 @@ class Option:
             refs.append(self.require_state[0])
         if self.require_stage:
             refs.append(self.require_stage[0])
+        for lst, acts in ((self.conditions, False), (self.actions, True), (self.fail_actions, True)):
+            for x in lst:
+                if x.get("quest"):
+                    refs.append(x["quest"])
         return refs
 
 
@@ -238,10 +277,13 @@ class Node:
         self.end = False
         self.spoils = False
         self.options = []
+        self.actions = []            # run when the line is shown (Creation Kit logic)
         self.note = ""
 
     def to_dict(self):
         d = {"id": self.id, "pos": [round(self.pos[0], 1), round(self.pos[1], 1)], "line": self.line}
+        if self.actions:
+            d["actions"] = self.actions
         if self.voice:
             d["voice"] = _voices_to(self.voice)
         for k in ("sequence", "server_sequence"):
@@ -275,6 +317,7 @@ class Node:
         n.end = bool(d.get("end", False))
         n.spoils = bool(d.get("spoils", False))
         n.options = [Option.from_dict(o) for o in d.get("options", [])]
+        n.actions = list(d.get("actions", []))
         n.note = d.get("note", "")
         return n
 
@@ -440,18 +483,77 @@ class NPC:
                     o.after_next = -1
 
 
+class Objective:
+    """A goal of a quest stage (journal line + HUD marker); see logic.OBJ_TYPES."""
+
+    def __init__(self, oid="o1"):
+        self.id = oid
+        self.text = {}
+        self.type = "custom"
+        self.target = ""          # kill / talk / go / use: names ("a;b;zomb*"), zone, entity
+        self.item = ""            # collect
+        self.count = 1
+        self.radius = 128         # go: to an entity
+        self.optional = False
+        self.marker = True
+        self.conditions = []      # cond
+
+    def to_dict(self):
+        d = {"id": self.id, "text": self.text, "type": self.type}
+        for k in ("target", "item"):
+            if getattr(self, k):
+                d[k] = getattr(self, k)
+        if self.count != 1:
+            d["count"] = self.count
+        if self.radius != 128:
+            d["radius"] = self.radius
+        if self.optional:
+            d["optional"] = True
+        if not self.marker:
+            d["marker"] = False
+        if self.conditions:
+            d["conditions"] = self.conditions
+        return d
+
+    @staticmethod
+    def from_dict(d):
+        o = Objective(d.get("id", "o1"))
+        o.text = _texts_from(d.get("text"))
+        o.type = d.get("type", "custom")
+        o.target = d.get("target", "")
+        o.item = d.get("item", "")
+        o.count = int(d.get("count", 1))
+        o.radius = int(d.get("radius", 128))
+        o.optional = bool(d.get("optional", False))
+        o.marker = bool(d.get("marker", True))
+        o.conditions = list(d.get("conditions", []))
+        return o
+
+
 class Stage:
     def __init__(self):
         self.title = {}
         self.desc = {}
         self.kill_targets = []
         self.kill_count = 0
+        self.objectives = []      # all required done -> the next stage (or the quest is done)
+        self.actions = []         # run when the stage begins
+        self.next = -1            # -1: the next one
+        self.final = False        # done -> the quest is completed
 
     def to_dict(self):
         d = {"title": self.title, "desc": self.desc}
         if self.kill_targets:
             d["kill_targets"] = self.kill_targets
             d["kill_count"] = self.kill_count
+        if self.objectives:
+            d["objectives"] = [o.to_dict() for o in self.objectives]
+        if self.actions:
+            d["actions"] = self.actions
+        if self.next != -1:
+            d["next"] = self.next
+        if self.final:
+            d["final"] = True
         return d
 
     @staticmethod
@@ -461,6 +563,10 @@ class Stage:
         s.desc = _texts_from(d.get("desc"))
         s.kill_targets = list(d.get("kill_targets", []))
         s.kill_count = int(d.get("kill_count", 0))
+        s.objectives = [Objective.from_dict(x) for x in d.get("objectives", [])]
+        s.actions = list(d.get("actions", []))
+        s.next = int(d.get("next", -1))
+        s.final = bool(d.get("final", False))
         return s
 
 
@@ -475,12 +581,31 @@ class Quest:
         self.fail_rep_penalty = 0
         self.stages = []
         self.rewards = []        # [[classname, amount], ...]
+        self.xp = 0              # experience for completing
+        self.on_complete = []    # actions
+        self.on_fail = []
+        self.fail_conditions = []    # true while active -> the quest fails
         self.note = ""
+
+    def all_objectives(self):
+        return [o for s in self.stages for o in s.objectives]
+
+    def new_objective_id(self):
+        used = {o.id for o in self.all_objectives()}
+        i = 1
+        while "o%d" % i in used:
+            i += 1
+        return "o%d" % i
 
     def to_dict(self):
         d = {"id": self.id, "owner": self.owner, "title": self.title, "desc": self.desc,
              "min_rep": self.min_rep, "stages": [s.to_dict() for s in self.stages],
              "rewards": [[r[0], int(r[1])] for r in self.rewards]}
+        if self.xp:
+            d["xp"] = self.xp
+        for k in ("on_complete", "on_fail", "fail_conditions"):
+            if getattr(self, k):
+                d[k] = getattr(self, k)
         if self.fail_on_kill:
             d["fail_on_kill"] = self.fail_on_kill
         if self.fail_rep_penalty:
@@ -500,8 +625,124 @@ class Quest:
         q.fail_rep_penalty = int(d.get("fail_rep_penalty", 0))
         q.stages = [Stage.from_dict(s) for s in d.get("stages", [])]
         q.rewards = [[r[0], int(r[1])] for r in d.get("rewards", [])]
+        q.xp = int(d.get("xp", 0))
+        q.on_complete = list(d.get("on_complete", []))
+        q.on_fail = list(d.get("on_fail", []))
+        q.fail_conditions = list(d.get("fail_conditions", []))
         q.note = d.get("note", "")
         return q
+
+
+class Event:
+    """An event of the "Logic" tab: when <on> (+ target / value) and the conditions hold -> actions."""
+
+    def __init__(self, eid="event"):
+        self.id = eid
+        self.on = "when"
+        self.target = ""
+        self.value = ""
+        self.map = ""
+        self.once = True
+        self.delay = 0.0
+        self.conditions = []
+        self.actions = []
+        self.note = ""
+
+    def to_dict(self):
+        d = {"id": self.id, "on": self.on, "once": self.once}
+        for k in ("target", "value", "map", "note"):
+            if getattr(self, k):
+                d[k] = getattr(self, k)
+        if self.delay:
+            d["delay"] = self.delay
+        if self.conditions:
+            d["conditions"] = self.conditions
+        if self.actions:
+            d["actions"] = self.actions
+        return d
+
+    @staticmethod
+    def from_dict(d):
+        e = Event(d.get("id", "event"))
+        e.on = d.get("on", "when")
+        e.target = d.get("target", "")
+        e.value = str(d.get("value", ""))
+        e.map = d.get("map", "")
+        e.once = bool(d.get("once", True))
+        e.delay = float(d.get("delay", 0))
+        e.conditions = list(d.get("conditions", []))
+        e.actions = list(d.get("actions", []))
+        e.note = d.get("note", "")
+        return e
+
+
+class Topic:
+    """A shared dialog topic (New Vegas "What's going on here?"): an option in the dialog of every NPC of
+    the project of the listed classes / factions, with the NPC's answer. The export puts it into their
+    dialogs (nodes 9000+, options and nodes marked "topic"); an NPC without lines of its own gets a short
+    dialog: the greeting of the topics, the topics, "Bye"."""
+
+    def __init__(self, tid="topic"):
+        self.id = tid
+        self.classes = []         # npc_citizen, npc_metropolice...
+        self.factions = []        # faction ids
+        self.text = {}            # the player's question
+        self.line = {}            # the NPC's answer
+        self.conditions = []      # when the question is shown
+        self.actions = []         # when it is asked
+        self.once = False         # asked once per NPC
+        self.note = ""
+        self.voices = {}          # NPC targetname -> {language: Voice}: the answer in that NPC's voice
+
+    def matches(self, classname, faction):
+        return (classname and classname in self.classes) or bool(faction and faction in self.factions)
+
+    def to_dict(self):
+        d = {"id": self.id, "text": self.text, "line": self.line}
+        for k in ("classes", "factions", "conditions", "actions", "note"):
+            if getattr(self, k):
+                d[k] = getattr(self, k)
+        if self.once:
+            d["once"] = True
+        voices = {npc: _voices_to(v) for npc, v in self.voices.items()}
+        voices = {npc: v for npc, v in voices.items() if v}
+        if voices:
+            d["voices"] = voices
+        return d
+
+    @staticmethod
+    def from_dict(d):
+        t = Topic(d.get("id", "topic"))
+        t.voices = {npc: _voices_from(v) for npc, v in (d.get("voices") or {}).items()}
+        t.classes = list(d.get("classes", []))
+        t.factions = list(d.get("factions", []))
+        t.text = dict(d.get("text", {}))
+        t.line = dict(d.get("line", {}))
+        t.conditions = list(d.get("conditions", []))
+        t.actions = list(d.get("actions", []))
+        t.once = bool(d.get("once", False))
+        t.note = d.get("note", "")
+        return t
+
+
+class Global:
+    """A world flag or variable declared in the "Logic" tab (value of a new game + description)."""
+
+    def __init__(self, name="flag", kind="flag"):
+        self.name = name
+        self.kind = kind          # flag / var
+        self.default = 0
+        self.note = ""
+
+    def to_dict(self):
+        return {"name": self.name, "kind": self.kind, "default": self.default, "note": self.note}
+
+    @staticmethod
+    def from_dict(d):
+        g = Global(d.get("name", "flag"), d.get("kind", "flag"))
+        g.default = int(d.get("default", 0))
+        g.note = d.get("note", "")
+        return g
 
 
 class Settings:
@@ -541,6 +782,24 @@ class Project:
         self.view = {}            # per NPC: canvas zoom/center (editor state)
         self.factions = []
         self.maps = {}            # map name -> MapLayer
+        self.items = []           # rpgdata.ItemDef (scripts/rpg/items.txt)
+        self.lootlists = []       # rpgdata.LootList (scripts/rpg/lootlists.txt)
+        self.events = []          # Event (scripts/rpg/events.txt)
+        self.globals = []         # Global (scripts/rpg/globals.txt)
+        self.test_state = {}      # "Play from here" with a state (scripts/rpg/test_state.txt)
+        self.music = []           # sounddata.MusicTrack (scripts/rpg/music.txt)
+        self.soundscapes = []     # sounddata.Soundscape (scripts/soundscapes_hl2rpm.txt)
+        self.bark_sets = []       # sounddata.BarkSet (scripts/rpg/barks.txt)
+        self.rpg_rules = {}       # rules of the character that differ from the defaults (rpgchar.RULES)
+        self.rpg_texts = {}       # attribute / skill id -> {"name": {lang}, "desc": {lang}, "stat": governing} overrides
+        self.perks = []           # rpgchar.Perk  (scripts/rpg/rpg.txt)
+        self.traits = []          # rpgchar.Trait
+        self.newgame = {}         # scripts/rpg/newgame.txt: map, spawn, yaw, create, name, time, weather, items, money, quest, actions
+        self.terminals = []       # termdata.TerminalDef (scripts/rpg/terminals.txt)
+        self.topics = []          # Topic: shared dialog topics (put into the NPC dialogs by the export)
+        self.topic_greeting = {}  # what an NPC without lines of its own says before the topics
+        self.topic_greeting_voices = {}  # NPC targetname -> {language: Voice}: that greeting in the NPC's voice
+        self.mt_marks = set()    # hashes of machine translations (translate.py): "МП" until edited by hand
 
     # --- lookup ----------------------------------------------------------
     def npc(self, targetname):
@@ -559,10 +818,77 @@ class Project:
     def quest_ids(self):
         return [q.id for q in self.quests]
 
+    def item(self, iid):
+        iid = (iid or "").lower()
+        for it in self.items:
+            if it.id.lower() == iid:
+                return it
+        return None
+
+    def topic(self, tid):
+        for t in self.topics:
+            if t.id == tid:
+                return t
+        return None
+
+    def terminal(self, tid):
+        for t in self.terminals:
+            if t.id == tid:
+                return t
+        return None
+
+    def lootlist(self, lid):
+        for x in self.lootlists:
+            if x.id == lid:
+                return x
+        return None
+
     def faction(self, fid):
         for f in self.factions:
             if f.id == fid:
                 return f
+        return None
+
+    def event(self, eid):
+        for e in self.events:
+            if e.id == eid:
+                return e
+        return None
+
+    def global_(self, name):
+        for g in self.globals:
+            if g.name == name:
+                return g
+        return None
+
+    def track(self, tid):
+        for t in self.music:
+            if t.id == tid:
+                return t
+        return None
+
+    def soundscape(self, name):
+        for s in self.soundscapes:
+            if s.name.lower() == (name or "").lower():
+                return s
+        return None
+
+    def bark_set(self, sid):
+        for s in self.bark_sets:
+            if s.id == sid:
+                return s
+        return None
+
+    def perk(self, pid):
+        for p in self.perks:
+            if p.id == pid:
+                return p
+        return None
+
+    def trait(self, tid):
+        for t in self.traits:
+            if t.id == tid:
+                return t
         return None
 
     def layer(self, name, create=False):
@@ -597,6 +923,25 @@ class Project:
             "quests": [q.to_dict() for q in self.quests],
             "factions": [f.to_dict() for f in self.factions],
             "maps": {k: v.to_dict() for k, v in sorted(self.maps.items())},
+            "items": [x.to_dict() for x in self.items],
+            "lootlists": [x.to_dict() for x in self.lootlists],
+            "events": [x.to_dict() for x in self.events],
+            "globals": [x.to_dict() for x in self.globals],
+            "music": [x.to_dict() for x in self.music],
+            "soundscapes": [x.to_dict() for x in self.soundscapes],
+            "bark_sets": [x.to_dict() for x in self.bark_sets],
+            "rpg_rules": dict(self.rpg_rules),
+            "rpg_texts": self.rpg_texts,
+            "perks": [x.to_dict() for x in self.perks],
+            "traits": [x.to_dict() for x in self.traits],
+            "newgame": self.newgame,
+            "terminals": [x.to_dict() for x in self.terminals],
+            "topics": [x.to_dict() for x in self.topics],
+            "topic_greeting": self.topic_greeting,
+            "topic_greeting_voices": {npc: v for npc, v in
+                                      ((n, _voices_to(x)) for n, x in self.topic_greeting_voices.items()) if v},
+            "test_state": self.test_state,
+            "mt_marks": sorted(self.mt_marks),
             "managed_files": sorted(set(self.managed_files)),
             "view": self.view,
         }
@@ -611,6 +956,24 @@ class Project:
         p.quests = [Quest.from_dict(x) for x in d.get("quests", [])]
         p.factions = [Faction.from_dict(x) for x in d.get("factions", [])]
         p.maps = {k: MapLayer.from_dict(v) for k, v in (d.get("maps") or {}).items()}
+        p.items = [ItemDef.from_dict(x) for x in d.get("items", [])]
+        p.lootlists = [LootList.from_dict(x) for x in d.get("lootlists", [])]
+        p.events = [Event.from_dict(x) for x in d.get("events", [])]
+        p.globals = [Global.from_dict(x) for x in d.get("globals", [])]
+        p.music = [MusicTrack.from_dict(x) for x in d.get("music", [])]
+        p.soundscapes = [Soundscape.from_dict(x) for x in d.get("soundscapes", [])]
+        p.bark_sets = [BarkSet.from_dict(x) for x in d.get("bark_sets", [])]
+        p.rpg_rules = dict(d.get("rpg_rules", {}))
+        p.rpg_texts = dict(d.get("rpg_texts", {}))
+        p.perks = [Perk.from_dict(x) for x in d.get("perks", [])]
+        p.traits = [Trait.from_dict(x) for x in d.get("traits", [])]
+        p.newgame = dict(d.get("newgame", {}))
+        p.terminals = [TerminalDef.from_dict(x) for x in d.get("terminals", [])]
+        p.topics = [Topic.from_dict(x) for x in d.get("topics", [])]
+        p.topic_greeting = dict(d.get("topic_greeting", {}))
+        p.topic_greeting_voices = {npc: _voices_from(v) for npc, v in (d.get("topic_greeting_voices") or {}).items()}
+        p.test_state = dict(d.get("test_state", {}))
+        p.mt_marks = set(d.get("mt_marks", []))
         p.managed_files = list(d.get("managed_files", []))
         p.view = d.get("view", {})
         return p

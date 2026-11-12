@@ -17,6 +17,8 @@
 #include "gamerules.h"
 #include "items.h"
 #include "inventory_system.h"
+#include "hl2rpm_items.h"
+#include "filesystem.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -28,17 +30,23 @@ class CItemSuit : public CItem
 public:
 	DECLARE_CLASS( CItemSuit, CItem );
 
+	// HL2RPM: the suit on a stand, as the other suits (hl2rpm_items.cpp: hl2rpm/items/suit_hev)
+	static const char *SuitModel()
+	{
+		const char *m = RPMItems::Model( "item_suit" );
+		return ( m && m[0] && filesystem->FileExists( m, "GAME" ) ) ? m : "models/items/hevsuit.mdl";
+	}
 	void Spawn( void )
 	{ 
 		Precache( );
-		SetModel( "models/items/hevsuit.mdl" );
+		SetModel( SuitModel() );
 		BaseClass::Spawn( );
 		
 		CollisionProp()->UseTriggerBounds( false, 0 );
 	}
 	void Precache( void )
 	{
-		PrecacheModel ("models/items/hevsuit.mdl");
+		PrecacheModel( SuitModel() );
 	}
 	bool MyTouch( CBasePlayer *pPlayer )
 	{

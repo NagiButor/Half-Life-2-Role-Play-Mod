@@ -1,0 +1,14 @@
+# Отладка крашей и порчи памяти
+
+> Общая техническая справка для любой AI-модели. Правила — `../PROJECT.md`, статус — `../CURRENT_STATUS.md`. Новые знания по теме добавлять сюда.
+
+## Отладчик крашей
+
+- Ядро: `game/shared/hl2rpm_crashdebug.{h,cpp}` — чистый Win32 без Source-заголовков (в vcxproj `PrecompiledHeader=NotUsing`; снимает `#define`-запреты `strncpy/_snprintf/fopen`). Собирается в client и server; буфер «крошек» общий через named shared memory `Local\hl2rpm_crashdbg_<pid>`.
+- Клиентская обвязка: `game/client/hl2rpm_crashhandler_client.cpp` (установка в `CHLClient::Init` сразу после получения `engine`, снятие последним в `CHLClient::Shutdown`; перехват spew для консоли; команды `rpm_crash_crumbs`, `rpm_crash_report`, `rpm_crash_test null|div|stack` (cheat), convar `rpm_crash_handler`).
+- Если отчёта нет: Windows (WER) хранит полные дампы `hl2.exe` в `%LOCALAPPDATA%\CrashDumps`, а журнал «Application Error» даёт модуль/код/смещение. `0x80000003` в `tier0.dll` = `Error()`/Assert движка — текст ошибки читать из дампа (`da` по первому аргументу `tier0!Error`) или в «Last console output» отчёта.
+- При краше (VEH, до 3 отчётов за сессию, пропускается если подключён отладчик; ловит в т.ч. `int 3` от `Error()`) пишет `hl2rpm\crashes\crash_<время>.dmp` + `.txt` и запускает `hl2rpm\crashtools\analyze_crash.bat` (x86 `cdb` из Windows Kits → `.analysis.txt`). Запасной вариант — `crashtools\run_under_debugger.bat` (игра под cdb, ловит second-chance).
+- Для символов PostBuild client/server копирует `.pdb` в `hl2rpm\bin`.
+- Добавлять крошки в подозрительный код: `#include "hl2rpm_crashdebug.h"` + `RPM_CRUMB( "fmt", ... )` (дёшево, потокобезопасно). Уже расставлены в пути попаданий: `FireBullets`, `ImpactTrace`, `UTIL_DecalTrace`, серверный `DispatchEffect`, `CBaseHLBludgeonWeapon::Swing/Hit/ImpactEffect`, клиентский `DispatchEffectToCallback` (FX begin/end), `Impact()`/декали, `PerformCustomEffects`, `PlayImpactSound`.
+- **Краши при выходе, смене карты и `mat_reloadallmaterials`** (NULL в `filesystem_stdio+0x29313`, 0xC0000374) были следствием переполнения массивов констант shader API (см. «Константы пиксельных шейдеров» ниже) — исправлено 2026-10-01, выход теперь с кодом 0. Если похожий «случайный» краш в чужом модуле вернётся — искать порчу кучи.
+- **Поиск порчи памяти — аппаратная точка на запись в cdb** (так найден виновник за один запуск): игра под cdb (`-cf init.txt`, **без** `-g`, иначе скрипт выполнится только при первом исключении), точка в уже загруженном модуле (`bu client!Функция`) ставит `bp модуль+смещение` (до загрузки модуля `bu модуль+смещение` не разрешается), а та — `ba w4 <адрес>` с командой `kb 60; gc`. В строках команд cdb пути к скриптам писать через `/` (обратный слэш съедается как escape), вложенные команды выносить в файлы `$$>< путь`. С `+mat_queue_mode 0` всё рисуется в основном потоке (детерминированно).

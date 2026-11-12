@@ -36,4 +36,7 @@ void DeferredOcclusion_RestoreWorldLeaves();
 // touches) is behind the walls or out of the visibility data's view: a lamp lights nothing seen
 bool DeferredOcclusion_AreLeafPartsHidden( const int *pLeaves, int nLeaves, const Vector &vecMins, const Vector &vecMaxs );
 
+// The bounds of a leaf of the map as the .bsp has them (false: no such leaf / the leaves are not read)
+bool DeferredOcclusion_GetLeafBounds( int iLeaf, Vector &vecMins, Vector &vecMaxs, bool &bSolid );
+
 #endif // DEFERRED_OCCLUSION_H

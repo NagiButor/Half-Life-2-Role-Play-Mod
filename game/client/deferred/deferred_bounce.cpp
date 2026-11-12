@@ -17,6 +17,7 @@
 #include "deferred/deferred_shared_common.h"
 #include "deferred/deferred_bounce.h"
 #include "deferred/deferred_dlight_bridge.h"
+#include "deferred/deferred_lightreach.h"
 #include "materialsystem/imaterial.h"
 
 #include "tier0/memdbgon.h"
@@ -44,6 +45,13 @@ struct BounceLight_t
 	Vector vecAlbedo;
 
 	int iFrame;
+
+	// HL2RPM: eases in (once its reach map is in use - it must not light through walls even for a
+	// moment) and out (no longer among the lamps around the camera, or its lamp is gone): it
+	// switched on and off at once as the camera moved
+	float flFade;
+	float flBorn;
+	bool bDying;
 };
 static CUtlVector< BounceLight_t > s_Bounce;
 
@@ -139,19 +147,27 @@ static void UpdateBounceLight( BounceLight_t &b, const def_light_t *src )
 
 	const Vector &a = b.vecAlbedo;
 	Vector col( src->col_diffuse.x * a.x, src->col_diffuse.y * a.y, src->col_diffuse.z * a.z );
-	col *= k;
+	col *= k * b.flFade;
+	// (a lamp converted from the map's light entities: its color is its light at 100 units and it
+	// falls off as the engine's lights - what reaches the surface it bounces from)
+	if ( src->flFalloffPower < 0.0f )
+		col *= Min( src->GetDistanceFalloff( b.flHitDist ), 1.5f );
 
 	// lifted off the surface: lights what is around it, not the lit spot itself
 	const float flLift = clamp( b.flHitDist * 0.15f, 8.0f, 40.0f );
-	l->pos = b.vecHit + b.vecHitNormal * flLift;
+	const Vector vecPos = b.vecHit + b.vecHitNormal * flLift;
+	// bounced light is a room-sized effect; it has no shadows (its reach map keeps it in the
+	// room - deferred_lightreach.cpp)
+	const float flRadius = Min( src->flRadius * 0.6f, 640.0f ) + flLift;
+	// (moved: its culling boxes again; only then - its reach map is kept for the place)
+	const bool bMoved = l->pos != vecPos || l->flRadius != flRadius || l->iLighttype != DEFLIGHTTYPE_POINT;
+	l->pos = vecPos;
 	l->ang.Init();
 	l->iLighttype = DEFLIGHTTYPE_POINT;
 	l->col_diffuse = col;
 	// surfaces facing away from it (the lit floor itself, backs) still get a soft fill
 	l->col_ambient = col * 0.4f;
-	// bounced light is a room-sized effect; it has no shadows, a long reach would leak
-	// through the walls into the next room
-	l->flRadius = Min( src->flRadius * 0.6f, 640.0f ) + flLift;
+	l->flRadius = flRadius;
 	l->flFalloffPower = 1.3f;
 
 	l->iVisible_Dist = src->iVisible_Dist;
@@ -168,7 +184,8 @@ static void UpdateBounceLight( BounceLight_t &b, const def_light_t *src )
 
 	l->iFlags &= ~( DEFLIGHT_SHADOW_ENABLED | DEFLIGHT_VOLUMETRICS_ENABLED | DEFLIGHT_COOKIE_ENABLED | DEFLIGHT_LIGHTSTYLE_ENABLED );
 	l->iFlags |= DEFLIGHT_ENABLED | ( src->iFlags & DEFLIGHT_LIGHTSTYLE_ENABLED );
-	l->MakeDirtyAll();
+	if ( bMoved )
+		l->MakeDirtyAll();
 }
 
 struct BounceCandidate_t
@@ -248,11 +265,17 @@ void DeferredBounce_Update( const Vector &vecViewOrigin )
 			BounceLight_t &b = s_Bounce[iSlot];
 			b.pSource = src;
 			b.pVPL = NULL;
+			b.flFade = 0.0f;
+			b.flBorn = gpGlobals->curtime;
 			FindBounceSurface( b, src );
 		}
 
 		BounceLight_t &b = s_Bounce[iSlot];
 		b.iFrame = iFrame;
+		b.bDying = false;
+		// (eases in once its reach map is in use - or after a while if the atlas has no room)
+		if ( b.pVPL && ( DeferredLightReach_IsReady( b.pVPL ) || gpGlobals->curtime - b.flBorn > 2.0f ) )
+			b.flFade = Min( 1.0f, b.flFade + gpGlobals->frametime / 0.5f );
 
 		// the lamp moved or turned (a flashlight, a swinging lamp): find its surface again
 		if ( !bNew && ( b.vecSrcPos.DistToSqr( src->pos ) > 1.0f || b.iSrcType != src->iLighttype
@@ -290,10 +313,23 @@ void DeferredBounce_Update( const Vector &vecViewOrigin )
 		}
 	}
 
-	// lamps that are gone, off or no longer among the important ones
+	// lamps that are gone, off or no longer among the important ones: fade out (the source is not
+	// touched any more - it may be gone), then removed
 	for ( int j = s_Bounce.Count() - 1; j >= 0; j-- )
 	{
-		if ( s_Bounce[j].iFrame != iFrame )
+		BounceLight_t &b = s_Bounce[j];
+		if ( b.iFrame == iFrame )
+			continue;
+		const float flOld = b.flFade;
+		b.flFade = Max( 0.0f, b.flFade - gpGlobals->frametime / 0.5f );
+		if ( !b.pVPL || b.flFade <= 0.0f || flOld <= 0.0f )
+		{
 			RemoveBounce( j );
+			continue;
+		}
+		b.bDying = true;
+		b.pSource = NULL;
+		b.pVPL->col_diffuse *= b.flFade / flOld;
+		b.pVPL->col_ambient *= b.flFade / flOld;
 	}
 }

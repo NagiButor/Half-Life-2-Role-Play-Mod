@@ -70,8 +70,9 @@
 | `game/shared/weather` | пресеты погоды, `env_weather` |
 | `materialsystem/stdshaders` | шейдеры: `.fxc`, C++ обёртки, `game_shader_dx9.dll` |
 | `game/ShaderCompile235` | компилятор шейдеров (без perl и DirectX SDK) |
-| `hl2rpm_extras/` | копии FGD, crashtools, локализации, навыков Claude Code и скрипты — см. [README](hl2rpm_extras/README.md) |
-| `CLAUDE.md` | подробная техническая документация: архитектура, convars, найденные ловушки |
+| `hl2rpm_extras/` | копии FGD, crashtools, локализации и инструменты — см. [README](hl2rpm_extras/README.md) |
+| `AI_instructions/` | общие инструкции для любых AI-моделей: [проект и сборка](AI_instructions/PROJECT.md), [текущий статус](AI_instructions/CURRENT_STATUS.md), темы, skills и история |
+| `AGENTS.md` | основной вход AI-агента; `CLAUDE.md`, `GEMINI.md` и Copilot-вход ведут к тем же знаниям |
 
 ## Сборка
 
@@ -106,7 +107,7 @@ python check_shader_combos.py   # .vcs и C++ должны совпадать: 0
    папка `hl2rpm`), перезапустить Steam.
 
 Исходники карт (`.vmf`) и FGD для Hammer++ — архивы `hl2rpm-mapsrc-*.zip` и `hl2rpm-fgds-*.zip`
-там же; порядок загрузки FGD описан в `CLAUDE.md`.
+там же; порядок загрузки FGD описан в `AI_instructions/topics/mapping.md`.
 
 ## Основные консольные переменные
 
@@ -130,7 +131,8 @@ python check_shader_combos.py   # .vcs и C++ должны совпадать: 0
 ## Производительность
 
 Ориентир — ноутбук с GTX 960M, 1600×900: открытая карта со всеми эффектами ~55–60 FPS.
-Стоимость отдельных эффектов и способы измерения — в `CLAUDE.md`.
+Стоимость отдельных эффектов и способы измерения — в `AI_instructions/topics/renderer-gi-post.md`
+и `AI_instructions/skills/hl2rpm-playtest/SKILL.md`.
 
 ## Благодарности
 

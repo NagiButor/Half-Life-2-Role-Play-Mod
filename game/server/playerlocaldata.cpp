@@ -51,6 +51,7 @@ BEGIN_SEND_TABLE_NOBASE( CPlayerLocalData, DT_Local )
 #endif
 	SendPropInt		(SENDINFO(m_bDrawViewmodel), 1, SPROP_UNSIGNED ),
 	SendPropInt		(SENDINFO(m_bWearingSuit), 1, SPROP_UNSIGNED ),
+	SendPropInt		(SENDINFO(m_iSuitTheme), 4, SPROP_UNSIGNED ),
 	SendPropBool	(SENDINFO(m_bPoisoned)),
 
 	SendPropFloat	(SENDINFO(m_flStepSize), 16, SPROP_ROUNDUP, 0.0f, 128.0f ),

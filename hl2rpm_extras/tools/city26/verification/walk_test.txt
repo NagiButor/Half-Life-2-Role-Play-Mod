@@ -1,0 +1,13 @@
+|cl_weather_tour_step 6; sv_weather clear 0; sv_timecycle_set_time 14; r_drawviewmodel 0; cl_rpm_tp 0
+|cl_weather_tour_step 3; setpos -6944 255 48; setang 0 53.1301 0; echo C26_STAIR_SETTLE
+shot|setang 0 53.1301 0; getpos; echo C26_STAIR_START; +forward
+shot|setang 0 53.1301 0; -forward; getpos; echo C26_STAIR_END
+|setpos 6646 -461 144; setang 0 0.0000 0; echo C26_GATE_SETTLE
+shot|setang 0 0.0000 0; getpos; echo C26_GATE_START; +forward
+shot|setang 0 0.0000 0; -forward; getpos; echo C26_GATE_END
+|cl_weather_tour_step 8; noclip; cl_playermodel_legs_override 0; setpos 800 -4000 2800; setang 65 105 0
+shot|setpos 800 -4000 2800; setang 65 105 0
+shot|setpos -4200 5400 2700; setang 50 -20 0
+shot|setpos -6963 -2970 192; setang -3 46 0
+shot|setpos 1178 614 192; setang -4 150 0
+shot|setpos 6246 -1690 192; setang 0 180 0

@@ -7,7 +7,8 @@
 
 #define DEFLIGHT_SPOT_ZNEAR 5.0f
 
-#define DEFLIGHT_MAX_LEAVES 128
+// HL2RPM: 512 (was 128) - the leaves are those of all the light reaches now (def_light_t::UpdateXForms)
+#define DEFLIGHT_MAX_LEAVES 512
 
 extern ConVar r_deferred_rt_shadowspot_res;
 extern ConVar r_deferred_rt_shadowpoint_res;

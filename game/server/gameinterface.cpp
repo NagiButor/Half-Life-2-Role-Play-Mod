@@ -156,6 +156,8 @@ CSteamGameServerAPIContext *steamgameserverapicontext = &s_SteamGameServerAPICon
 
 IUploadGameStats *gamestatsuploader = NULL;
 
+#include "hl2rpm_world.h"
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -578,6 +580,7 @@ COMPILE_TIME_ASSERT( INTERFACEVERSION_SERVERGAMEDLL_INT == 9 );
 // HL2RPM: quests / inventory in the save game
 extern ISaveRestoreBlockHandler *GetQuestSaveRestoreBlockHandler();
 extern ISaveRestoreBlockHandler *GetInventorySaveRestoreBlockHandler();
+extern ISaveRestoreBlockHandler *GetRPMStateSaveRestoreBlockHandler();
 
 bool CServerGameDLL::DLLInit( CreateInterfaceFn appSystemFactory, 
 		CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory, 
@@ -704,6 +707,7 @@ bool CServerGameDLL::DLLInit( CreateInterfaceFn appSystemFactory,
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetDialogSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetQuestSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetInventorySaveRestoreBlockHandler() );
+	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetRPMStateSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetTemplateSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetDefaultResponseSystemSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->AddBlockHandler( GetCommentarySaveRestoreBlockHandler() );
@@ -794,6 +798,7 @@ void CServerGameDLL::DLLShutdown( void )
 	ModelSoundsCacheShutdown();
 
 	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetInventorySaveRestoreBlockHandler() );
+	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetRPMStateSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetQuestSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetVScriptSaveRestoreBlockHandler() );
 	g_pGameSaveRestoreBlockSet->RemoveBlockHandler( GetAchievementSaveRestoreBlockHandler() );
@@ -1049,6 +1054,10 @@ bool CServerGameDLL::LevelInit( const char *pMapName, char const *pMapEntities, 
 
 		if ( pOldLevel )
 		{
+			// HL2RPM: the transitions of the world layer (their landmarks) must exist before the player is moved over
+			if ( !bRestored )
+				RPMWorld::SpawnTransitionsEarly();
+			RPMWorld::NoteArrival( pLandmarkName );
 			engine->LoadAdjacentEnts( pOldLevel, pLandmarkName );
 		}
 
@@ -1229,9 +1238,41 @@ void CServerGameDLL::GameServerSteamAPIShutdown( void )
 //-----------------------------------------------------------------------------
 ConVar  trace_report( "trace_report", "0" );
 
+// HL2RPM: the server's share of the main thread (single player: the same thread as the client's
+// rendering), printed once a second as [svprof] with the client's frame profiler on
+// (r_hl2rpm_gpuprof 1): ticks, then ms per second of each part of GameFrame
+struct SvProfAccum_t
+{
+	double flTotal, flPre, flThink, flPost, flEvents, flClientData;
+	int nTicks;
+};
+static SvProfAccum_t s_SvProf;
+static double s_flSvProfNext = 0.0;
+
+static void SvProf_Print()
+{
+	static ConVarRef r_hl2rpm_gpuprof( "r_hl2rpm_gpuprof" );
+	const double flNow = Plat_FloatTime();
+	if ( flNow < s_flSvProfNext )
+		return;
+	if ( r_hl2rpm_gpuprof.IsValid() && r_hl2rpm_gpuprof.GetBool() && s_flSvProfNext > 0.0 )
+	{
+		const double flSpan = flNow - ( s_flSvProfNext - 1.0 );
+		const double k = 1000.0 / Max( flSpan, 0.001 );
+		Msg( "[svprof] %d ticks/s, ms per s: total %.1f | pre-think systems %.1f | entity thinks %.1f | post-think systems (physics) %.1f | events %.1f | client data %.1f\n",
+			s_SvProf.nTicks, s_SvProf.flTotal * k, s_SvProf.flPre * k, s_SvProf.flThink * k, s_SvProf.flPost * k,
+			s_SvProf.flEvents * k, s_SvProf.flClientData * k );
+	}
+	memset( &s_SvProf, 0, sizeof( s_SvProf ) );
+	s_flSvProfNext = flNow + 1.0;
+}
+
 void CServerGameDLL::GameFrame( bool simulating )
 {
 	VPROF( "CServerGameDLL::GameFrame" );
+	SvProf_Print();
+	const double flSvStart = Plat_FloatTime();
+	s_SvProf.nTicks++;
 
 	// Don't run frames until fully restored
 	if ( g_InRestore )
@@ -1264,8 +1305,10 @@ void CServerGameDLL::GameFrame( bool simulating )
 	//  outside of server frameloop (e.g., in response to concommand)
 	gEntList.CleanupDeleteList();
 
+	double flSvMark = Plat_FloatTime();
 	IGameSystem::FrameUpdatePreEntityThinkAllSystems();
 	GameStartFrame();
+	s_SvProf.flPre += Plat_FloatTime() - flSvMark;
 
 #ifndef _XBOX
 #ifdef USE_NAV_MESH
@@ -1282,19 +1325,28 @@ void CServerGameDLL::GameFrame( bool simulating )
 	UpdateQueryCache();
 	g_pServerBenchmark->UpdateBenchmark();
 
+	flSvMark = Plat_FloatTime();
 	Physics_RunThinkFunctions( simulating );
+	s_SvProf.flThink += Plat_FloatTime() - flSvMark;
 	
+	flSvMark = Plat_FloatTime();
 	IGameSystem::FrameUpdatePostEntityThinkAllSystems();
+	s_SvProf.flPost += Plat_FloatTime() - flSvMark;
 
 	// UNDONE: Make these systems IGameSystems and move these calls into FrameUpdatePostEntityThink()
 	// service event queue, firing off any actions whos time has come
+	flSvMark = Plat_FloatTime();
 	ServiceEventQueue();
+	s_SvProf.flEvents += Plat_FloatTime() - flSvMark;
 
 	// free all ents marked in think functions
 	gEntList.CleanupDeleteList();
 
 	// FIXME:  Should this only occur on the final tick?
+	flSvMark = Plat_FloatTime();
 	UpdateAllClientData();
+	s_SvProf.flClientData += Plat_FloatTime() - flSvMark;
+	s_SvProf.flTotal += Plat_FloatTime() - flSvStart;
 
 	if ( g_pGameRules )
 	{

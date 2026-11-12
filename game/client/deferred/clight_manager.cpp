@@ -18,6 +18,7 @@
 #include "deferred/deferred_dlight_bridge.h"
 #include "deferred/deferred_firelight.h"
 #include "deferred/deferred_bounce.h"
+#include "deferred/deferred_lightreach.h"
 #include "deferred/deferred_gi.h"
 #include "deferred/deferred_postfx.h"
 #include "deferred/deferred_taa.h"
@@ -188,6 +189,9 @@ void CLightingManager::LightSetup( const CViewSetup& setup )
 	UpdateShadowBudget( setup.origin );
 
 	CullLights();
+
+	// HL2RPM: the reach maps of the point lights (no light through walls; the leaves they are culled by)
+	DeferredLightReach_Update( setup.origin, m_hDeferredLights );
 
 #if DEFCFG_USE_SSE
 	if ( m_bSortDataNeedsRealloc )
@@ -637,8 +641,15 @@ void CLightingManager::CullLights()
 		// HL2RPM: the same leaf by leaf - the part of its reach within each leaf is hidden (a lamp
 		// in the next room or yard; one box over all it reaches is seldom hidden whole). On an open
 		// map without areaportals the visibility data alone lets the lamps of half the town through.
-		if ( bAllLeaves && DeferredOcclusion_AreLeafPartsHidden( l->iLeaveIDs, l->iNumLeaves, l->bounds_min, l->bounds_max ) )
-			continue;
+		// (the part of what it reaches: its radius / cone, or the box of its traced reach map -
+		// def_light_t::GetCullBounds; not the box of the 14 traces, which missed light between them)
+		if ( bAllLeaves )
+		{
+			Vector vecCullMins, vecCullMaxs;
+			l->GetCullBounds( vecCullMins, vecCullMaxs );
+			if ( DeferredOcclusion_AreLeafPartsHidden( l->iLeaveIDs, l->iNumLeaves, vecCullMins, vecCullMaxs ) )
+				continue;
+		}
 
 		if ( l->IsSpot() && l->HasShadow() )
 		{
@@ -753,7 +764,16 @@ void CLightingManager::SortLights()
 			}
 			else
 			{
-				if ( IS_NAN( SubFloat( needsFullscreen, j ) ) )
+				// HL2RPM: the sphere it is drawn with (def_light_t::BuildSphere) is 1.05 x the radius at its
+				// vertices, up to 5 % out of the box: just outside the box the camera was inside the mesh,
+				// its front faces behind the camera or cut by the near plane - the light went out, or a
+				// round hole was cut in it, for the moment the player crossed that shell (walking along a
+				// street, at the radius of each lamp). The box grows by that much for points.
+				const def_light_t *pl = s.lights[j];
+				const float flBloat = zNear + pl->flRadius * 0.06f;
+				const Vector vecLightBloat( flBloat, flBloat, flBloat );
+				if ( IS_NAN( SubFloat( needsFullscreen, j ) ) ||
+					IsPointInBox( m_vecViewOrigin, pl->bounds_min_naive - vecLightBloat, pl->bounds_max_naive + vecLightBloat ) )
 				{
 					m_hPreSortedLights[LSORT_POINT_FULLSCREEN].AddToTail( s.lights[j] );
 				}
@@ -771,9 +791,11 @@ void CLightingManager::SortLights()
 #else
 	FOR_EACH_VEC_FAST( def_light_t*, m_hRenderLights, l )
 	{
-		bool bNeedsFullscreen = IsPointInBounds( m_vecViewOrigin,
-			l->bounds_min_naive - vecBloat,
-			l->bounds_max_naive + vecBloat );
+		// (HL2RPM: points - the sphere mesh is up to 5 % bigger than the box, see the SSE path)
+		const Vector vecBloatLight = l->IsPoint() ? vecBloat + Vector( 1, 1, 1 ) * ( l->flRadius * 0.06f ) : vecBloat;
+		bool bNeedsFullscreen = IsPointInBox( m_vecViewOrigin,
+			l->bounds_min_naive - vecBloatLight,
+			l->bounds_max_naive + vecBloatLight );
 
 		if ( bNeedsFullscreen && l->IsSpot() )
 		{
@@ -934,6 +956,11 @@ FORCEINLINE int CLightingManager::WriteLight( def_light_t* l, float* pfl4 )
 			Q_memcpy( pfl4, colAmbient.Base(), iFloatSize * 3 );
 			pfl4 += 3;
 
+			// HL2RPM: the reach map of the light (lightingpass_point_ps30 LightReach): row 2 .w of a simple
+			// light, row 3 .w (unused by the rotation) of an advanced one
+			if ( !bAdvanced )
+				*pfl4 = l->flReachParam;
+
 			if ( bAdvanced )
 			{
 				float flShadowScalar = l->flShadowFade;
@@ -949,6 +976,7 @@ FORCEINLINE int CLightingManager::WriteLight( def_light_t* l, float* pfl4 )
 				rotMatrix = rotMatrix.Transpose3x3();
 				MatrixInverseGeneral( rotMatrix, rotMatrixit );
 				Q_memcpy( pfl4, rotMatrixit.Base(), iFloatSize * 12 );
+				pfl4[3] = l->flReachParam;
 			}
 		}
 		break;

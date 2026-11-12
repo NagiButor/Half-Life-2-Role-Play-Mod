@@ -151,6 +151,11 @@ bool DeferredWorldMesh_AlsoEngine()
 	return r_deferred_shadow_worldmesh_add.GetBool();
 }
 
+bool DeferredWorldMesh_IsReady()
+{
+	return s_bReady;
+}
+
 template< class T >
 static bool ReadLump( FileHandle_t hFile, const dheader_t &header, int iLump, CUtlVector< T > &out )
 {
@@ -225,14 +230,14 @@ static int ClassifyMaterial( const char *pszName )
 	return iGroup;
 }
 
-static WMBatch_t *GetBatch( CUtlVector< WMBatch_t * > &batches, CUtlMap< uint64, int > &lookup,
+static WMBatch_t *GetBatch( CUtlVector< WMBatch_t * > &batches, CUtlMap< uint64, int, int > &lookup,
 	int iGroup, const Vector &vecCenter, int nVerts )
 {
 	const int iCellX = (int)floorf( vecCenter.x / WORLDMESH_CELL ) + 4096;
 	const int iCellY = (int)floorf( vecCenter.y / WORLDMESH_CELL ) + 4096;
 	const uint64 key = ( (uint64)iGroup << 40 ) | ( (uint64)( iCellX & 0xFFFFF ) << 20 ) | (uint64)( iCellY & 0xFFFFF );
 
-	const unsigned short idx = lookup.Find( key );
+	const int idx = lookup.Find( key );
 	if ( idx != lookup.InvalidIndex() )
 	{
 		WMBatch_t *pBatch = batches[ lookup[ idx ] ];
@@ -387,7 +392,7 @@ static bool BuildWorldMeshes()
 		texdataGroup[i] = -2;
 
 	CUtlVector< WMBatch_t * > batches;
-	CUtlMap< uint64, int > lookup( DefLessFunc( uint64 ) );
+	CUtlMap< uint64, int, int > lookup( DefLessFunc( uint64 ) );
 	CUtlVector< WMVertex_t > poly;
 	int nFaces = 0, nDisps = 0, nSkipped = 0, nBadDisps = 0;
 
@@ -398,7 +403,10 @@ static bool BuildWorldMeshes()
 	CUtlVector< int > occluderEdgeStart;	// per occluder: where its edges start in occluderEdges
 	CUtlVector< int > occluderEdgeSides;	// per side of each occluder (in order): how many edges it is made of
 	CUtlVector< int > occluderPlane;		// per occluder: plane * 2 + side
-	CUtlMap< uint64, int > edgeUse( DefLessFunc( uint64 ) );	// ( plane, side, edge ) -> faces using it
+	// ( plane, side, edge ) -> faces using it. Int indices: the default unsigned short ones hold
+	// 65535 entries, and a big map has more edges ("CUtlRBTree overflow!" - the game closed while
+	// loading rpm_trainstation_testoptimization with 89 000 edges)
+	CUtlMap< uint64, int, int > edgeUse( DefLessFunc( uint64 ) );
 
 	const dmodel_t &world = models[0];
 	const int iLastFace = Min( world.firstface + world.numfaces, faces.Count() );
@@ -633,7 +641,7 @@ static bool BuildWorldMeshes()
 			for ( int k = 0; k < poly.Count(); k++ )
 			{
 				const uint64 key = ( (uint64)iPlaneSide << 32 ) | (uint64)(unsigned int)abs( surfedges[ face.firstedge + k ] );
-				const unsigned short idx = edgeUse.Find( key );
+				const int idx = edgeUse.Find( key );
 				if ( idx == edgeUse.InvalidIndex() )
 					edgeUse.Insert( key, 1 );
 				else
@@ -738,7 +746,7 @@ static bool BuildWorldMeshes()
 			for ( int m = 0; m < occluderEdgeSides[ iSide ]; m++, iEdge++ )
 			{
 				const uint64 key = ( (uint64)occluderPlane[i] << 32 ) | (uint64)(unsigned int)occluderEdges[ iEdge ];
-				const unsigned short idx = edgeUse.Find( key );
+				const int idx = edgeUse.Find( key );
 				if ( idx == edgeUse.InvalidIndex() || edgeUse[ idx ] <= 1 )
 					bInner = false;
 			}

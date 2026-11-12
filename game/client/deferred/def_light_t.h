@@ -118,6 +118,22 @@ struct def_light_t
 	{
 		return iLighttype == DEFLIGHTTYPE_POINT;
 	};
+
+	// HL2RPM: the light's distance falloff, as the light passes compute it (common_lighting_fxc.h
+	// DeferredLightFalloff): its own ( 1 - d / r )^power, or, with a negative power (a light converted
+	// from the map's light entities), the engine's attenuation, 1 at 100 units
+	float GetDistanceFalloff( float flDist ) const
+	{
+		const float x = clamp( flDist / Max( flRadius, 1.0f ), 0.0f, 1.0f );
+		const float x4 = x * x * x * x;
+		if ( flFalloffPower < 0.0f )
+		{
+			const float k = Max( -flFalloffPower, 576.0f );
+			const float w = 1.0f - x4;
+			return ( k + 10000.0f ) / ( k + flDist * flDist ) * w * w;
+		}
+		return powf( 1.0f - x, Max( flFalloffPower, 0.01f ) ) * ( 1.0f - x4 * x4 );
+	}
 	FORCEINLINE bool IsSpot()
 	{
 		return iLighttype == DEFLIGHTTYPE_SPOT;
@@ -167,6 +183,19 @@ struct def_light_t
 		return iNumLeaves;
 	};
 
+	// HL2RPM: light reach (deferred_lightreach.cpp) - what of the world the light gets to, traced from
+	// it. The box of all its rays reached replaces the box of the 14 / 5 traces of UpdateXForms for
+	// the leaves the light is culled by (those traces missed the light falling between them).
+	void SetReachBounds( const Vector &vecMins, const Vector &vecMaxs );
+	void ClearReachBounds();
+	void GetCullBounds( Vector &vecMins, Vector &vecMaxs ) const;
+	int iReachSlot;				// slot in the reach atlas (-1 = none)
+	float flReachParam;			// for the shader this frame: slot + 0.5 x fade, -1 = no map
+	float flReachFade;			// 0..1 the map eases in
+	Vector reachTrackPos;		// where it was last seen, and since when it stays
+	float flReachTrackRadius;
+	float flReachStillSince;
+
 private:
 
 	def_light_t( const def_light_t &o );
@@ -195,6 +224,12 @@ private:
 	void UpdateXForms();
 	Vector bounds_min, bounds_max;
 	Vector bounds_min_naive, bounds_max_naive;
+	// HL2RPM: the box of all the light reaches (set by the reach map) and what it was traced for
+	bool bReachBounds;
+	Vector reach_min, reach_max;
+	Vector reachBoundsPos;
+	float flReachBoundsRadius;
+	void UpdateLeaves();
 
 	void UpdateRenderMesh();
 	IMesh *pMesh_World;

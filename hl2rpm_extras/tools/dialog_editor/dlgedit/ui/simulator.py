@@ -1,8 +1,11 @@
 """«Проверить диалог»: play the dialog in the editor with voice, quests and reputation."""
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QPlainTextEdit,
-                               QPushButton, QSpinBox, QSplitter, QTableWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QHeaderView,
+                               QLabel, QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTableWidget, QVBoxLayout,
+                               QWidget)
+
+from .. import logic
 
 from .. import audio
 from ..model import LANGUAGE_NAMES, QUEST_STATES, QUEST_STATE_NAMES, text_for
@@ -53,6 +56,27 @@ class SimulatorDialog(QDialog):
         self.sound = QCheckBox("Звук")
         self.sound.setChecked(True)
         ll.addWidget(self.sound)
+        # Creation Kit logic: what the conditions see
+        sf = QFormLayout()
+        self.f_flags = QLineEdit()
+        self.f_flags.setPlaceholderText("флаги через запятую: door_open, met_boss")
+        self.f_vars = QLineEdit()
+        self.f_vars.setPlaceholderText("rats_killed=3, gold=10")
+        self.f_skills = QLineEdit()
+        self.f_skills.setPlaceholderText("speech=50, lockpick=25, cha=7, level=3")
+        self.f_items = QLineEdit()
+        self.f_items.setPlaceholderText("rpm_credits=100, item_healthkit=2")
+        self.f_hour = QDoubleSpinBox()
+        self.f_hour.setRange(0, 23.99)
+        self.f_hour.setValue(12)
+        for label, wdg in (("Флаги:", self.f_flags), ("Переменные:", self.f_vars), ("Навыки:", self.f_skills),
+                           ("Предметы:", self.f_items), ("Время:", self.f_hour)):
+            sf.addRow(label, wdg)
+            if isinstance(wdg, QLineEdit):
+                wdg.editingFinished.connect(self.read_state)
+            else:
+                wdg.valueChanged.connect(self.read_state)
+        ll.addLayout(sf)
         ll.addWidget(QLabel("Квесты:"))
         self.qt = QTableWidget(0, 3)
         self.qt.setHorizontalHeaderLabels(["Квест", "Состояние", "Этап"])
@@ -96,6 +120,41 @@ class SimulatorDialog(QDialog):
         self.refresh_quests()
         self.start()
 
+    @staticmethod
+    def _pairs(text):
+        out = {}
+        for part in text.replace(";", ",").split(","):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                try:
+                    out[k.strip()] = int(float(v))
+                except ValueError:
+                    pass
+        return out
+
+    def read_state(self, *_):
+        st = self.sim.state
+        st.flags = {x.strip() for x in self.f_flags.text().replace(";", ",").split(",") if x.strip()}
+        st.vars = self._pairs(self.f_vars.text())
+        skills = self._pairs(self.f_skills.text())
+        stat_ids = {s for s, _ in logic.STATS}
+        st.stats = {k: v for k, v in skills.items() if k in stat_ids}
+        st.skills = {k: v for k, v in skills.items() if k not in stat_ids and k != "level"}
+        st.level = skills.get("level", 1)
+        st.items = self._pairs(self.f_items.text())
+        st.hour = self.f_hour.value()
+
+    def write_state(self):
+        st = self.sim.state
+        self.f_flags.setText(", ".join(sorted(st.flags)))
+        self.f_vars.setText(", ".join("%s=%d" % kv for kv in sorted(st.vars.items())))
+        sk = dict(st.skills)
+        sk.update(st.stats)
+        if st.level != 1:
+            sk["level"] = st.level
+        self.f_skills.setText(", ".join("%s=%d" % kv for kv in sorted(sk.items())))
+        self.f_items.setText(", ".join("%s=%d" % kv for kv in sorted(st.items.items()) if kv[1]))
+
     def _lang(self):
         self.sim.lang = self.lang.currentData()
 
@@ -121,6 +180,8 @@ class SimulatorDialog(QDialog):
             self.qt.setCellWidget(r, 2, sp)
 
     def start(self):
+        if hasattr(self, "f_flags"):
+            self.read_state()
         self.log.appendPlainText("— разговор%s —" % (" (повторный визит)" if self.sim.spoken else ""))
         self.show_screen(self.sim.start())
 
@@ -133,7 +194,15 @@ class SimulatorDialog(QDialog):
         if sc is not None:
             for ev in sc.events:
                 self.log.appendPlainText("• " + ev)
+        else:
+            for ev in self.sim.events:
+                self.log.appendPlainText("• " + ev)
+            self.sim.events = []
         self.refresh_quests()
+        self.rep.blockSignals(True)
+        self.rep.setValue(self.sim.rep)
+        self.rep.blockSignals(False)
+        self.write_state()
         if sc is None:
             audio.stop()
             self.name.setText("")
@@ -160,9 +229,17 @@ class SimulatorDialog(QDialog):
             audio.stop()
         self.nodeShown.emit(sc.node_id)
         if sc.options:
-            for idx, text, fb in sc.options:
+            for idx, text, fb, greyed, passes in sc.options:
                 b = QPushButton("%d. %s" % (idx + 1, text))
-                b.setStyleSheet("text-align:left; padding:8px; font-size:13px;" + ("color:#e07b6a;" if fb else ""))
+                color = "#e07b6a" if fb else ""
+                if passes is True:
+                    color = "#8fd27a"
+                elif passes is False:
+                    color = "#e88a5a"
+                b.setStyleSheet("text-align:left; padding:8px; font-size:13px;" + (("color:%s;" % color) if color else ""))
+                if greyed:
+                    b.setEnabled(False)
+                    b.setToolTip("Условия не выполнены — в игре вариант виден серым")
                 b.clicked.connect(lambda _=False, i=idx: self.choose(i))
                 self.opts_box.addWidget(b)
         else:
@@ -180,6 +257,7 @@ class SimulatorDialog(QDialog):
             self.opts_box.addWidget(b)
 
     def choose(self, idx):
+        self.read_state()
         sc = self.sim.current
         n = self.npc.node(sc.node_id) if sc else None
         if n and idx < len(n.options):

@@ -43,9 +43,11 @@ float2 ShadowDitherOffset( float2 uv, float4 offsets_0, float4 offsets_1 )
 	return j * offsets_0.xy * ditherTexels;
 }
 
+// HL2RPM: explicit LOD (the shadow maps have no mips - the same compare): the lamp passes call
+// these only where light reaches the point, in a dynamic branch
 float ShadowDepth_Raw_Nvidia( sampler depthMap, float3 uvw )
 {
-	return tex2Dproj( depthMap, float4( uvw, 1 ) ).x;
+	return tex2Dlod( depthMap, float4( uvw, 0 ) ).x;
 }
 
 float ShadowDepth_3x3Gauss_Nvidia( sampler depthMap, float3 uvw, float4 offsets_0, float4 offsets_1 )
@@ -60,17 +62,17 @@ float ShadowDepth_3x3Gauss_Nvidia( sampler depthMap, float3 uvw, float4 offsets_
 
 	offsets_0 *= fraction.xyxy;
 
-	float lightGauss = tex2Dproj( depthMap, float4( uvw, 1 ) ).x * gauss2D3[ 2 ];
+	float lightGauss = tex2Dlod( depthMap, float4( uvw, 0 ) ).x * gauss2D3[ 2 ];
 
-	lightGauss += ( tex2Dproj( depthMap, float4( uv + float2( offsets_0.x, 0 ), objDepth, 1 ) ).x +
-					tex2Dproj( depthMap, float4( uv - float2( offsets_0.x, 0 ), objDepth, 1 ) ).x +
-					tex2Dproj( depthMap, float4( uv + float2( 0, offsets_0.y ), objDepth, 1 ) ).x +
-					tex2Dproj( depthMap, float4( uv - float2( 0, offsets_0.y ), objDepth, 1 ) ).x ) * gauss2D3[ 1 ];
+	lightGauss += ( tex2Dlod( depthMap, float4( uv + float2( offsets_0.x, 0 ), objDepth, 0 ) ).x +
+					tex2Dlod( depthMap, float4( uv - float2( offsets_0.x, 0 ), objDepth, 0 ) ).x +
+					tex2Dlod( depthMap, float4( uv + float2( 0, offsets_0.y ), objDepth, 0 ) ).x +
+					tex2Dlod( depthMap, float4( uv - float2( 0, offsets_0.y ), objDepth, 0 ) ).x ) * gauss2D3[ 1 ];
 
-	lightGauss += ( tex2Dproj( depthMap, float4( uv + offsets_0.xy, objDepth, 1 ) ).x +
-					tex2Dproj( depthMap, float4( uv + float2( -offsets_0.x, offsets_0.y ), objDepth, 1 ) ).x +
-					tex2Dproj( depthMap, float4( uv + float2( offsets_0.x, -offsets_0.y ), objDepth, 1 ) ).x +
-					tex2Dproj( depthMap, float4( uv - offsets_0.xy, objDepth, 1 ) ).x ) * gauss2D3[ 0 ];
+	lightGauss += ( tex2Dlod( depthMap, float4( uv + offsets_0.xy, objDepth, 0 ) ).x +
+					tex2Dlod( depthMap, float4( uv + float2( -offsets_0.x, offsets_0.y ), objDepth, 0 ) ).x +
+					tex2Dlod( depthMap, float4( uv + float2( offsets_0.x, -offsets_0.y ), objDepth, 0 ) ).x +
+					tex2Dlod( depthMap, float4( uv - offsets_0.xy, objDepth, 0 ) ).x ) * gauss2D3[ 0 ];
 
 	return lightGauss;
 }
@@ -85,36 +87,36 @@ float ShadowDepth_5x5Gauss_Nvidia( sampler depthMap, float3 uvw, float4 offsets_
 
 	offsets_0 *= fraction.xyxy;
 
-	float lightGauss = tex2Dproj( depthMap, float4( uvw, 1 ) ).x * 0.162103f;
+	float lightGauss = tex2Dlod( depthMap, float4( uvw, 0 ) ).x * 0.162103f;
 
-	lightGauss += ( tex2Dproj( depthMap, float4( uv + offsets_0.zw, objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv + float2( -offsets_0.z, offsets_0.w ), objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv + float2( offsets_0.z, -offsets_0.w ), objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv - offsets_0.zw, objDepth, 1 ) ).x ) * 0.002969f;
+	lightGauss += ( tex2Dlod( depthMap, float4( uv + offsets_0.zw, objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv + float2( -offsets_0.z, offsets_0.w ), objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv + float2( offsets_0.z, -offsets_0.w ), objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv - offsets_0.zw, objDepth, 0 ) ).x ) * 0.002969f;
 
-	lightGauss += ( tex2Dproj( depthMap, float4( uv + offsets_0.zy, objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv + offsets_0.xw, objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv + float2( -offsets_0.x, offsets_0.w ), objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv + float2( -offsets_0.z, offsets_0.y ), objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv - offsets_0.zy, objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv - offsets_0.xw, objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv + float2( offsets_0.x, -offsets_0.w ), objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv + float2( offsets_0.z, -offsets_0.y ), objDepth, 1 ) ).x ) * 0.013306f;
+	lightGauss += ( tex2Dlod( depthMap, float4( uv + offsets_0.zy, objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv + offsets_0.xw, objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv + float2( -offsets_0.x, offsets_0.w ), objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv + float2( -offsets_0.z, offsets_0.y ), objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv - offsets_0.zy, objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv - offsets_0.xw, objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv + float2( offsets_0.x, -offsets_0.w ), objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv + float2( offsets_0.z, -offsets_0.y ), objDepth, 0 ) ).x ) * 0.013306f;
 
-	lightGauss += ( tex2Dproj( depthMap, float4( uv + float2( offsets_0.z, 0 ), objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv + float2( -offsets_0.z, 0 ), objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv + float2( 0, offsets_0.w ), objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv + float2( 0, -offsets_0.w ), objDepth, 1 ) ).x ) * 0.021938f;
+	lightGauss += ( tex2Dlod( depthMap, float4( uv + float2( offsets_0.z, 0 ), objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv + float2( -offsets_0.z, 0 ), objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv + float2( 0, offsets_0.w ), objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv + float2( 0, -offsets_0.w ), objDepth, 0 ) ).x ) * 0.021938f;
 
-	lightGauss += ( tex2Dproj( depthMap, float4( uv + offsets_0.xy, objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv + float2( -offsets_0.x, offsets_0.y ), objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv + float2( offsets_0.x, -offsets_0.y ), objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv - offsets_0.xy, objDepth, 1 ) ).x ) * 0.059634f;
+	lightGauss += ( tex2Dlod( depthMap, float4( uv + offsets_0.xy, objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv + float2( -offsets_0.x, offsets_0.y ), objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv + float2( offsets_0.x, -offsets_0.y ), objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv - offsets_0.xy, objDepth, 0 ) ).x ) * 0.059634f;
 
-	lightGauss += ( tex2Dproj( depthMap, float4( uv + float2( offsets_0.x, 0 ), objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv - float2( offsets_0.x, 0 ), objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv + float2( 0, offsets_0.y ), objDepth, 1 ) ).x +
-		tex2Dproj( depthMap, float4( uv - float2( 0, offsets_0.y ), objDepth, 1 ) ).x ) * 0.098320f;
+	lightGauss += ( tex2Dlod( depthMap, float4( uv + float2( offsets_0.x, 0 ), objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv - float2( offsets_0.x, 0 ), objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv + float2( 0, offsets_0.y ), objDepth, 0 ) ).x +
+		tex2Dlod( depthMap, float4( uv - float2( 0, offsets_0.y ), objDepth, 0 ) ).x ) * 0.098320f;
 
 	return lightGauss;
 }

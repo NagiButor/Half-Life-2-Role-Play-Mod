@@ -12,6 +12,10 @@ enum InventoryUpdateMsgType
 	kInventoryUpdate_LootAddLeft = 11,
 	kInventoryUpdate_LootAddRight = 12,
 	kInventoryUpdate_LootEnd = 13,
+	// HL2RPM: trade mode of the loot window (sent between LootBegin and LootEnd):
+	// int player money, int vendor money, string currency name, string "price;price;.." of the left
+	// (player) column, same of the right (vendor) column; price -1 = the vendor doesn't buy it
+	kInventoryUpdate_TradeInfo = 14,
 };
 
 #endif

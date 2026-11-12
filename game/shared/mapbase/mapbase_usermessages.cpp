@@ -54,6 +54,9 @@ void RegisterMapbaseUserMessages( void )
 		usermessages->Register( "Inventory_Update", -1 );
 	if ( usermessages->LookupUserMessage( "Quests_Update" ) == -1 )
 		usermessages->Register( "Quests_Update", -1 );
+	usermessages->Register( "RPMChar", -1 );	// HL2RPM: the player character (hl2rpm_char.cpp), in pieces
+	usermessages->Register( "RPMTerm", -1 );	// HL2RPM: the screen of a terminal (hl2rpm_terminal.cpp), in pieces
+	usermessages->Register( "RPMPrompt", -1 );	// HL2RPM: what USE would do with the thing under the crosshair (hl2rpm_prompt.cpp)
 
 #ifdef CLIENT_DLL
 	// TODO: Better placement?

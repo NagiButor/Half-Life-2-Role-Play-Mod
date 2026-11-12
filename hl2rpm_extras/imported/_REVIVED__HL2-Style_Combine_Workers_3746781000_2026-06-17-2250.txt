@@ -1,0 +1,47 @@
+# E:\SourceModding\HL2RPMSOURCE\Downloaded models\Combine workers\[REVIVED]_HL2-Style_Combine_Workers_3746781000_2026-06-17-2250.gma -> E:\Steam\steamapps\sourcemods\hl2rpm
+materials/models/player/cyan.vtf
+materials/models/player/green.vtf
+materials/models/player/red.vtf
+materials/models/player/puntleycmb/cmbworker_helmet.vmt
+materials/models/player/puntleycmb/cmbworker_helmet.vtf
+materials/models/player/puntleycmb/cmbworker_helmet_normal.vtf
+materials/models/player/puntleycmb/cmbworker_sheet.vmt
+materials/models/player/puntleycmb/cmbworker_sheet.vtf
+materials/models/player/puntleycmb/cmbworker_sheet_normal.vtf
+materials/models/player/puntleycmb/cmbworker_sheet_orange.vmt
+materials/models/player/puntleycmb/cmbworker_sheet_orange.vtf
+materials/models/player/puntleycmb/cmbworker_sheet_orange2.vmt
+materials/models/player/puntleycmb/cmbworker_sheet_orange2.vtf
+materials/models/player/puntleycmb/hands/cmbworker_hands.vmt
+materials/models/player/puntleycmb/hands/cmbworker_hands.vtf
+materials/models/player/puntleycmb/hands/cmbworker_sleeve.vmt
+materials/models/player/puntleycmb/hands/cmbworker_sleeve.vtf
+materials/models/player/puntleycmb/hands/cmbworker_sleeve_normal.vtf
+materials/models/player/puntleycmb/hands/v_hands_normal.vtf
+materials/models/player/puntleycmb/zmbworker_sheet.vmt
+materials/models/player/puntleycmb/zmbworker_sheet.vtf
+materials/models/player/puntleycmb/zmbworker_sheet2.vmt
+materials/models/player/puntleycmb/zmbworker_sheet2.vtf
+materials/models/player/puntleycmb/zmbworker_sheet3.vmt
+materials/models/player/puntleycmb/zmbworker_sheet3.vtf
+materials/vgui/entities/combine worker.vmt
+materials/vgui/entities/friendly worker.vmt
+materials/vgui/entities/zombie worker.vmt
+materials/vgui/entities/combine worker.vtf
+materials/vgui/entities/friendly worker.vtf
+materials/vgui/entities/zombie worker.vtf
+models/player/puntleycmb/hands/c_arms_cmbwrkr.dx80.vtx
+models/player/puntleycmb/hands/c_arms_cmbwrkr.dx90.vtx
+models/player/puntleycmb/hands/c_arms_cmbwrkr.mdl
+models/player/puntleycmb/hands/c_arms_cmbwrkr.vvd
+models/puntleycmb/workernpc.dx80.vtx
+models/puntleycmb/workernpc.dx90.vtx
+models/puntleycmb/workernpc.mdl
+models/puntleycmb/workernpc.phy
+models/puntleycmb/workernpc.vvd
+models/puntleycmb/zombie_worker.ani
+models/puntleycmb/zombie_worker.dx80.vtx
+models/puntleycmb/zombie_worker.dx90.vtx
+models/puntleycmb/zombie_worker.mdl
+models/puntleycmb/zombie_worker.phy
+models/puntleycmb/zombie_worker.vvd

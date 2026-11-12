@@ -45,6 +45,32 @@ static ConVar fov_watcher( "_fov", "0", 0, "Automates fov command to server.", F
 //-----------------------------------------------------------------------------
 // Purpose: Think
 //-----------------------------------------------------------------------------
+// HL2RPM: stock elements that are gone. A suit has one HUD (hl2rpm_suithud.cpp); no weapon is selected, one is
+// equipped from the inventory (hl2rpm_weapons.cpp); what is picked up shows as a notification of the left, with
+// or without a suit (the icons of HudHistoryResource were there even with no suit on); the captions are cut out
+// (hud_closecaption.cpp); the rest is multiplayer.
+static bool RPMHud_IsCut( const CUtlVector<CHudElement *> &list, CHudElement *pElement )
+{
+	static const char *s_pszCut[] =
+	{
+		"CHudHealth", "CHudBattery", "CHudAmmo", "CHudSecondaryAmmo", "CHudSuitPower", "CHudFlashlight", "CHudPosture",
+		"CHudWeaponSelection", "CHudHistoryResource", "CHudCloseCaption", "CHudHintKeyDisplay",
+		"CHudDeathNotice", "CHudVoiceSelfStatus", "CHudVoiceStatus",
+	};
+	static CUtlVector<CHudElement *> s_Cut;
+	static int s_nKnown = -1;
+	if ( s_nKnown != list.Count() )
+	{
+		s_nKnown = list.Count();
+		s_Cut.RemoveAll();
+		for ( int i = 0; i < list.Count(); i++ )
+			for ( int j = 0; j < ARRAYSIZE( s_pszCut ); j++ )
+				if ( !Q_stricmp( list[i]->GetName(), s_pszCut[j] ) )
+					s_Cut.AddToTail( list[i] );
+	}
+	return s_Cut.Find( pElement ) != s_Cut.InvalidIndex();
+}
+
 void CHud::Think(void)
 {
 #if defined( REPLAY_ENABLED )
@@ -57,7 +83,7 @@ void CHud::Think(void)
 	for ( int i = 0; i < m_HudList.Size(); i++ )
 	{
 		// Visible?
-		bool visible = m_HudList[i]->ShouldDraw();
+		bool visible = !RPMHud_IsCut( m_HudList, m_HudList[i] ) && m_HudList[i]->ShouldDraw();
 
 #if defined( REPLAY_ENABLED )
 		visible = visible && !bPlayingReplay;

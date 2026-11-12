@@ -170,6 +170,9 @@ bool CSoundscapeSystem::Init()
 		{
 			AddSoundscapeFile( mapSoundscapeFilename );
 		}
+		// HL2RPM: the soundscapes of the Creation Kit, on every map (the client loads the same file)
+		if ( filesystem->FileExists( "scripts/soundscapes_hl2rpm.txt" ) )
+			AddSoundscapeFile( "scripts/soundscapes_hl2rpm.txt" );
 	}
 	else
 	{

@@ -270,6 +270,12 @@ void CBasePlayer::ItemPostFrame()
 		return;
 	}
 
+#if !defined( CLIENT_DLL )
+	// HL2RPM: the weapon is put away and taken out here (hl2rpm_weapons.cpp)
+	extern void RPMWeapons_PlayerFrame( CBasePlayer *pPlayer );
+	RPMWeapons_PlayerFrame( this );
+#endif
+
     if ( gpGlobals->curtime < m_flNextAttack )
 	{
 		if ( GetActiveWeapon() )

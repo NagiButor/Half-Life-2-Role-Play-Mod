@@ -85,6 +85,11 @@ void DrawPassLightPass( const lightPassParms &info, CBaseVSShader *pShader, IMat
 			pShaderShadow->EnableTexture( (Sampler_t)( FIRST_LIGHT_SAMPLER + i ), true );
 		}
 
+		// HL2RPM: the light reach atlas (deferred_lightreach.cpp in the client): point lights
+		// stop at the walls of the world - no light, fill or bounce through them
+		if ( bPoint )
+			pShaderShadow->EnableTexture( SHADER_SAMPLER15, true );
+
 		pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION, 1, NULL, 0 );
 
 		DECLARE_STATIC_VERTEX_SHADER( defconstruct_vs30 );
@@ -190,6 +195,15 @@ void DrawPassLightPass( const lightPassParms &info, CBaseVSShader *pShader, IMat
 
 			iSampler++;
 			iCookie++;
+		}
+
+		if ( bPoint )
+		{
+			ITexture *pReach = GetDeferredExt()->GetTexture_LightReach();
+			if ( pReach )
+				pShader->BindTexture( SHADER_SAMPLER15, pReach );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER15, TEXTURE_WHITE );
 		}
 
 		const int frustumReg = bWorldProjection ? 3 : VERTEX_SHADER_SHADER_SPECIFIC_CONST_0;

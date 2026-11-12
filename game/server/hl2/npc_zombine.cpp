@@ -22,6 +22,7 @@
 #include "activitylist.h"
 #include "engine/IEngineSound.h"
 #include "npc_BaseZombie.h"
+#include "hl2rpm_zombies.h"
 #include "movevars_shared.h"
 #include "IEffects.h"
 #include "props.h"
@@ -210,6 +211,7 @@ const char *CNPC_Zombine::pMoanSounds[] =
 
 void CNPC_Zombine::Spawn( void )
 {
+	RPMZombie_Choose( this, RPMZ_ZOMBINE );		// HL2RPM: other clothes (hl2rpm_zombies.cpp)
 	Precache();
 
 	m_fIsTorso = false;
@@ -250,6 +252,7 @@ void CNPC_Zombine::Precache( void )
 	BaseClass::Precache();
 
 	PrecacheModel( DefaultOrCustomModel( "models/zombie/zombie_soldier.mdl" ) );
+	RPMZombie_Precache( RPMZ_ZOMBINE );
 
 	PrecacheScriptSound( "Zombie.FootstepRight" );
 	PrecacheScriptSound( "Zombie.FootstepLeft" );
@@ -910,14 +913,14 @@ const char *CNPC_Zombine::GetHeadcrabModel( void )
 //-----------------------------------------------------------------------------
 const char *CNPC_Zombine::GetLegsModel( void )
 {
-	return "models/zombie/zombie_soldier_legs.mdl";
+	return RPMZombie_Legs( this, "models/zombie/zombie_soldier_legs.mdl" );
 }
 
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 const char *CNPC_Zombine::GetTorsoModel( void )
 {
-	return "models/zombie/zombie_soldier_torso.mdl";
+	return RPMZombie_Torso( this, "models/zombie/zombie_soldier_torso.mdl" );
 }
 
 //---------------------------------------------------------

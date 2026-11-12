@@ -1144,9 +1144,36 @@ if ERRORLEVEL 1 exit /b 1
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="hl2rpm_gpuprof_d3d.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="hl2rpm_crashhandler_client.cpp" />
     <ClCompile Include="hl2rpm_options_graphics.cpp" />
     <ClCompile Include="hl2rpm_vitals.cpp" />
+    <ClCompile Include="hl2rpm_note_panel.cpp" />
+    <ClCompile Include="hl2rpm_markers.cpp" />
+    <ClCompile Include="hl2rpm_music.cpp" />
+    <ClCompile Include="hl2rpm_subtitles.cpp" />
+    <ClCompile Include="..\..\game\shared\hl2rpm_items.cpp" />
+    <ClCompile Include="..\..\game\shared\hl2rpm_animdebug.cpp" />
+    <ClCompile Include="..\..\game\shared\hl2rpm_rpgdefs.cpp" />
+    <ClCompile Include="hl2rpm_charpanel.cpp" />
+    <ClCompile Include="hl2rpm_ui.cpp" />
+    <ClCompile Include="hl2rpm_menu.cpp" />
+    <ClCompile Include="hl2rpm_itempreview.cpp" />
+    <ClCompile Include="hl2rpm_keys.cpp" />
+    <ClCompile Include="hl2rpm_language.cpp" />
+    <ClCompile Include="hl2rpm_suithud.cpp" />
+    <ClCompile Include="hl2rpm_vmhands.cpp" />
+    <ClCompile Include="hl2rpm_mainmenu.cpp" />
+    <ClCompile Include="hl2rpm_lootwin.cpp" />
+    <ClCompile Include="hl2rpm_prompthud.cpp" />
+    <ClCompile Include="hl2rpm_suitboot.cpp" />
+    <ClCompile Include="hl2rpm_lockpick_ui.cpp" />
+    <ClCompile Include="hl2rpm_terminal_ui.cpp" />
+    <ClCompile Include="hl2rpm_seat_cam.cpp" />
+    <ClCompile Include="hl2rpm_tpcam.cpp" />
     <ClCompile Include="..\..\public\tier0\memoverride.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>

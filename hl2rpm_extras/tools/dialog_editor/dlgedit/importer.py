@@ -11,7 +11,8 @@ import re
 from . import kv
 from . import audio
 from . import lipsync
-from .model import NPC, Node, Option, Quest, Stage, Voice, Returning, clean_text, LANGUAGE_NAMES
+from . import logic
+from .model import NPC, Node, Objective, Option, Quest, Stage, Voice, Returning, clean_text, LANGUAGE_NAMES
 
 LANG_SUFFIXES = [("_russian", "russian"), ("_rus", "russian"), ("_ru", "russian"),
                  ("_english", "english"), ("_eng", "english"), ("_en", "english"),
@@ -64,6 +65,9 @@ def _loc(block, key, langs, base_lang):
         lv = block.get(key + "_" + lg)
         if lv:
             out[lg] = clean_text(lv)
+    # the exporter copies a translation into the plain key when the base language has no text
+    if base_lang in out and any(l != base_lang and t == out[base_lang] for l, t in out.items()):
+        del out[base_lang]
     return out
 
 
@@ -129,6 +133,8 @@ def read_dialog(path, langs, default_lang="english"):
         raw.problems.append('нет блока "nodes"')
         return None
     for nkv in nb.blocks():
+        if nkv.get("topic"):
+            continue        # a shared topic put in by the export (scripts/rpg/topics.txt)
         if not re.fullmatch(r"-?\d+", nkv.name.strip()):
             raw.problems.append("узел %r: имя не число, игра его не видит — пропущен" % nkv.name)
             continue
@@ -143,11 +149,14 @@ def read_dialog(path, langs, default_lang="english"):
         n.auto_next = _int(nkv.get("auto_next"), -1)
         n.end = _true(nkv.get("end")) or _true(nkv.get("close")) or _true(nkv.get("auto_close"))
         n.spoils = _true(nkv.get("spoils"))
+        n.actions = logic.read_actions(nkv.block("actions"), _langs(all_langs, base))
         ob = nkv.block("options")
         if ob:
             slots = {}
             extra = []
             for okv in ob.blocks():
+                if okv.get("topic"):
+                    continue
                 o = _read_option(okv, all_langs, base)
                 idx = _int(okv.name, -1)
                 if idx >= 0 and idx not in slots:
@@ -165,6 +174,11 @@ def read_dialog(path, langs, default_lang="english"):
 
 def _split_targets(s):
     return [t.strip() for t in (s or "").split(";") if t.strip()]
+
+
+def _langs(langs, base):
+    """The base language first: logic.read_conds gives it the plain keys."""
+    return [base] + [lg for lg in langs if lg != base]
 
 
 def _read_quest(qkv, langs, base, owner):
@@ -188,6 +202,22 @@ def _read_quest(qkv, langs, base, owner):
             s.desc = _loc(skv, "desc", langs, base)
             s.kill_targets = _split_targets(skv.get("kill_targets", "")) + _split_targets(skv.get("kill_target", ""))
             s.kill_count = _int(skv.get("kill_count", "0"), 0)
+            ob = skv.block("objectives")
+            for x in (ob.blocks() if ob else []):
+                o = Objective(x.get("id") or x.name)
+                o.type = x.get("type", "custom") or "custom"
+                o.text = _loc(x, "text", langs, base)
+                o.target = x.get("target", "") or ""
+                o.item = x.get("item", "") or ""
+                o.count = max(1, _int(x.get("count"), 1))
+                o.radius = _int(x.get("radius"), 128)
+                o.optional = _true(x.get("optional"))
+                o.marker = x.get("marker") in (None, "") or _true(x.get("marker"))
+                o.conditions = logic.read_conds(x.block("conditions"), _langs(langs, base))
+                s.objectives.append(o)
+            s.actions = logic.read_actions(skv.block("actions"), _langs(langs, base))
+            s.next = _int(skv.get("next"), -1)
+            s.final = _true(skv.get("final"))
             stages[i] = s
     if stages:
         top = max(stages)
@@ -201,6 +231,10 @@ def _read_quest(qkv, langs, base, owner):
         if q.stages[0].kill_count <= 0:
             q.stages[0].kill_targets = qt
             q.stages[0].kill_count = qc
+    q.xp = _int(qkv.get("xp"), 0)
+    q.on_complete = logic.read_actions(qkv.block("on_complete"), _langs(langs, base))
+    q.on_fail = logic.read_actions(qkv.block("on_fail"), _langs(langs, base))
+    q.fail_conditions = logic.read_conds(qkv.block("fail_conditions"), _langs(langs, base))
     rb = qkv.block("rewards")
     if rb:
         seen = set()
@@ -219,6 +253,7 @@ def _read_option(okv, langs, base):
     o.next = _int(okv.get("next"), -1)
     o.close = _true(okv.get("close")) or (_int(okv.get("flags"), 0) & 1) == 1
     o.spoils = _true(okv.get("spoils"))
+    o.trade = _true(okv.get("trade"))
     o.server_sequence = okv.get("server_sequence", "") or ""
     o.grant = okv.get("grant_quest", "") or ""
     o.complete = okv.get("complete_quest", "") or ""
@@ -245,6 +280,17 @@ def _read_option(okv, langs, base):
     o.after_next = _int(okv.get("after_next"), -1)
     o.after_line = _loc(okv, "after_line", langs, base)
     o.after_sequence = okv.get("after_sequence", "") or ""
+    L = _langs(langs, base)
+    o.conditions = logic.read_conds(okv.block("conditions"), L)
+    o.show_unmet = _true(okv.get("show_unmet"))
+    cb = okv.block("check")
+    if cb is not None:
+        key = "stat" if cb.get("stat") else "skill"
+        o.check = {key: cb.get(key) or "", "value": _int(cb.get("value"), 0)}
+        o.fail_next = _int(okv.get("fail_next"), -1)
+        o.check_once = okv.get("check_once") in (None, "") or _true(okv.get("check_once"))
+    o.actions = logic.read_actions(okv.block("actions"), L)
+    o.fail_actions = logic.read_actions(okv.block("fail_actions"), L)
     return o
 
 

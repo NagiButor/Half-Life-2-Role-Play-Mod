@@ -1,0 +1,47 @@
+# E:\SourceModding\HL2RPMSOURCE\Downloaded models\Second iteration\HL2-Styled_Combine_Hazmat_Worker_[PM&NPC]_3362066159_2025-05-28-1348.gma -> E:\Steam\steamapps\sourcemods\hl2rpm
+materials/models/hl2_hazmat/c_hands_basesoldier_normal.vtf
+materials/models/hl2_hazmat/c_hands_hazmat_regular.vmt
+materials/models/hl2_hazmat/c_hands_hazmat_regular.vtf
+materials/models/hl2_hazmat/citizen_sheet.vmt
+materials/models/hl2_hazmat/citizen_sheet.vtf
+materials/models/hl2_hazmat/cmbworker_helmet.vmt
+materials/models/hl2_hazmat/cmbworker_helmet.vtf
+materials/models/hl2_hazmat/cmbworker_helmet_n.vtf
+materials/models/hl2_hazmat/grunttank.vmt
+materials/models/hl2_hazmat/grunttank.vtf
+materials/models/hl2_hazmat/hazmatbody.vmt
+materials/models/hl2_hazmat/hazmatbody.vtf
+materials/models/hl2_hazmat/hazmatbody_n.vtf
+materials/models/hl2_hazmat/hazmatbody_nback.vtf
+materials/models/hl2_hazmat/hazmatbody_pingphong.vtf
+materials/models/hl2_hazmat/hazmatbody_zombie.vmt
+materials/models/hl2_hazmat/hazmatbody_zombie.vtf
+materials/vgui/entities/npc_hl_hazmat.vmt
+materials/vgui/entities/npc_hl_hazmat.vtf
+materials/vgui/entities/npc_hl_hazmat_f.vmt
+models/hl2_combine_hazmat.dx80.vtx
+models/hl2_combine_hazmat.dx90.vtx
+models/hl2_combine_hazmat.mdl
+models/hl2_combine_hazmat.phy
+models/hl2_combine_hazmat.vvd
+models/hl2_combine_hazmat_cit.dx80.vtx
+models/hl2_combine_hazmat_cit.dx90.vtx
+models/hl2_combine_hazmat_cit.mdl
+models/hl2_combine_hazmat_cit.phy
+models/hl2_combine_hazmat_cit.vvd
+models/player_hl2_combine_hazmat.dx80.vtx
+models/player_hl2_combine_hazmat.dx90.vtx
+models/player_hl2_combine_hazmat.mdl
+models/player_hl2_combine_hazmat.phy
+models/player_hl2_combine_hazmat.vvd
+models/weapons/c_arms_hazmat.dx80.vtx
+models/weapons/c_arms_hazmat.dx90.vtx
+models/weapons/c_arms_hazmat.mdl
+models/weapons/c_arms_hazmat.vvd
+models/zombie/zombie_hl2_combine_hazmat.dx80.vtx
+models/zombie/zombie_hl2_combine_hazmat.dx90.vtx
+models/zombie/zombie_hl2_combine_hazmat.mdl
+models/zombie/zombie_hl2_combine_hazmat.phy
+models/zombie/zombie_hl2_combine_hazmat.vvd
+# missing materials:
+# models/weapons/c_arms_hazmat.mdl: c_arms_vanillasoldier_regular (in models/combine_arms/juonovom/hl2 vanilla, models/hl2_hazmat, models/combine_soldier)

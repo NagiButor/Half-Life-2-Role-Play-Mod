@@ -106,6 +106,10 @@ public:
 	const char *ScriptGetUnlockedSound() { return STRING( m_ls.sUnlockedSound ); }
 #endif
 
+	// HL2RPM (M6): the lock for the use prompt (hl2rpm_prompt.cpp)
+	const char *GetRPMKey() const { return STRING( m_iszRPMKey ); }
+	int GetRPMLockLevel() const { return m_iRPMLockLevel; }
+
 protected:
 
 	enum DoorState_t
@@ -226,6 +230,8 @@ private:
 	EHANDLE		m_hActivator;		
 	
 	bool	m_bLocked;				// True if the door is locked.
+	string_t m_iszRPMKey;			// HL2RPM: key item that opens the locked door (Creation Kit)
+	int		m_iRPMLockLevel;		// HL2RPM: lockpick skill that opens it (0 = none)
 	EHANDLE	m_hBlocker;				// Entity blocking the door currently
 	bool	m_bFirstBlocked;		// Marker for being the first door (in a group) to be blocked (needed for motion control)
 

@@ -127,7 +127,7 @@ CHudDamageIndicator::CHudDamageIndicator( const char *pElementName ) : CHudEleme
 
 	m_WhiteAdditiveMaterial.Init( "vgui/white_additive", TEXTURE_GROUP_VGUI ); 
 	
-	SetHiddenBits( HIDEHUD_HEALTH );
+	SetHiddenBits( HIDEHUD_HEALTH | HIDEHUD_NEEDSUIT );	// HL2RPM: without a suit the edges of the screen tell (hl2rpm_vitals.cpp)
 }
 
 //-----------------------------------------------------------------------------

@@ -12,12 +12,15 @@ public:
 		DEFSTAGE_GBUFFER = 0,
 		DEFSTAGE_SHADOW,
 		DEFSTAGE_COMPOSITE,
+		DEFSTAGE_MAX,
 	};
 
 	CDeferredPerMaterialContextData()
 	{
 		m_iAllocated = -1;
 		m_piCommandArray = NULL;
+		for ( int i = 0; i < DEFSTAGE_MAX; i++ )
+			m_nStageVarChangeID[i] = 0xfffffffe;
 	};
 
 	~CDeferredPerMaterialContextData()
@@ -52,7 +55,22 @@ public:
 
 		delete [] m_piCommandArray[ p_iStage ];
 		m_piCommandArray[ p_iStage ] = p_iCmd;
+		// (the variables these commands were built from)
+		if ( p_iStage < DEFSTAGE_MAX )
+			m_nStageVarChangeID[ p_iStage ] = m_nVarChangeID;
 	};
+
+	// HL2RPM: the commands of a stage are built again when the material's variables changed since
+	// they were built. m_bMaterialVarsChanged alone is not enough: the material system raises it on
+	// the first draw after a change and the shader clears it at the end of that draw - which is one
+	// stage (the G-buffer); the composite drawn next saw it lowered and kept the old textures (a
+	// texture set by code - the arms of the view models by suit, hl2rpm_vmhands.cpp - showed only
+	// the first time).
+	bool NeedsCommands( DefStage_t p_iStage )
+	{
+		return m_bMaterialVarsChanged || !HasCommands( p_iStage ) ||
+			( p_iStage < DEFSTAGE_MAX && m_nStageVarChangeID[ p_iStage ] != m_nVarChangeID );
+	}
 
 	uint8 *GetCommands( DefStage_t p_iStage )
 	{
@@ -73,6 +91,7 @@ private:
 	int m_iAllocated;
 
 	uint8 **m_piCommandArray;
+	uint32 m_nStageVarChangeID[DEFSTAGE_MAX];
 };
 
 

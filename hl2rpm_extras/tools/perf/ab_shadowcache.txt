@@ -1,0 +1,12 @@
+# A/B r_deferred_shadow_cache
+|cl_weather_tour_step 8; r_hl2rpm_gpuprof 1; sv_weather partlycloudy 0; sv_timecycle_set_time 13; r_deferred_treesway 0; r_deferred_taa_jitter 0; r_weather_motes 0; r_weather_cloud_wind_scale 0; ai_disable 1; r_deferred_shadow_cache_debug 1
+|setpos -2954 -3625 60; setang -5 69 0
+shot|r_deferred_shadow_cache 1; setpos -2954 -3625 60; setang -5 69 0
+shot|r_deferred_shadow_cache 0; setpos -2954 -3625 60; setang -5 69 0
+shot|r_deferred_shadow_cache 1; setpos -2954 -3625 60; setang -5 69 0
+shot|r_deferred_shadow_cache 0; setpos -2954 -3625 60; setang -5 69 0
+shot|r_deferred_shadow_cache 1; setpos -2954 -3625 60; setang 0 249 0
+shot|r_deferred_shadow_cache 0; setpos -2954 -3625 60; setang 0 249 0
+|sv_timecycle_set_time 23
+shot|r_deferred_shadow_cache 1; setpos -2954 -3625 60; setang -5 69 0
+shot|r_deferred_shadow_cache 0; setpos -2954 -3625 60; setang -5 69 0

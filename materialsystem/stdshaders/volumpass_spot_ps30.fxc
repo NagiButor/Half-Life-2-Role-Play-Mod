@@ -83,8 +83,7 @@ float DoSpotLightVolum( const int index,
 	float lightToWorldDist = length( normalizedLightVec );
 	normalizedLightVec = normalizedLightVec / lightToWorldDist;
 
-	float fade = 1.0f - saturate( lightToWorldDist / g_flMixedData[ index ].w );
-	fade = pow( fade, g_flMixedData[ index + 1 ].w );
+	float fade = DeferredLightFalloff( lightToWorldDist, g_flMixedData[ index ].w, g_flMixedData[ index + 1 ].w );
 
 	if ( bDoSpotAttn )
 	{

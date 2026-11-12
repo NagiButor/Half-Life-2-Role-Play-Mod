@@ -1,0 +1,46 @@
+# E:\SourceModding\HL2RPMSOURCE\Downloaded models\Combine beta units pack\Beta_Combine_Units_Pack_beta_combine_units_pack_2014-08-31-0014.gma -> E:\Steam\steamapps\sourcemods\hl2rpm
+
+# kept (already in the game):
+# materials/models/dpfilms/beta/cremator/arms.vmt
+# materials/models/dpfilms/beta/cremator/ball.vmt
+# materials/models/dpfilms/beta/cremator/cloak.vmt
+# materials/models/dpfilms/beta/cremator/cremator_arms.vtf
+# materials/models/dpfilms/beta/cremator/cremator_arms_n.vtf
+# materials/models/dpfilms/beta/cremator/cremator_body.vtf
+# materials/models/dpfilms/beta/cremator/cremator_body_n.vtf
+# materials/models/dpfilms/beta/cremator/cremator_head.vtf
+# materials/models/dpfilms/beta/cremator/cremator_head_exp.vtf
+# materials/models/dpfilms/beta/cremator/cremator_head_n.vtf
+# materials/models/dpfilms/beta/cremator/eyes.vmt
+# materials/models/dpfilms/beta/cremator/eyes.vtf
+# materials/models/dpfilms/beta/cremator/gradient_skin.vtf
+# materials/models/dpfilms/beta/cremator/head.vmt
+# materials/models/dpfilms/beta/cremator/immolator.vmt
+# materials/models/dpfilms/beta/cremator/immolator.vtf
+# materials/models/dpfilms/beta/cremator/immolator_n.vtf
+# materials/models/dpfilms/beta/cremator/lens.vmt
+# materials/models/dpfilms/beta/cremator/lens.vtf
+# materials/models/dpfilms/beta/cremator/pwrp_metal.vtf
+# materials/models/dpfilms/beta/cremator/tube.vmt
+# materials/models/dpfilms/beta/super_soldier/armor.vmt
+# materials/models/dpfilms/beta/super_soldier/armor_arctic.vmt
+# materials/models/dpfilms/beta/super_soldier/body.vmt
+# materials/models/dpfilms/beta/super_soldier/gun.vmt
+# materials/models/dpfilms/beta/super_soldier/gun_diffuse.vtf
+# materials/models/dpfilms/beta/super_soldier/organs.vmt
+# materials/models/dpfilms/beta/super_soldier/super_soldier_arctic.vtf
+# materials/models/dpfilms/beta/super_soldier/super_soldier_diffuse.vtf
+# materials/models/dpfilms/beta/super_soldier/super_soldier_gun.vtf
+# materials/models/dpfilms/beta/super_soldier/super_soldier_gun_exp.vtf
+# materials/models/dpfilms/beta/super_soldier/super_soldier_gun_n.vtf
+# materials/models/dpfilms/beta/super_soldier/super_soldier_normal.vtf
+# materials/models/dpfilms/beta/super_soldier/tubes.vmt
+# materials/models/dpfilms/beta/synth_elite/alt.vtf
+# materials/models/dpfilms/beta/synth_elite/alternative_diffuse.vmt
+# materials/models/dpfilms/beta/synth_elite/alt_n.vtf
+# materials/models/dpfilms/beta/synth_elite/elite.vmt
+# materials/models/dpfilms/beta/synth_elite/elite.vtf
+# materials/models/dpfilms/beta/synth_elite/elite_n.vtf
+# materials/models/dpfilms/beta/synth_elite/spear.vmt
+# materials/models/dpfilms/beta/synth_elite/spear.vtf
+# materials/models/dpfilms/beta/synth_elite/spear_n.vtf

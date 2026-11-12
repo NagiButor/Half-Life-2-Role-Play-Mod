@@ -5,6 +5,7 @@
 #include "usermessages.h"
 #include "baseplayer_shared.h"
 #include "inventory_system.h"
+#include "hl2rpm_items.h"
 
 LINK_ENTITY_TO_CLASS( item_combine_soldier_suit, CItemCombineSoldierSuit );
 
@@ -13,14 +14,14 @@ END_DATADESC()
 
 void CItemCombineSoldierSuit::Precache( void )
 {
-    PrecacheModel( "models/combine_vests/militaryvest.mdl" );
+    PrecacheModel( RPMItems::Model( "item_combine_soldier_suit" ) );
     BaseClass::Precache();
 }
 
 void CItemCombineSoldierSuit::Spawn( void )
 {
     Precache();
-    SetModel( "models/combine_vests/militaryvest.mdl" );
+    SetModel( RPMItems::Model( "item_combine_soldier_suit" ) );
     BaseClass::Spawn();
 }
 
@@ -54,3 +55,53 @@ bool CItemCombineSoldierSuit::MyTouch( CBasePlayer *pPlayer )
 
     return true;
 }
+
+//-----------------------------------------------------------------------------
+// HL2RPM (M6): more suits to wear - the PCV, Civil Protection, the guards of Nova
+// Prospekt and Overwatch elite. Their models are in RPMItems::Model, what they stop and
+// the body of the player in RPMItems::SuitDefense / SuitBody; HUD / window colors and
+// the boot screen come from the class (RPMChar_SuitTheme in hl2rpm_char.cpp).
+//-----------------------------------------------------------------------------
+class CItemRPMSuit : public CItem
+{
+public:
+	DECLARE_CLASS( CItemRPMSuit, CItem );
+
+	const char *SuitModel()
+	{
+		return RPMItems::Model( GetClassname() );
+	}
+
+	virtual void Precache( void )
+	{
+		PrecacheModel( SuitModel() );
+		BaseClass::Precache();
+	}
+
+	virtual void Spawn( void )
+	{
+		Precache();
+		SetModel( SuitModel() );
+		BaseClass::Spawn();
+	}
+
+	virtual bool MyTouch( CBasePlayer *pPlayer )
+	{
+		if ( !pPlayer )
+			return false;
+		pPlayer->m_Local.m_bWearingSuit = true;
+		InventorySystem::SetEquippedSuitClass( pPlayer, GetClassname() );
+		EmitSound( "player/suit_equip.wav" );
+		UTIL_Remove( this );
+		return true;
+	}
+};
+
+LINK_ENTITY_TO_CLASS( item_suit_pcv, CItemRPMSuit );
+LINK_ENTITY_TO_CLASS( item_suit_cp, CItemRPMSuit );
+LINK_ENTITY_TO_CLASS( item_suit_elite, CItemRPMSuit );
+LINK_ENTITY_TO_CLASS( item_suit_prison, CItemRPMSuit );
+// (2026-11-02: not combat suits - the coverall of a Combine worker and a hazmat suit, with a HUD of
+// their own: themes "worker" / "hazmat")
+LINK_ENTITY_TO_CLASS( item_suit_worker, CItemRPMSuit );
+LINK_ENTITY_TO_CLASS( item_suit_hazmat, CItemRPMSuit );

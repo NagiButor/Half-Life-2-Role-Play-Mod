@@ -14,6 +14,17 @@ namespace DialogDefinitions
         int flags;
         char serverSequenceName[128];
         bool spoils;
+        bool trade;                 // HL2RPM: the dialog closes and the NPC's trade window opens
+        // HL2RPM (Creation Kit): conditions (unmet: hidden, or shown greyed with show_unmet), a skill /
+        // attribute check ("[Speech 50]": passed -> next + actions, failed -> fail_next + fail_actions,
+        // check_once: tried once, then hidden), actions; blocks owned by RPMLogic::POOL_DIALOGS
+        KeyValues *pConds;
+        KeyValues *pCheck;
+        KeyValues *pActions;
+        KeyValues *pFailActions;
+        int failNextId;
+        bool checkOnce;
+        bool showUnmet;
         char grantQuestId[64];
         char completeQuestId[64];
         char failQuestId[64];
@@ -45,6 +56,7 @@ namespace DialogDefinitions
         bool autoClose;
         CUtlString serverSequenceName;
         bool spoils;
+        KeyValues *pActions;        // HL2RPM: run when the line is shown (RPMLogic::POOL_DIALOGS)
     };
 
     struct DSDialog
@@ -71,6 +83,10 @@ namespace DialogDefinitions
     void SendDialogNodeToPlayerEx(CBasePlayer *pPlayer, const DSDialog *dialog, int nodeId, int entIndex, const char *overrideLine, bool forceNoOptions, bool forcePendingSpoil, int forcedAutoNextId, int forcedAutoClose);
     void SendDialogNodeToPlayerEx(CBasePlayer *pPlayer, const DSDialog *dialog, int nodeId, int entIndex, const char *overrideLine, const char *overrideChoreo, const char *overrideSound, const char *overrideSequence, bool forceNoOptions, bool forcePendingSpoil, int forcedAutoNextId, int forcedAutoClose);
     const DSDialog *FindDialogForEntity(const char *entityName);
+    // HL2RPM: the transition the last screen sent to the player was told to make when its line ends
+    // (forced by the caller: returning visit, after a quest turn-in...). The client used to send them back
+    // only when the line ended by itself - a click to skip the line lost them and the window hung.
+    bool GetLastScreenTransition(const char *entityName, int nodeId, int &autoNextId, int &autoClose);
     // HL2RPM: display name of a dialog NPC in the current dialog language, NULL if its file has none
     const char *GetDisplayNameForEntity(const char *entityName);
     // HL2RPM: language the dialogs are loaded in (dialog_language, else cl_language / Steam, else english)

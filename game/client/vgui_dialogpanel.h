@@ -32,15 +32,42 @@ public:
     // Set a delay (seconds) after which option buttons become active/visible
     void SetOptionDelay(float seconds);
 
+    // HL2RPM (M6): the look of the window - the row under the mouse or the keyboard
+    int HighlightedOption() const;
+    float OptionAppear(int index) const;
+    float HighlightTime() const { return m_flSelTime; }
+    void SimulateKey(vgui::KeyCode code) { OnKeyCodeTyped(code); }
+
 protected:
     virtual void OnCommand(const char *command) OVERRIDE;
     virtual void OnMousePressed(vgui::MouseCode code) OVERRIDE;
     virtual void OnMouseWheeled(int delta) OVERRIDE;
+    virtual void OnKeyCodeTyped(vgui::KeyCode code) OVERRIDE;
+    virtual void ApplySchemeSettings(vgui::IScheme *pScheme) OVERRIDE;
     virtual void PaintBackground() OVERRIDE;
     virtual void Paint() OVERRIDE;
     virtual void OnTick() OVERRIDE;
+    virtual void OnThink() OVERRIDE;
 
 private:
+    void LayoutDialog();
+    void PlaceOptions();
+    void RevealOptions();
+    bool ContinueOrReveal();
+    void ChooseOption(int index);
+
+    CUtlString m_Line;
+    CUtlString m_Speaker;
+    float m_flOpenTime;         // the window unfolds
+    float m_flLineTime;         // a new line fades in
+    float m_flOptionsTime;      // the options appear one after another
+    float m_flSelTime;          // the highlighted row flashes
+    int m_iKeySel;              // row chosen with the keyboard (-1 none)
+    int m_iLastHighlight;
+    int m_iTabH, m_iBoxH, m_iOptTop, m_iRowH, m_iOptViewH;
+    bool m_bEscapeBlocked;
+    bool m_bOptionsRevealed;
+
     vgui::Label *m_pSpeakerLabel;
     vgui::Label *m_pLineLabel;
     CUtlVector<vgui::Button*> m_Options;
@@ -70,6 +97,7 @@ private:
     // Internal tracking whether scene was observed playing (to detect end)
     bool m_sceneWasPlaying;
     int m_nOptionsOffset;
+    friend class CDialogOptionButton;
 };
 
 CVGuiDialogPanel *GetGlobalDialogPanel();

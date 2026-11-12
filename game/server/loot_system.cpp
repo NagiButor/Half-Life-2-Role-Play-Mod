@@ -1,10 +1,16 @@
 #include "cbase.h"
+#include "hl2rpm_char.h"
 #include "loot_system.h"
 #include "physics_prop_ragdoll.h"
 #include "inventory_system.h"
 #include "loot_container.h"
 #include "recipientfilter.h"
 #include "inventory_netmessages.h"
+#include "hl2rpm_rpg.h"
+#include "hl2rpm_items.h"
+#include "hl2rpm_world.h"
+#include "ai_basenpc.h"
+#include "tier1/fmtstr.h"
 #include <stdarg.h>
 
 // memdbgon must be the last include file in a .cpp file
@@ -76,6 +82,30 @@ static const char *LootTarget_GetLootItems(CBaseEntity *pEnt)
 	if (ILootContainer *pBox = AsLootContainer(pEnt))
 		return pBox->GetLootItems();
 	return NULL;
+}
+
+static const char *LootTarget_GetDisplayName(CBaseEntity *pEnt);
+
+// HL2RPM (M6): what the use prompt shows for a loot target (hl2rpm_prompt.cpp); false if it isn't one
+// (a ragdoll of the map without loot and without a name is not)
+// HL2RPM: the owner of a container ("" - nobody's; corpses are nobody's)
+const char *RPMLoot_GetOwner(CBaseEntity *pEnt)
+{
+	ILootContainer *pBox = AsLootContainer(pEnt);
+	return pBox ? pBox->GetLootOwner() : "";
+}
+
+bool RPMLoot_DescribeTarget(CBaseEntity *pEnt, const char *&pszName, bool &bCorpse, bool &bEmpty)
+{
+	const char *items = LootTarget_GetLootItems(pEnt);
+	if (!items)
+		return false;
+	pszName = LootTarget_GetDisplayName(pEnt);
+	if (!pszName)
+		pszName = "";
+	bCorpse = AsLootRagdoll(pEnt) != NULL;
+	bEmpty = !items[0];
+	return !( bCorpse && bEmpty && !pszName[0] );
 }
 
 static void LootTarget_SetLootItems(CBaseEntity *pEnt, const char *items)
@@ -201,6 +231,28 @@ static void NormalizeClassname(const char *raw, char *out, int outSize)
 
 static void AddLootItem(CUtlVector<CUtlString> &items, const char *classname, int bullets, bool isAmmo);
 
+// HL2RPM: entries that keep a count ":N" in loot strings and merge - ammo (bullets) and the stackable
+// items of the item database (tokens, bobby pins, rations...: the count of the stack). Before, a stack
+// lost its count here: 60 tokens in a locker gave the player 1, a vendor's 8 bobby pins became 1.
+static bool IsLootStack(const char *cls)
+{
+	return InventorySystem::IsAmmoItem(cls) || RPMItems::IsStackable(cls);
+}
+
+static int DefaultStackCount(const char *cls)
+{
+	return InventorySystem::IsAmmoItem(cls) ? InventorySystem::GetBulletsPerAmmoItem(cls) : 1;
+}
+
+// gives the player a non-weapon loot entry: ammo with its bullets, a stack with its count
+static void GiveLootEntry(CBasePlayer *pPlayer, const char *cls, int count, bool hasCount)
+{
+	if (IsLootStack(cls))
+		InventorySystem::AddItemToPlayerWithBullets(pPlayer, cls, (hasCount && count > 0) ? count : DefaultStackCount(cls));
+	else
+		InventorySystem::AddItemToPlayer(pPlayer, cls);
+}
+
 static void NormalizeLootItems(CUtlVector<CUtlString> &items);
 
 static void AddLootItem(CUtlVector<CUtlString> &items, const char *classname, int bullets, bool isAmmo)
@@ -213,8 +265,10 @@ static void AddLootItem(CUtlVector<CUtlString> &items, const char *classname, in
 	if (!ncls[0])
 		return;
 
-	if (isAmmo)
+	if (isAmmo || RPMItems::IsStackable(ncls))
 	{
+		if (bullets <= 0)
+			bullets = DefaultStackCount(ncls);
 		int idxMatch = -1;
 		int existingBullets = 0;
 		for (int i = 0; i < items.Count(); ++i)
@@ -227,7 +281,7 @@ static void AddLootItem(CUtlVector<CUtlString> &items, const char *classname, in
 			if (!Q_stricmp(nExisting, ncls))
 			{
 				idxMatch = i;
-				existingBullets = hasB ? b : InventorySystem::GetBulletsPerAmmoItem(ncls);
+				existingBullets = hasB ? b : DefaultStackCount(ncls);
 				break;
 			}
 		}
@@ -315,11 +369,11 @@ static void NormalizeLootItems(CUtlVector<CUtlString> &items)
 		if (!cls[0])
 			continue;
 
-		if (InventorySystem::IsAmmoItem(cls))
+		if (!isWeapon && IsLootStack(cls))
 		{
 			int b = bullets;
 			if (!hasBullets || b <= 0)
-				b = InventorySystem::GetBulletsPerAmmoItem(cls);
+				b = DefaultStackCount(cls);
 
 			int match = -1;
 			for (int j = 0; j < out.Count(); ++j)
@@ -332,12 +386,12 @@ static void NormalizeLootItems(CUtlVector<CUtlString> &items)
 				ExtractLootEntryFull(out[j].Get(), ecls, sizeof(ecls), ebullets, ehasBullets, eisWeapon, eclip1, eclip2, ereserveIdx, ereserveCount);
 				if (!ecls[0] || eisWeapon)
 					continue;
-				if (!InventorySystem::IsAmmoItem(ecls))
+				if (!IsLootStack(ecls))
 					continue;
 				if (Q_stricmp(ecls, cls))
 					continue;
 				match = j;
-				int existing = (ehasBullets && ebullets > 0) ? ebullets : InventorySystem::GetBulletsPerAmmoItem(cls);
+				int existing = (ehasBullets && ebullets > 0) ? ebullets : DefaultStackCount(cls);
 				int total = existing + b;
 				out[j] = UTIL_VarArgs("%s:%d", cls, total);
 				break;
@@ -375,11 +429,11 @@ static void AddLootRawEntry(CUtlVector<CUtlString> &items, const char *rawEntry)
 	if (!cls[0])
 		return;
 
-	bool isAmmo = InventorySystem::IsAmmoItem(cls);
+	bool isAmmo = !isWeapon && IsLootStack(cls);
 	if (isAmmo)
 	{
 		if (!hasBullets || bullets <= 0)
-			bullets = InventorySystem::GetBulletsPerAmmoItem(cls);
+			bullets = DefaultStackCount(cls);
 		for (int i = 0; i < items.Count(); ++i)
 		{
 			char ecls[256];
@@ -392,7 +446,7 @@ static void AddLootRawEntry(CUtlVector<CUtlString> &items, const char *rawEntry)
 				continue;
 			if (Q_stricmp(ecls, cls))
 				continue;
-			int total = (ehasBullets ? ebullets : InventorySystem::GetBulletsPerAmmoItem(cls)) + bullets;
+			int total = (ehasBullets ? ebullets : DefaultStackCount(cls)) + bullets;
 			items[i] = UTIL_VarArgs("%s:%d", cls, total);
 			return;
 		}
@@ -416,16 +470,387 @@ static void RestoreInventoryEntry(CBasePlayer *pPlayer, const InventorySystem::I
 		InventorySystem::AddWeaponToPlayer(pPlayer, cls, inv.weaponClip1, inv.weaponClip2, inv.reserveAmmoIndex, inv.reserveAmmoCount);
 		return;
 	}
+	GiveLootEntry(pPlayer, cls, inv.bullets, true);
+}
+
+//=============================================================================
+// HL2RPM: trade. An NPC of the Creation Kit with a "vendor" block (scripts/npcs)
+// trades in the loot window: the player's column sells, the vendor's column buys.
+// The vendor's stock and money live in the RPG state ("vendors"/<targetname>):
+// they go into the save game and over level changes; the stock is rolled from
+// the vendor's list again every restock_hours of game time.
+//=============================================================================
+static bool s_bLootTrade[MAX_PLAYERS + 1];
+
+static bool IsTrading(CBasePlayer *pPlayer)
+{
+	int idx = pPlayer ? pPlayer->entindex() : 0;
+	return idx > 0 && idx <= MAX_PLAYERS && s_bLootTrade[idx] && s_LootTargets[idx].Get();
+}
+
+namespace RPMTrade
+{
+	KeyValues *VendorDef(CBaseEntity *pNPC)
+	{
+		if (!pNPC || pNPC->GetEntityName() == NULL_STRING)
+			return NULL;
+		const RPMNPCDef_t *pDef = RPMWorld::FindNPCDef(STRING(pNPC->GetEntityName()));
+		return pDef ? pDef->pVendor : NULL;
+	}
+}
+
+static const char *TradeCurrency(KeyValues *pVendor)
+{
+	const char *c = pVendor ? pVendor->GetString("currency", "") : "";
+	return c[0] ? c : "rpm_credits";
+}
+
+// the vendor's state: stock (loot string), money; refilled when the restock time has come
+static KeyValues *VendorState(CBaseEntity *pNPC, KeyValues *pVendor, CBasePlayer *pPlayer)
+{
+	KeyValues *v = RPMState::Section("vendors")->FindKey(STRING(pNPC->GetEntityName()), true);
+	double now = RPMState::GameHours();
+	float restock = pVendor->GetFloat("restock_hours", 72.0f);
+	if (!v->GetInt("init") || (restock > 0.0f && now >= v->GetFloat("restock_at")))
+	{
+		CUtlString rolled;
+		RPMLoot::Resolve(pVendor->GetString("list"), rolled, pPlayer);
+		CUtlVector<CUtlString> items;
+		ParseLootItems(rolled.Get(), items);
+		NormalizeLootItems(items);
+		CUtlString stock;
+		BuildLootItems(items, stock);
+		v->SetString("stock", stock.Get());
+		v->SetInt("money", pVendor->GetInt("money", 200));
+		v->SetFloat("restock_at", (float)(now + Max(restock, 1.0f)));
+		v->SetInt("init", 1);
+	}
+	return v;
+}
+
+// value of a loot / inventory entry: ammo by its bullets (value and weight of ammo are per bullet),
+// stackables by their count
+static int EntryValue(const char *cls, int bullets, bool hasBullets)
+{
+	// the database value, else the built-in price of stock items (they had 0 - vendors gave them away)
+	const int value = RPMItems::Value(cls);
+	if (value <= 0)
+		return 0;
 	if (InventorySystem::IsAmmoItem(cls))
 	{
-		int b = inv.bullets;
-		if (b <= 0)
-			b = InventorySystem::GetBulletsPerAmmoItem(cls);
-		InventorySystem::AddItemToPlayerWithBullets(pPlayer, cls, b);
+		int b = (hasBullets && bullets > 0) ? bullets : Max(1, InventorySystem::GetBulletsPerAmmoItem(cls));
+		return value * b;
+	}
+	if (RPMItems::IsStackable(cls))
+		return value * Max(1, hasBullets ? bullets : 1);
+	return value;
+}
+
+static void ParseEntry(const char *raw, char *cls, int clsSize, int &bullets, bool &hasBullets)
+{
+	bool isWeapon; int c1, c2, ri, rc;
+	ExtractLootEntryFull(raw, cls, clsSize, bullets, hasBullets, isWeapon, c1, c2, ri, rc);
+}
+
+// what the player pays for a vendor's entry / gets for his own (-1: the vendor doesn't take it)
+static bool TradesByOne(const char *cls)
+{
+	return !InventorySystem::IsAmmoItem(cls) && RPMItems::IsStackable(cls);
+}
+
+static int BuyPrice(KeyValues *pVendor, const char *raw)
+{
+	char cls[256]; int b; bool hb;
+	ParseEntry(raw, cls, sizeof(cls), b, hb);
+	int v = TradesByOne(cls) ? RPMItems::Value(cls) : EntryValue(cls, b, hb);
+	return v > 0 ? Max(1, (int)ceilf(v * pVendor->GetFloat("markup", 1.25f) * RPMChar::PriceScale(true))) : 0;
+}
+
+static int SellPrice(KeyValues *pVendor, const char *raw)
+{
+	char cls[256]; int b; bool hb;
+	ParseEntry(raw, cls, sizeof(cls), b, hb);
+	const RPMItemDef_t *pDef = RPMItems::Find(cls);
+	if ((pDef && (pDef->quest || !Q_stricmp(pDef->category, "currency"))) || !Q_stricmp(cls, TradeCurrency(pVendor)) ||
+		!Q_stricmp(cls, "rpm_credits"))
+		return -1;
+	int v = TradesByOne(cls) ? RPMItems::Value(cls) : EntryValue(cls, b, hb);
+	if (v <= 0)
+		return -1;
+	return Max(1, (int)floorf(v * Min(1.0f, pVendor->GetFloat("pays", 0.5f) * RPMChar::PriceScale(false))));
+}
+
+static void TradeToast(CBasePlayer *pPlayer, const char *ru, const char *en, const char *snd)
+{
+	bool bRu = !Q_stricmp(RPMItems::Language(), "russian");
+	engine->ClientCommand(pPlayer->edict(), "ui_toast \"inventory\" \"%s\" \"%s\"\n", bRu ? ru : en, snd);
+}
+
+static void SendTradeWindow(CBasePlayer *pPlayer, CBaseEntity *pNPC)
+{
+	KeyValues *pVendor = RPMTrade::VendorDef(pNPC);
+	if (!pPlayer || !pNPC || !pVendor)
+		return;
+	KeyValues *v = VendorState(pNPC, pVendor, pPlayer);
+	int idx = pPlayer->entindex();
+	if (idx <= 0 || idx > MAX_PLAYERS)
+		return;
+	s_LootTargets[idx] = pNPC;
+	s_bLootTrade[idx] = true;
+
+	CUtlVector<CUtlString> leftItems, rightItems;
+	InventorySystem::GetInventoryItemStringsForPlayer(pPlayer, leftItems);
+	ParseLootItems(v->GetString("stock"), rightItems);
+
+	CUtlString leftPrices, rightPrices;
+	for (int i = 0; i < leftItems.Count(); ++i)
+		leftPrices.Append(CFmtStr("%s%d", i ? ";" : "", SellPrice(pVendor, leftItems[i].Get())));
+	for (int i = 0; i < rightItems.Count(); ++i)
+		rightPrices.Append(CFmtStr("%s%d", i ? ";" : "", BuyPrice(pVendor, rightItems[i].Get())));
+
+	const char *cur = TradeCurrency(pVendor);
+	CAI_BaseNPC *pAI = pNPC->MyNPCPointer();
+	const char *displayName = pAI ? pAI->GetLootDisplayName() : "";
+
+	CSingleUserRecipientFilter user(pPlayer);
+	user.MakeReliable();
+	UserMessageBegin(user, "Inventory_Update");
+	WRITE_BYTE(kInventoryUpdate_LootBegin);
+	WRITE_STRING(displayName ? displayName : "");
+	WRITE_STRING("");
+	WRITE_STRING("");
+	MessageEnd();
+
+	UserMessageBegin(user, "Inventory_Update");
+	WRITE_BYTE(kInventoryUpdate_TradeInfo);
+	WRITE_LONG(InventorySystem::CountItem(pPlayer, cur));
+	WRITE_LONG(v->GetInt("money"));
+	WRITE_STRING(RPMItems::Name(cur));
+	WRITE_STRING(leftPrices.Get());
+	WRITE_STRING(rightPrices.Get());
+	MessageEnd();
+
+	for (int i = 0; i < leftItems.Count(); ++i)
+	{
+		UserMessageBegin(user, "Inventory_Update");
+		WRITE_BYTE(kInventoryUpdate_LootAddLeft);
+		WRITE_STRING(leftItems[i].Get());
+		MessageEnd();
+	}
+	for (int i = 0; i < rightItems.Count(); ++i)
+	{
+		UserMessageBegin(user, "Inventory_Update");
+		WRITE_BYTE(kInventoryUpdate_LootAddRight);
+		WRITE_STRING(rightItems[i].Get());
+		MessageEnd();
+	}
+	UserMessageBegin(user, "Inventory_Update");
+	WRITE_BYTE(kInventoryUpdate_LootEnd);
+	MessageEnd();
+}
+
+// the player buys the vendor's entry <slot>
+static void Trade_Buy(CBasePlayer *pPlayer, int slot)
+{
+	CBaseEntity *pNPC = GetLootTargetForPlayer(pPlayer);
+	KeyValues *pVendor = RPMTrade::VendorDef(pNPC);
+	if (!pVendor)
+		return;
+	KeyValues *v = VendorState(pNPC, pVendor, pPlayer);
+	CUtlVector<CUtlString> items;
+	ParseLootItems(v->GetString("stock"), items);
+	if (slot < 0 || slot >= items.Count())
+	{
+		SendTradeWindow(pPlayer, pNPC);
 		return;
 	}
-	InventorySystem::AddItemToPlayer(pPlayer, cls);
+	const char *cur = TradeCurrency(pVendor);
+	int price = BuyPrice(pVendor, items[slot].Get());
+	if (InventorySystem::CountItem(pPlayer, cur) < price)
+	{
+		TradeToast(pPlayer, CFmtStr("Не хватает: %s %d", RPMItems::Name(cur), price), CFmtStr("Not enough %s: %d", RPMItems::Name(cur), price),
+			"buttons/button10.wav");
+		SendTradeWindow(pPlayer, pNPC);
+		return;
+	}
+	char cls[256]; int bullets = 0; bool hasBullets = false, isWeapon = false; int clip1 = 0, clip2 = 0, reserveIdx = -1, reserveCount = 0;
+	ExtractLootEntryFull(items[slot].Get(), cls, sizeof(cls), bullets, hasBullets, isWeapon, clip1, clip2, reserveIdx, reserveCount);
+	if (!cls[0])
+		return;
+	InventorySystem::TakeItems(pPlayer, cur, price);
+	if (TradesByOne(cls))
+	{
+		InventorySystem::AddItemToPlayerWithBullets(pPlayer, cls, 1);
+		const int left = (hasBullets ? bullets : 1) - 1;
+		if (left > 0)
+			items[slot] = UTIL_VarArgs("%s:%d", cls, left);
+		else
+			items.Remove(slot);
+	}
+	else
+	{
+		if (isWeapon && !InventorySystem::IsAmmoItem(cls))
+			InventorySystem::AddWeaponToPlayer(pPlayer, cls, clip1, clip2, reserveIdx, reserveCount);
+		else
+			GiveLootEntry(pPlayer, cls, bullets, hasBullets);
+		items.Remove(slot);
+	}
+	CUtlString stock;
+	BuildLootItems(items, stock);
+	v->SetString("stock", stock.Get());
+	v->SetInt("money", v->GetInt("money") + price);
+	CPASAttenuationFilter filter(pPlayer, "ambient/levels/labs/coinslot1.wav");
+	filter.MakeReliable();
+	CBaseEntity::EmitSound(filter, pPlayer->entindex(), "ambient/levels/labs/coinslot1.wav");
+	SendTradeWindow(pPlayer, pNPC);
 }
+
+// the player sells his inventory slot <slot>
+static void Trade_Sell(CBasePlayer *pPlayer, int slot)
+{
+	CBaseEntity *pNPC = GetLootTargetForPlayer(pPlayer);
+	KeyValues *pVendor = RPMTrade::VendorDef(pNPC);
+	if (!pVendor)
+		return;
+	KeyValues *v = VendorState(pNPC, pVendor, pPlayer);
+	CUtlVector<CUtlString> mine;
+	InventorySystem::GetInventoryItemStringsForPlayer(pPlayer, mine);
+	if (slot < 0 || slot >= mine.Count())
+	{
+		SendTradeWindow(pPlayer, pNPC);
+		return;
+	}
+	int price = SellPrice(pVendor, mine[slot].Get());
+	if (price < 0)
+	{
+		TradeToast(pPlayer, "Это не продаётся", "Can't sell this", "buttons/button10.wav");
+		SendTradeWindow(pPlayer, pNPC);
+		return;
+	}
+	if (v->GetInt("money") < price)
+	{
+		TradeToast(pPlayer, "У торговца не хватает денег", "The vendor can't afford it", "buttons/button10.wav");
+		SendTradeWindow(pPlayer, pNPC);
+		return;
+	}
+	char cls[256];
+	int bullets = 0;
+	InventorySystem::InvItem inv;
+	inv.bullets = 0;
+	inv.isWeapon = false;
+	inv.weaponClip1 = inv.weaponClip2 = 0;
+	inv.reserveAmmoIndex = -1;
+	inv.reserveAmmoCount = 0;
+	{
+		char raw[256]; int b; bool hb;
+		ParseEntry(mine[slot].Get(), raw, sizeof(raw), b, hb);
+		NormalizeClassname(raw, cls, sizeof(cls));
+	}
+	if (TradesByOne(cls) && InventorySystem::CountItem(pPlayer, cls) > 1)
+	{
+		// a stack: one unit goes to the vendor
+		InventorySystem::TakeItems(pPlayer, cls, 1);
+		inv.classname = cls;
+		bullets = 1;
+	}
+	else
+	{
+		if (!InventorySystem::PopInventoryEntryAtIndex(pPlayer, slot, inv))
+		{
+			SendTradeWindow(pPlayer, pNPC);
+			return;
+		}
+		NormalizeClassname(inv.classname.Get(), cls, sizeof(cls));
+		bullets = inv.bullets;
+		if (IsLootStack(cls) && bullets <= 0)
+			bullets = DefaultStackCount(cls);
+	}
+	CUtlString entry;
+	if (inv.isWeapon || !Q_strnicmp(cls, "weapon_", 7))
+		entry = UTIL_VarArgs("%s:%d:%d:%d:%d:%d", cls, bullets, inv.weaponClip1, inv.weaponClip2, inv.reserveAmmoIndex, inv.reserveAmmoCount);
+	else
+		entry = UTIL_VarArgs("%s:%d", cls, bullets);
+	CUtlVector<CUtlString> items;
+	ParseLootItems(v->GetString("stock"), items);
+	AddLootRawEntry(items, entry.Get());
+	NormalizeLootItems(items);
+	CUtlString stock;
+	BuildLootItems(items, stock);
+	v->SetString("stock", stock.Get());
+	v->SetInt("money", v->GetInt("money") - price);
+	InventorySystem::AddItemToPlayerWithBullets(pPlayer, TradeCurrency(pVendor), price);
+	CPASAttenuationFilter filter(pPlayer, "ambient/levels/labs/coinslot1.wav");
+	filter.MakeReliable();
+	CBaseEntity::EmitSound(filter, pPlayer->entindex(), "ambient/levels/labs/coinslot1.wav");
+	SendTradeWindow(pPlayer, pNPC);
+}
+
+// opening waits a moment: the dialog window closes first (its end releases the modal input)
+static CHandle<CBasePlayer> s_hTradePlayer;
+static EHANDLE s_hTradeNPC;
+static float s_flTradeOpenAt = -1.0f;
+
+class CRPMTradeSystem : public CAutoGameSystemPerFrame
+{
+public:
+	CRPMTradeSystem() : CAutoGameSystemPerFrame("CRPMTradeSystem") {}
+	virtual void LevelInitPreEntity()
+	{
+		s_flTradeOpenAt = -1.0f;
+		for (int i = 0; i <= MAX_PLAYERS; ++i)
+			s_bLootTrade[i] = false;
+	}
+	virtual void FrameUpdatePostEntityThink()
+	{
+		if (s_flTradeOpenAt < 0.0f || gpGlobals->curtime < s_flTradeOpenAt)
+			return;
+		s_flTradeOpenAt = -1.0f;
+		if (s_hTradePlayer.Get() && s_hTradeNPC.Get() && s_hTradeNPC->IsAlive())
+			SendTradeWindow(s_hTradePlayer.Get(), s_hTradeNPC.Get());
+	}
+};
+static CRPMTradeSystem g_RPMTradeSystem;
+
+bool RPMTrade::Open(CBasePlayer *pPlayer, CBaseEntity *pNPC)
+{
+	if (!pPlayer || !pNPC || !VendorDef(pNPC))
+	{
+		if (pNPC)
+			Warning("RPMTrade: %s is not a vendor (no \"vendor\" block in scripts/npcs)\n", STRING(pNPC->GetEntityName()));
+		return false;
+	}
+	s_hTradePlayer = pPlayer;
+	s_hTradeNPC = pNPC;
+	s_flTradeOpenAt = gpGlobals->curtime + 0.15f;
+	return true;
+}
+
+static void CC_RPM_Trade(const CCommand &args)
+{
+	CBasePlayer *pPlayer = UTIL_GetCommandClient();
+	if (!pPlayer || args.ArgC() < 2)
+	{
+		Msg("rpm_trade <targetname of a vendor NPC>\n");
+		return;
+	}
+	CBaseEntity *pNPC = gEntList.FindEntityByName(NULL, args.Arg(1));
+	if (!pNPC)
+	{
+		Msg("rpm_trade: no entity '%s'\n", args.Arg(1));
+		return;
+	}
+	RPMTrade::Open(pPlayer, pNPC);
+}
+static ConCommand rpm_trade_cc("rpm_trade", CC_RPM_Trade, "HL2RPM: rpm_trade <vendor> - open the trade window of a vendor NPC", FCVAR_CHEAT);
+
+static void CC_RPM_Vendor_Dump(const CCommand &args)
+{
+	KeyValues *vs = RPMState::Section("vendors");
+	for (KeyValues *k = vs->GetFirstTrueSubKey(); k; k = k->GetNextTrueSubKey())
+		Msg("vendor %s: money %d, restock at %.1f h (now %.1f), stock '%s'\n", k->GetName(), k->GetInt("money"), k->GetFloat("restock_at"),
+			RPMState::GameHours(), k->GetString("stock"));
+}
+static ConCommand rpm_vendor_dump_cc("rpm_vendor_dump", CC_RPM_Vendor_Dump, "HL2RPM: print the vendors' stock and money");
 
 static void CC_Loot_PutSlot(const CCommand &args)
 {
@@ -439,6 +864,11 @@ static void CC_Loot_PutSlot(const CCommand &args)
 		return;
 
 	int slot = atoi(args.Arg(1));
+	if (IsTrading(pPlayer))
+	{
+		Trade_Sell(pPlayer, slot);
+		return;
+	}
 	LootDevMsg("[loot] put_slot player=%d ent=%d slot=%d\n", pPlayer->entindex(), pLootEnt->entindex(), slot);
 	InventorySystem::InvItem inv;
 	if (!InventorySystem::PopInventoryEntryAtIndex(pPlayer, slot, inv))
@@ -458,8 +888,8 @@ static void CC_Loot_PutSlot(const CCommand &args)
 	}
 
 	int bullets = inv.bullets;
-	if (InventorySystem::IsAmmoItem(cls) && bullets <= 0)
-		bullets = InventorySystem::GetBulletsPerAmmoItem(cls);
+	if (IsLootStack(cls) && bullets <= 0)
+		bullets = DefaultStackCount(cls);
 
 	CUtlString entry;
 	if (inv.isWeapon || !Q_strnicmp(cls, "weapon_", 7))
@@ -491,6 +921,11 @@ static void CC_Loot_TakeSlot(const CCommand &args)
 		return;
 
 	int slot = atoi(args.Arg(1));
+	if (IsTrading(pPlayer))
+	{
+		Trade_Buy(pPlayer, slot);
+		return;
+	}
 	LootDevMsg("[loot] take_slot player=%d ent=%d slot=%d\n", pPlayer->entindex(), pLootEnt->entindex(), slot);
 	CUtlVector<CUtlString> items;
 	ParseLootItems(LootTarget_GetLootItems(pLootEnt), items);
@@ -518,24 +953,14 @@ static void CC_Loot_TakeSlot(const CCommand &args)
 	NormalizeLootItems(items);
 	LootDebugDumpItems("take_slot after", items);
 
-	if (InventorySystem::IsAmmoItem(cls))
-	{
-		int b = bullets;
-		if (!hasBullets || b <= 0)
-			b = InventorySystem::GetBulletsPerAmmoItem(cls);
-		InventorySystem::AddItemToPlayerWithBullets(pPlayer, cls, b);
-	}
-	else if (isWeapon)
-	{
+	if (isWeapon && !InventorySystem::IsAmmoItem(cls))
 		InventorySystem::AddWeaponToPlayer(pPlayer, cls, clip1, clip2, reserveIdx, reserveCount);
-	}
 	else
-	{
-		InventorySystem::AddItemToPlayer(pPlayer, cls);
-	}
+		GiveLootEntry(pPlayer, cls, bullets, hasBullets);
 
 	CUtlString newLoot;
 	BuildLootItems(items, newLoot);
+	RPMTheft::OnTake(pPlayer, pLootEnt, RPMLoot_GetOwner(pLootEnt));
 	LootTarget_SetLootItems(pLootEnt, newLoot.Get());
 	OpenLootForPlayer(pPlayer, pLootEnt);
 }
@@ -545,12 +970,21 @@ void OpenLootForPlayer(CBasePlayer *pPlayer, CBaseEntity *pLootEnt)
     if (!pPlayer || !pLootEnt)
         return;
 
+	// HL2RPM: loot lists ("list:<id>") are rolled the first time the loot is opened
+	{
+		const char *raw = LootTarget_GetLootItems(pLootEnt);
+		CUtlString rolled;
+		if (raw && RPMLoot::Resolve(raw, rolled, pPlayer))
+			LootTarget_SetLootItems(pLootEnt, rolled.Get());
+	}
+
 	LootDevMsg("[loot] open player=%d ent=%d loot='%s'\n", pPlayer->entindex(), pLootEnt->entindex(), LootTarget_GetLootItems(pLootEnt) ? LootTarget_GetLootItems(pLootEnt) : "(null)");
 
 	int idx = pPlayer->entindex();
 	if (idx > 0 && idx <= MAX_PLAYERS)
 	{
 		s_LootTargets[idx] = pLootEnt;
+		s_bLootTrade[idx] = false;
 	}
 
 	CUtlVector<CUtlString> leftItems;
@@ -608,6 +1042,8 @@ static void CC_Loot_Put(const CCommand &args)
 	CBasePlayer *pPlayer = UTIL_GetCommandClient();
 	if (!pPlayer)
 		return;
+	if (IsTrading(pPlayer))		// HL2RPM: a vendor's window moves items only through buy / sell
+		return;
 	CBaseEntity *pLootEnt = GetLootTargetForPlayer(pPlayer);
 	if (!pLootEnt)
 		return;
@@ -640,6 +1076,8 @@ static void CC_Loot_Take(const CCommand &args)
 		return;
 	CBasePlayer *pPlayer = UTIL_GetCommandClient();
 	if (!pPlayer)
+		return;
+	if (IsTrading(pPlayer))		// HL2RPM: a vendor's window moves items only through buy / sell
 		return;
 	CBaseEntity *pLootEnt = GetLootTargetForPlayer(pPlayer);
 	if (!pLootEnt)
@@ -683,22 +1121,13 @@ static void CC_Loot_Take(const CCommand &args)
 	items.Remove(match);
 	NormalizeLootItems(items);
 
-	if (InventorySystem::IsAmmoItem(classname))
-	{
-		if (!hasBullets || bullets <= 0)
-			bullets = InventorySystem::GetBulletsPerAmmoItem(classname);
-		InventorySystem::AddItemToPlayerWithBullets(pPlayer, classname, bullets);
-	}
-	else if (isWeapon)
-	{
+	if (isWeapon)
 		InventorySystem::AddWeaponToPlayer(pPlayer, classname, clip1, clip2, reserveIdx, reserveCount);
-	}
 	else
-	{
-		InventorySystem::AddItemToPlayer(pPlayer, classname);
-	}
+		GiveLootEntry(pPlayer, classname, bullets, hasBullets);
 	CUtlString newLoot;
 	BuildLootItems(items, newLoot);
+	RPMTheft::OnTake(pPlayer, pLootEnt, RPMLoot_GetOwner(pLootEnt));
 	LootTarget_SetLootItems(pLootEnt, newLoot.Get());
 	OpenLootForPlayer(pPlayer, pLootEnt);
 }
@@ -708,6 +1137,8 @@ static void CC_Loot_PutAll(const CCommand &args)
 {
 	CBasePlayer *pPlayer = UTIL_GetCommandClient();
 	if (!pPlayer)
+		return;
+	if (IsTrading(pPlayer))		// HL2RPM: a vendor's window moves items only through buy / sell
 		return;
 	CBaseEntity *pLootEnt = GetLootTargetForPlayer(pPlayer);
 	if (!pLootEnt)
@@ -760,6 +1191,8 @@ static void CC_Loot_TakeAll(const CCommand &args)
 	CBasePlayer *pPlayer = UTIL_GetCommandClient();
 	if (!pPlayer)
 		return;
+	if (IsTrading(pPlayer))		// HL2RPM: a vendor's window moves items only through buy / sell
+		return;
 	CBaseEntity *pLootEnt = GetLootTargetForPlayer(pPlayer);
 	if (!pLootEnt)
 		return;
@@ -782,23 +1215,13 @@ static void CC_Loot_TakeAll(const CCommand &args)
 		if (!cls[0])
 			continue;
 
-		if (InventorySystem::IsAmmoItem(cls))
-		{
-			int b = bullets;
-			if (!hasBullets || b <= 0)
-				b = InventorySystem::GetBulletsPerAmmoItem(cls);
-			InventorySystem::AddItemToPlayerWithBullets(pPlayer, cls, b);
-		}
-		else if (isWeapon)
-		{
+		if (isWeapon && !InventorySystem::IsAmmoItem(cls))
 			InventorySystem::AddWeaponToPlayer(pPlayer, cls, clip1, clip2, reserveIdx, reserveCount);
-		}
 		else
-		{
-			InventorySystem::AddItemToPlayer(pPlayer, cls);
-		}
+			GiveLootEntry(pPlayer, cls, bullets, hasBullets);
 	}
 
+	RPMTheft::OnTake(pPlayer, pLootEnt, RPMLoot_GetOwner(pLootEnt));
 	LootTarget_SetLootItems(pLootEnt, "");
 	OpenLootForPlayer(pPlayer, pLootEnt);
 }

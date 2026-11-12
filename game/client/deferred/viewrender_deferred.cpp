@@ -40,9 +40,12 @@
 #include "deferred/deferred_taa.h"
 #include "deferred/deferred_worldmesh.h"
 #include "deferred/deferred_occlusion.h"
+#include "deferred/deferred_gpuprof.h"
+#include "deferred/deferred_shadowcache.h"
 #include "detailobjectsystem.h"
 #include "c_func_reflective_glass.h"
 #include "hl2rpm_vitals.h"
+#include "hl2rpm_itempreview.h"
 
 #include "vgui_int.h"
 #include "vgui/IPanel.h"
@@ -581,6 +584,13 @@ private:
 	bool			m_bReflection;
 };
 
+// HL2RPM: the G-buffer pass and the composite of the same view drew from world lists built twice
+// - the walk of the tree, the surfaces of every leaf in sight, their sort: ~2.4 ms of the main thread
+// each on an open map. The G-buffer view now puts its lists into the engine's world list cache
+// (r_worldlistcache, keyed by the view), and the composite - which always looked there - takes them.
+static ConVar r_deferred_gbuffer_listcache( "r_deferred_gbuffer_listcache", "1", FCVAR_NONE,
+	"HL2RPM: the G-buffer pass shares its world lists with the composite of the same view (0 = each builds its own)" );
+
 class CGBufferView : public CBaseWorldViewDeferred
 {
 	DECLARE_CLASS( CGBufferView, CBaseWorldViewDeferred );
@@ -588,6 +598,8 @@ public:
 	CGBufferView(CViewRender *pMainView) : CBaseWorldViewDeferred( pMainView )
 	{
 	}
+
+	virtual bool	ShouldCacheLists() { return r_deferred_gbuffer_listcache.GetBool(); }
 
 	void			Setup( const CViewSetup &view, bool bDrewSkybox );
 	void			Draw();
@@ -686,6 +698,10 @@ public:
 	virtual void	CommitData(){};
 
 	virtual int		GetShadowMode() = 0;
+
+	// HL2RPM: after the casters are collected - true = the map from an earlier frame still shows
+	// them, nothing is drawn (deferred_shadowcache.cpp)
+	virtual bool	KeepsLastShadow() { return false; }
 
 	virtual bool	IsShadowMapView() const { return true; }
 
@@ -950,9 +966,18 @@ public:
 		return DEFERRED_SHADOW_MODE_PROJECTED;
 	};
 
+	// HL2RPM: the lamp's map kept between frames (deferred_shadowcache.cpp), -1 = the shared slot
+	void			SetCacheEntry( int iEntry ) { m_iCacheEntry = iEntry; }
+	virtual bool	KeepsLastShadow()
+	{
+		return m_iCacheEntry >= 0 &&
+			DeferredShadowCache_IsCurrent( m_iCacheEntry, m_pLight, width, m_bRenderablesListBuilt ? m_pRenderablesList : NULL );
+	}
+
 private:
 	def_light_t *m_pLight;
 	int m_iIndex;
+	int m_iCacheEntry = -1;
 };
 
 //-----------------------------------------------------------------------------
@@ -1151,6 +1176,22 @@ bool CBaseWorldViewDeferred::AdjustView( float waterHeight )
 // every face casts.
 static ConVar r_deferred_shadow_worldlists( "r_deferred_shadow_worldlists", "1", 0, "Shadow views keep world faces turned away from the light (single-sided walls with nodraw backs cast shadows)" );
 
+// HL2RPM: a shadow view whose world is drawn from the renderer's own meshes takes only the leaves in
+// its frustum (CRendering3dView::BuildLeafListsOnly), and a lamp's shadow views need no visibility
+// setup of their own then (DrawLightShadowView)
+static ConVar r_deferred_shadow_leaflists( "r_deferred_shadow_leaflists", "1", FCVAR_NONE,
+	"HL2RPM: shadow views drawing the world from the renderer's meshes collect their renderables from the leaves "
+	"in their frustum - no engine world lists, no visibility setup per lamp (0 = the engine's world lists)" );
+extern void ClientLeafSystem_SetNoPortalTest( bool bNoTest );
+
+static bool ShadowLeafListsUsable( bool bOrtho )
+{
+	if ( !r_deferred_shadow_leaflists.GetBool() || DeferredWorldMesh_AlsoEngine() || !DeferredWorldMesh_IsReady() )
+		return false;
+	const int iMeshMode = DeferredWorldMesh_Mode();
+	return iMeshMode >= 2 || ( iMeshMode == 1 && bOrtho );
+}
+
 void CBaseWorldViewDeferred::DrawSetup( float waterHeight, int nSetupFlags, float waterZAdjust, int iForceViewLeaf,
 	bool bShadowDepth )
 {
@@ -1171,22 +1212,34 @@ void CBaseWorldViewDeferred::DrawSetup( float waterHeight, int nSetupFlags, floa
 	// HL2RPM: the leaves of the map behind the walls are left out of the main view's world lists
 	// (not the shadow views': what the eye can't see still casts its shadow into view)
 	const bool bOccludeWorld = !IsShadowMapView() && !bDrawReflection;
-	if ( bOccludeWorld )
-		DeferredOcclusion_HideWorldLeaves( origin, angles );
-	BuildWorldRenderLists( bDrawEntities, iForceViewLeaf, ShouldCacheLists(), bShadowDepth && r_deferred_shadow_worldlists.GetBool(), bDrawReflection ? &waterHeight : NULL );
-	if ( bOccludeWorld )
-		DeferredOcclusion_RestoreWorldLeaves();
+	bool bLeafLists = false;
+	{
+		CCPUProfScope profLists( IsShadowMapView() ? "sh_worldlists" : "v_worldlists" );
+		if ( bShadowDepth && IsShadowMapView() && ShadowLeafListsUsable( m_bOrtho ) )
+			bLeafLists = BuildLeafListsOnly();
+		if ( !bLeafLists )
+		{
+			if ( bOccludeWorld )
+				DeferredOcclusion_HideWorldLeaves( origin, angles );
+			BuildWorldRenderLists( bDrawEntities, iForceViewLeaf, ShouldCacheLists(), bShadowDepth && r_deferred_shadow_worldlists.GetBool(), bDrawReflection ? &waterHeight : NULL );
+			if ( bOccludeWorld )
+				DeferredOcclusion_RestoreWorldLeaves();
+		}
+	}
 
 	PruneWorldListInfo();
 
 	m_bRenderablesListBuilt = bDrawEntities;
 	if ( bDrawEntities )
 	{
+		CCPUProfScope profRLists( IsShadowMapView() ? "sh_rlists" : "v_rlists" );
 		const bool bOptimized = bShadowDepth;
 		// HL2RPM: what the walls of the map hide from this camera is left out of the lists (not
 		// in the shadow views: what the eye can't see still casts its shadow into view)
 		DeferredOcclusion_SetCollecting( !IsShadowMapView() && DeferredOcclusion_IsForView( origin, angles ) );
+		ClientLeafSystem_SetNoPortalTest( bLeafLists );
 		BuildRenderableRenderLists( bOptimized ? VIEW_SHADOW_DEPTH_TEXTURE : savedViewID );
+		ClientLeafSystem_SetNoPortalTest( false );
 		DeferredOcclusion_SetCollecting( false );
 
 		if ( bShadowDepth )
@@ -1278,6 +1331,7 @@ void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, f
 	// HL2RPM: the world of a shadow map comes from the renderer's own meshes of the map
 	// (deferred_worldmesh.cpp): the engine's world lists drop materials past 127 mesh changes -
 	// on a map with hundreds of materials walls cast no shadow in the views that see all of it
+	const bool bProfMain = !bShadowDepth && IsMainCompositeView();
 	bool bWorldDrawn = false;
 	if ( IsShadowMapView() )
 	{
@@ -1286,13 +1340,21 @@ void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, f
 		{
 			if ( DeferredWorldMesh_AlsoEngine() )
 				DrawWorldDeferred( waterZAdjust );
-			bWorldDrawn = DeferredWorldMesh_DrawShadowCasters();
+			{
+				CPUPROF_SCOPE( "sh_worldmesh" );
+				bWorldDrawn = DeferredWorldMesh_DrawShadowCasters();
+			}
 			if ( DeferredWorldMesh_AlsoEngine() )
 				bWorldDrawn = true;
 		}
 	}
-	if ( !bWorldDrawn )
+	// (a view with leaf lists only has no engine world list to draw)
+	if ( !bWorldDrawn && m_pWorldRenderList )
+	{
+		CCPUProfScope profWorld( bShadowDepth ? "sh_world" : "v_world" );
+		GPUPROF_SCOPE_IF( "c_world", bProfMain );
 		DrawWorldDeferred( waterZAdjust );
+	}
 
 	if ( bShadowDepth && iOldDrawDecals >= 0 )
 		r_drawdecals.SetValue( iOldDrawDecals );
@@ -1310,7 +1372,11 @@ void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, f
 	const bool bHoldRopes = bShadowDepth || IsMainGBufferView() || bCompositeOpaqueParts;
 	g_bDeferredHoldRopes = bHoldRopes;
 	if ( m_bRenderablesListBuilt && m_pRenderablesList )
+	{
+		CCPUProfScope profProps( bShadowDepth ? "sh_props" : "v_props" );
+		GPUPROF_SCOPE_IF( "c_props", bProfMain );
 		DrawOpaqueRenderablesDeferred( false );
+	}
 	g_bDeferredHoldRopes = false;
 
 	// HL2RPM: the shadows of the grass (the sun's nearest cascades)
@@ -1327,6 +1393,7 @@ void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, f
 	}
 	else if ( bCompositeOpaqueParts )
 	{
+		GPUPROF_SCOPE_IF( "c_sprites", bProfMain );
 		DrawTranslucentModelsOpaqueParts( true );
 		bDetailSpritesDrawn = DrawDetailSpritesOpaque();
 	}
@@ -1344,7 +1411,10 @@ void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, f
 			pPostContext->SetHeightClipMode( MATERIAL_HEIGHTCLIPMODE_DISABLE );
 		pPostContext.SafeRelease();
 
-		OnPostOpaque();
+		{
+			GPUPROF_SCOPE_IF( "c_postopaque", bProfMain );
+			OnPostOpaque();
+		}
 
 		if ( bCompositeOpaqueParts )
 			DeferredWorldMesh_DebugDraw();
@@ -1374,8 +1444,11 @@ void CBaseWorldViewDeferred::DrawExecute( float waterHeight, view_id_t viewID, f
 				if ( bCompositeOpaqueParts && m_bRenderablesListBuilt && m_pRenderablesList )
 					RopeManager()->DrawRenderCache( false );
 
-				DrawTranslucentRenderables( false, false );
-				DrawNoZBufferTranslucentRenderables();
+				{
+					GPUPROF_SCOPE_IF( "c_translucent", bProfMain );
+					DrawTranslucentRenderables( false, false );
+					DrawNoZBufferTranslucentRenderables();
+				}
 
 				if ( bWeatherFog )
 					EnableWorldFog();
@@ -1811,6 +1884,7 @@ void CGlassViewDeferred::PopView()
 void CGlassViewDeferred::Draw()
 {
 	VPROF( "CGlassViewDeferred::Draw" );
+	GPUPROF_SCOPE( "glassview" );
 
 	const view_id_t nSaveViewID = CurrentViewID();
 	const Vector vecSaveOrigin = CurrentViewOrigin();
@@ -2371,7 +2445,8 @@ void CBaseShadowView::Draw()
 
 	DrawSetup( 0, m_DrawFlags, 0, -1, true );
 
-	DrawExecute( 0, CurrentViewID(), 0, true );
+	if ( !KeepsLastShadow() )
+		DrawExecute( 0, CurrentViewID(), 0, true );
 
 	pRenderContext.GetFrom( materials );
 	pRenderContext->SetFloatRenderingParameter( FLOAT_RENDERPARM_DEFERRED_SHADOW_RADIOSITY, 0.0f );
@@ -2862,6 +2937,9 @@ void CDeferredViewRender::LevelInit()
 	BaseClass::LevelInit();
 
 	ResetCascadeDelay();
+	DeferredShadowCache_InvalidateAll();
+	extern void ClearShadowLeafCache();
+	ClearShadowLeafCache();
 }
 
 // HL2RPM: staggered cascade updates. A cascade that isn't re-rendered this frame keeps
@@ -2929,17 +3007,30 @@ void CDeferredViewRender::ViewDrawSceneDeferred( const CViewSetup &view, int nCl
 	bool bDrew3dSkybox = false;
 	SkyboxVisibility_t nSkyboxVisible = SKYBOX_NOT_VISIBLE;
 
-	ViewDrawGBuffer( view, bDrew3dSkybox, nSkyboxVisible, bDrawViewModel );
+	{
+		GPUPROF_SCOPE( "gbuffer" );
+		CPUPROF_SCOPE( "gbuffer" );
+		ViewDrawGBuffer( view, bDrew3dSkybox, nSkyboxVisible, bDrawViewModel );
+	}
 
-	PerformLighting( view );
+	{
+		CPUPROF_SCOPE( "lighting" );
+		PerformLighting( view );
+	}
 
 	// HL2RPM: volumetric clouds, read by the sky shader during the composite
-	WeatherRender_Clouds( view );
+	{
+		GPUPROF_SCOPE( "clouds" );
+		WeatherRender_Clouds( view );
+	}
 
 #if DEFCFG_DEFERRED_SHADING
 	ViewCombineDeferredShading( view, viewID );
 #else
-	ViewDrawComposite( view, bDrew3dSkybox, nSkyboxVisible, nClearFlags, viewID, bDrawViewModel );
+	{
+		CPUPROF_SCOPE( "composite" );
+		ViewDrawComposite( view, bDrew3dSkybox, nSkyboxVisible, nClearFlags, viewID, bDrawViewModel );
+	}
 #endif
 
 	// other views (monitors, cubemaps...) must not sample this view's screen-space clouds
@@ -2958,7 +3049,12 @@ void CDeferredViewRender::ViewDrawSceneDeferred( const CViewSetup &view, int nCl
 	g_ShaderEditorSystem->UpdateSkymask( bDrew3dSkybox, view.x, view.y, view.width, view.height );
 	#endif
 
-	GetLightingManager()->RenderVolumetrics( view );
+	{
+		GPUPROF_SCOPE( "volumetrics" );
+		GetLightingManager()->RenderVolumetrics( view );
+	}
+
+	GPUPROF_SCOPE( "effects" );
 
 	// Disable fog for the rest of the stuff
 	DisableFog();
@@ -3046,8 +3142,11 @@ void CDeferredViewRender::ViewDrawGBuffer( const CViewSetup &view, bool &bDrew3d
 void CDeferredViewRender::ViewDrawComposite( const CViewSetup &view, bool &bDrew3dSkybox, SkyboxVisibility_t &nSkyboxVisible,
 		int nClearFlags, view_id_t viewID, bool bDrawViewModel )
 {
-	UpdateSkyAtmoLUT();
-	DrawSkyboxComposite( view, bDrew3dSkybox );
+	{
+		GPUPROF_SCOPE( "sky3d" );
+		UpdateSkyAtmoLUT();
+		DrawSkyboxComposite( view, bDrew3dSkybox );
+	}
 
 	// this allows the refract texture to be updated once per *scene* on 360
 	// (e.g. once for a monitor scene and once for the main scene)
@@ -3086,7 +3185,10 @@ void CDeferredViewRender::ViewDrawComposite( const CViewSetup &view, bool &bDrew
 
 	ParticleMgr()->IncrementFrameCode();
 
-	DrawWorldComposite( view, nClearFlags, drawSkybox );
+	{
+		GPUPROF_SCOPE( "composite" );
+		DrawWorldComposite( view, nClearFlags, drawSkybox );
+	}
 
 	#ifdef SHADEREDITOR
 	VisibleFogVolumeInfo_t fogVolumeInfo;
@@ -3098,6 +3200,7 @@ void CDeferredViewRender::ViewDrawComposite( const CViewSetup &view, bool &bDrew
 	SetupCurrentView( CurrentViewOrigin(), CurrentViewAngles(), (view_id_t)nShaderEditorViewID );
 	#endif
 
+	GPUPROF_SCOPE( "viewmodel" );
 	DrawViewModels( view, bDrawViewModel, false );
 }
 
@@ -3565,7 +3668,11 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 		// previous matrix - sky light, wet surfaces and rain shifted by the distance walked
 		// for one frame (a flash over everything near walls and roofs, only when moving)
 		if ( !r_deferred_rainmap_debug_late.GetBool() )
+		{
+			GPUPROF_SCOPE( "rainmap" );
+			CPUPROF_SCOPE( "rainmap" );
 			RenderRainOcclusion( view );
+		}
 
 		// HL2RPM: weather constants for this frame (clouds, sky, fog, rain...)
 		WeatherRender_CommitFrame( view, lightDataState );
@@ -3585,6 +3692,8 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 				Vector origins[2] = { view.origin, view.origin + lightDataState.vecLight.AsVector3D() * 1024 };
 				render->ViewSetupVis( r_csm_novis.GetBool(), 2, origins );
 
+				GPUPROF_SCOPE( "csm" );
+				CPUPROF_SCOPE( "csm" );
 				RenderCascadedShadows( view, bRadiosityEnabled );
 			}
 		}
@@ -3609,8 +3718,15 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 	// sky visibility), read by the global light pass
 	// (the SSAO target first: its sky visibility is what the GI estimates the light beyond its
 	// probes from)
-	DeferredSSAO_Render( lightingView );
-	DeferredGI_Render( lightingView, giLightState );
+	{
+		GPUPROF_SCOPE( "ssao" );
+		DeferredSSAO_Render( lightingView );
+	}
+	{
+		GPUPROF_SCOPE( "gi" );
+		CPUPROF_SCOPE( "gi" );
+		DeferredGI_Render( lightingView, giLightState );
+	}
 
 	CMatRenderContextPtr pRenderContext( materials );
 	pRenderContext->PushRenderTargetAndViewport( GetDefRT_Lightaccum() );
@@ -3621,13 +3737,20 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 		pRenderContext->ClearBuffers( true, false );
 	}
 	else
+	{
+		GPUPROF_SCOPE( "sun" );
 		DrawLightPassFullscreen(
 			GetDeferredManager()->GetDeferredMaterial( bDrawDebugShadow ? DEF_MAT_DEBUG_SHADOW_ORTHO : DEF_MAT_LIGHT_GLOBAL ),
 			lightingView.width, lightingView.height );
+	}
 
 	pRenderContext.SafeRelease();
 
-	GetLightingManager()->RenderLights( lightingView, this );
+	{
+		GPUPROF_SCOPE( "lamps" );
+		CPUPROF_SCOPE( "lamps" );
+		GetLightingManager()->RenderLights( lightingView, this );
+	}
 
 	if ( bRadiosityEnabled )
 		EndRadiosity( view );
@@ -4084,6 +4207,8 @@ void CDeferredViewRender::RenderRainOcclusion( const CViewSetup &view )
 
 void CDeferredViewRender::DrawLightShadowView( const CViewSetup &view, int iDesiredShadowmap, def_light_t *l )
 {
+	GPUPROF_SCOPE( "lampshadow" );
+	CPUPROF_SCOPE( "lampshadow" );
 	CViewSetup setup;
 	setup.origin = l->pos;
 	setup.angles = l->ang;
@@ -4091,8 +4216,14 @@ void CDeferredViewRender::DrawLightShadowView( const CViewSetup &view, int iDesi
 	setup.m_flAspectRatio = 1;
 	setup.x = setup.y = 0;
 
-	Vector origins[2] = { view.origin, l->pos };
-	render->ViewSetupVis( false, 2, origins );
+	// (the views collect their casters from the leaves in their frustum, without the visibility data:
+	// with the engine's world lists they needed what the camera and the light see set up first)
+	if ( !ShadowLeafListsUsable( false ) )
+	{
+		CPUPROF_SCOPE( "ls_vis" );
+		Vector origins[2] = { view.origin, l->pos };
+		render->ViewSetupVis( false, 2, origins );
+	}
 
 	switch ( l->iLighttype )
 	{
@@ -4125,10 +4256,18 @@ void CDeferredViewRender::DrawLightShadowView( const CViewSetup &view, int iDesi
 		break;
 	case DEFLIGHTTYPE_SPOT:
 		{
-			CRefPtr<CSpotLightShadowView> pProjView = new CSpotLightShadowView( this, l, iDesiredShadowmap );
+			// HL2RPM: a map of its own kept between frames if the pool has one free
+			// (deferred_shadowcache.cpp); the light pass reads the slot - give it this lamp's map
+			const int iCache = DeferredShadowCache_Acquire( l );
+			ITexture *pDepth = ( iCache >= 0 ) ? DeferredShadowCache_GetTexture( iCache ) : GetShadowDepthRT_Proj( iDesiredShadowmap );
 
-			pProjView->Setup( setup, GetShadowDepthRT_Proj( iDesiredShadowmap ), GetShadowColorRT_Proj( iDesiredShadowmap ) );
+			CRefPtr<CSpotLightShadowView> pProjView = new CSpotLightShadowView( this, l, iDesiredShadowmap );
+			pProjView->SetCacheEntry( iCache );
+			pProjView->Setup( setup, pDepth, GetShadowColorRT_Proj( iDesiredShadowmap ) );
 			AddViewToScene( pProjView );
+
+			ITexture *pSample = ( iCache >= 0 ) ? pDepth : GetShadowSampleRT_Proj( iDesiredShadowmap );
+			QUEUE_FIRE( CommitTexture_ProjectedDepth, iDesiredShadowmap, pSample );
 		}
 		break;
 	}
@@ -4279,6 +4418,28 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 
 	CViewSetup worldView = view;
 
+	// HL2RPM: frame profiler (r_hl2rpm_gpuprof) - the outermost view of the frame only
+	static int s_nRenderViewDepth = 0;
+	const bool bProfFrame = ( s_nRenderViewDepth++ == 0 );
+
+	// HL2RPM: render scale - the 3D view is drawn into the smaller frame _rt_hl2rpm_scene (all the
+	// deferred targets have its size), the TAA brings it up to the screen (DeferredTAA_DrawUpscale);
+	// the post-processing, the fades and the HUD after it are drawn at the size of the screen
+	ITexture *pSceneRT = NULL;
+	if ( bProfFrame && DeferredRenderScale_IsActive() && !building_cubemaps.GetBool() && view.m_eStereoEye == STEREO_EYE_MONO )
+	{
+		int iFrameW, iFrameH;
+		DeferredRenderScale_GetFrameSize( iFrameW, iFrameH );
+		if ( iFrameW < view.width || iFrameH < view.height )
+		{
+			pSceneRT = GetDefRT_Scene();
+			worldView.x = 0;
+			worldView.y = 0;
+			worldView.width = iFrameW;
+			worldView.height = iFrameH;
+		}
+	}
+
 	CLightingEditor *pLightEditor = GetLightingEditor();
 
 	if ( pLightEditor->IsEditorActive() && !building_cubemaps.GetBool() )
@@ -4291,6 +4452,10 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	DeferredTAA_JitterView( worldView, worldView.m_bDoBloomAndToneMapping && !building_cubemaps.GetBool() );
 
 	m_CurrentView = worldView;
+
+	if ( bProfFrame )
+		GPUProf_FrameBegin();
+	CCPUProfScope profRenderView( bProfFrame ? "renderview" : "renderview_nested" );
 
 	C_BaseAnimating::AutoAllowBoneAccess boneaccess( true, true );
 	VPROF( "CViewRender::RenderView" );
@@ -4311,17 +4476,29 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	pRenderContext.SafeRelease();
 
 	// clear happens here probably
+	extern ITexture *g_pMain3DViewTarget;
+	g_pMain3DViewTarget = pSceneRT;
 	SetupMain3DView( worldView, nClearFlags );
+	g_pMain3DViewTarget = NULL;
 
 	SetupCurrentView( worldView.origin, worldView.angles, VIEW_MAIN );
 
 	unsigned int visFlags;
 	SetupVis( worldView, visFlags, NULL );
 
-	ProcessDeferredGlobals( worldView );
+	{
+		CPUPROF_SCOPE( "globals" );
+		ProcessDeferredGlobals( worldView );
+	}
 	// HL2RPM: the occlusion buffer of the frame - before the lights are culled and the lists built
-	DeferredOcclusion_Setup( worldView );
-	GetLightingManager()->LightSetup( worldView );
+	{
+		CPUPROF_SCOPE( "occlusion" );
+		DeferredOcclusion_Setup( worldView );
+	}
+	{
+		CPUPROF_SCOPE( "lightsetup" );
+		GetLightingManager()->LightSetup( worldView );
+	}
 
 	// Force it to clear the framebuffer if they're in solid space.
 	if ( ( nClearFlags & VIEW_CLEAR_COLOR ) == 0 )
@@ -4371,6 +4548,7 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	{
 		if ( ( mat_motion_blur_enabled.GetInt() ) && ( g_pMaterialSystemHardwareConfig->GetDXSupportLevel() >= 90 ) )
 		{
+			GPUPROF_SCOPE( "motionblur" );
 			pRenderContext.GetFrom( materials );
 			{
 				PIXEVENT( pRenderContext, "DoImageSpaceMotionBlur" );
@@ -4409,6 +4587,7 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 
 	if ( !building_cubemaps.GetBool() && worldView.m_bDoBloomAndToneMapping )
 	{
+		GPUPROF_SCOPE( "enginepost" );
 		pRenderContext.GetFrom( materials );
 		{
 			PIXEVENT( pRenderContext, "DoEnginePostProcessing" );
@@ -4433,22 +4612,48 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	if ( !building_cubemaps.GetBool() )
 	{
 		// (the depth of field first: TAA evens out the noise of its gather)
-		DeferredPostFX_DrawDoF( worldView );
+		{
+			GPUPROF_SCOPE( "dof" );
+			DeferredPostFX_DrawDoF( worldView );
+		}
 
-		if ( DeferredTAA_IsFrameActive() )
+		GPUPROF_SCOPE( "aa" );
+		if ( pSceneRT )
+		{
+			// (FXAA, if asked for, at the size of the frame first; then up to the screen - the back
+			// buffer stays the render target until the end of the post-processing below)
+			if ( !DeferredTAA_IsFrameActive() && DeferredAA_GetMode() == 1 )
+				DrawDeferredFXAA( worldView );
+			DeferredTAA_DrawUpscale( worldView, view, pSceneRT );
+		}
+		else if ( DeferredTAA_IsFrameActive() )
 			DeferredTAA_Draw( worldView );
 		else if ( DeferredAA_GetMode() >= 1 )
 			DrawDeferredFXAA( worldView );
 	}
 
+	// (from here on the screen: the frame was brought up to it)
+	CViewSetup postView = worldView;
+	if ( pSceneRT )
+	{
+		postView.x = view.x;
+		postView.y = view.y;
+		postView.width = view.width;
+		postView.height = view.height;
+	}
+
 	// HL2RPM: eye adaptation, bloom, grading, lens effects (the HUD comes after)
 	if ( !building_cubemaps.GetBool() )
-		DeferredPostFX_Draw( worldView );
+	{
+		GPUPROF_SCOPE( "postfx" );
+		CPUPROF_SCOPE( "postfx" );
+		DeferredPostFX_Draw( postView );
+	}
 
 	// HL2RPM: the view of a wounded man without the suit - red edges, vessels, clouding
 	// (hl2rpm_vitals.cpp); on the finished frame, under the engine's fades and the HUD
 	if ( !building_cubemaps.GetBool() && worldView.m_bDoBloomAndToneMapping )
-		HL2RPM_Vitals_DrawScreenEffect( worldView.x, worldView.y, worldView.width, worldView.height );
+		HL2RPM_Vitals_DrawScreenEffect( postView.x, postView.y, postView.width, postView.height );
 
 	// Overlay screen fade on entire screen (see above: on the finished frame)
 	{
@@ -4457,7 +4662,7 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 		vieweffects->GetFadeParams( &color[0], &color[1], &color[2], &color[3], &blend );
 		IMaterial* pMaterial = blend ? m_ModulateSingleColor : m_TranslucentSingleColor;
 		render->ViewDrawFade( color, pMaterial );
-		PerformScreenOverlay( worldView.x, worldView.y, worldView.width, worldView.height );
+		PerformScreenOverlay( postView.x, postView.y, postView.width, postView.height );
 	}
 
 	// And here are the screen-space effects
@@ -4467,10 +4672,14 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 		tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "GrabPreColorCorrectedFrame" );
 
 		// Grab the pre-color corrected frame for editing purposes
-		engine->GrabPreColorCorrectedFrame( worldView.x, worldView.y, worldView.width, worldView.height );
+		engine->GrabPreColorCorrectedFrame( postView.x, postView.y, postView.width, postView.height );
 	}
 
-	PerformScreenSpaceEffects( 0, 0, worldView.width, worldView.height );
+	PerformScreenSpaceEffects( 0, 0, postView.width, postView.height );
+
+	// (the back buffer pushed for the frame brought up to it)
+	if ( pSceneRT )
+		DeferredTAA_EndUpscale();
 
 	if ( g_pMaterialSystemHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER )
 	{
@@ -4484,6 +4693,10 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	pRenderContext = materials->GetRenderContext();
 	pRenderContext->SetRenderTarget( saveRenderTarget );
 	pRenderContext.SafeRelease();
+
+	// HL2RPM: the model on the card of an item, for the window that paints after this
+	if ( !building_cubemaps.GetBool() )
+		RPMItemPreview_Render();
 
 	// Draw the overlay
 	if ( m_bDrawOverlay )
@@ -4534,6 +4747,10 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	{
 		saveRenderTarget = g_pSourceVR->GetRenderTarget( (ISourceVirtualReality::VREye)(worldView.m_eStereoEye - 1), ISourceVirtualReality::RT_Color );
 	}
+
+	if ( bProfFrame )
+		GPUProf_FrameEnd();
+	s_nRenderViewDepth--;
 
 	// Draw the 2D graphics
 	render->Push2DView( worldView, 0, saveRenderTarget, GetFrustum() );
@@ -5100,6 +5317,7 @@ void CAboveWaterViewDeferred::CReflectionView::Setup( bool bReflectEntities )
 //-----------------------------------------------------------------------------
 void CAboveWaterViewDeferred::CReflectionView::Draw()
 {
+	GPUPROF_SCOPE( "waterrefl" );
 #ifdef PORTAL
 	g_pPortalRender->WaterRenderingHandler_PreReflection();
 #endif
@@ -5177,6 +5395,7 @@ void CAboveWaterViewDeferred::CRefractionView::Setup()
 //-----------------------------------------------------------------------------
 void CAboveWaterViewDeferred::CRefractionView::Draw()
 {
+	GPUPROF_SCOPE( "waterrefr" );
 #ifdef PORTAL
 	g_pPortalRender->WaterRenderingHandler_PreRefraction();
 #endif
@@ -5351,6 +5570,7 @@ void CUnderWaterViewDeferred::CRefractionView::Setup()
 //-----------------------------------------------------------------------------
 void CUnderWaterViewDeferred::CRefractionView::Draw()
 {
+	GPUPROF_SCOPE( "waterrefr" );
 	CMatRenderContextPtr pRenderContext( materials );
 	SetFogVolumeState( GetOuter()->m_fogInfo, true );
 	unsigned char ucFogColor[3];

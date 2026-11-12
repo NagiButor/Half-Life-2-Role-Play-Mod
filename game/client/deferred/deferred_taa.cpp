@@ -31,6 +31,7 @@
 
 #include "materialsystem/itexture.h"
 #include "materialsystem/imaterial.h"
+#include "materialsystem/imaterialvar.h"
 #include "materialsystem/materialsystem_config.h"
 #include "view_shared.h"
 #include "tier1/KeyValues.h"
@@ -96,6 +97,16 @@ static bool s_bFrameActive = false;
 static int s_iJitterIndex = 0;
 static int s_iHistory = 0;		// target holding the last result
 static int s_iHistoryW = 0, s_iHistoryH = 0;
+// HL2RPM: TAA upscale (render scale): this frame's sub-pixel shift (frame pixels) and its materials
+static float s_flJitterX = 0.0f, s_flJitterY = 0.0f;
+static IMaterial *g_pMatTAAU[2];	// [history read]
+static IMaterial *g_pMatUpscaleMask = NULL;
+static bool g_bUpscaleMaterialsTried = false;
+static bool s_bUpscalePushed = false;
+static ConVar r_deferred_taau_jitter_sign( "r_deferred_taau_jitter_sign", "1 -1", 0,
+	"HL2RPM: TAA upscale - signs of this frame's sub-pixel shift (x y) where the frame's samples lie (debug)" );
+static ConVar r_deferred_taau_sharpness( "r_deferred_taau_sharpness", "2.29", 0,
+	"HL2RPM: TAA upscale - how fast the weight of a frame sample falls with its distance (exp( -k d^2 ), d in screen pixels)" );
 
 //-----------------------------------------------------------------------------
 // Targets and materials
@@ -263,8 +274,10 @@ bool DeferredTAA_JitterView( CViewSetup &view, bool bMainView )
 
 	s_iJitterIndex = ( s_iJitterIndex % TAA_JITTER_SAMPLES ) + 1;
 
-	// the composite samples the textures sharper while the frame is jittered
-	s_TAAData.vecParams3.y = r_deferred_taa_mipbias.GetFloat();
+	// the composite samples the textures sharper while the frame is jittered (and with a render
+	// scale as sharp as the screen: the upscale accumulates the detail of the screen's pixels)
+	const float flRenderScale = DeferredRenderScale_GetScale();
+	s_TAAData.vecParams3.y = r_deferred_taa_mipbias.GetFloat() + ( ( flRenderScale < 0.999f ) ? log2f( flRenderScale ) : 0.0f );
 	// (z, w: the frame is accumulated - passes that dither per pixel move their pattern with
 	// the phase w each frame, and the history averages the noise away: contact shadows)
 	s_TAAData.vecParams3.z = 1.0f;
@@ -274,6 +287,8 @@ bool DeferredTAA_JitterView( CViewSetup &view, bool bMainView )
 	const float flScale = r_deferred_taa_jitter.GetFloat();
 	const float jx = ( Halton( s_iJitterIndex, 2 ) - 0.5f ) * flScale;
 	const float jy = ( Halton( s_iJitterIndex, 3 ) - 0.5f ) * flScale;
+	s_flJitterX = jx;
+	s_flJitterY = jy;
 
 	// the frustum's 0..1 range covers the view: a shift of 1 / width is one pixel
 	view.m_bOffCenter = true;
@@ -464,4 +479,139 @@ void DeferredTAA_Draw( const CViewSetup &view )
 	s_Prev = cur;
 	s_bPrevValid = true;
 	s_bReset = false;
+}
+
+//-----------------------------------------------------------------------------
+// HL2RPM: TAA upscale (render scale). The 3D view was drawn into a smaller frame, jittered as for
+// the TAA (in the frame's pixels). Each pixel of the screen takes the frame's samples around it,
+// weighted by how close their jittered positions come to its center, and blends them into the
+// history at the size of the screen - over the frames of the jitter sequence the samples fall all
+// over the screen's pixels, and the history keeps the detail of the screen's resolution. Where the
+// history is missing (reset, disocclusion, out of the last view) the weighted samples alone - a
+// smooth upsample. The pixels that move with the camera (stencil bit, made a mask first) take the
+// history of the same pixel.
+//-----------------------------------------------------------------------------
+static bool EnsureUpscaleMaterials()
+{
+	if ( !g_bUpscaleMaterialsTried )
+	{
+		g_bUpscaleMaterialsTried = true;
+		for ( int h = 0; h < 2; h++ )
+		{
+			KeyValues *pKV = new KeyValues( "HL2RPM_TAAU" );
+			pKV->SetString( "$frametexture", "_rt_hl2rpm_scene" );
+			pKV->SetString( "$historytexture", VarArgs( "_rt_hl2rpm_taa%d", h ) );
+			pKV->SetString( "$masktexture", "_rt_hl2rpm_upscalemask" );
+			g_pMatTAAU[h] = MakeMaterial( VarArgs( "__hl2rpm_taau%d", h ), pKV );
+		}
+		KeyValues *pKV = new KeyValues( "UnlitGeneric" );
+		pKV->SetString( "$basetexture", "vgui/white" );
+		pKV->SetInt( "$ignorez", 1 );
+		g_pMatUpscaleMask = MakeMaterial( "__hl2rpm_upscalemask", pKV );
+	}
+	return IsOk( g_pMatTAAU[0] ) && IsOk( g_pMatTAAU[1] ) && IsOk( g_pMatUpscaleMask );
+}
+
+void DeferredTAA_DrawUpscale( const CViewSetup &view, const CViewSetup &screen, ITexture *pScene )
+{
+	const bool bTAA = s_bFrameActive && IsTAAAvailable() && EnsureUpscaleMaterials() && GetDefRT_UpscaleMask() != NULL;
+	s_bFrameActive = false;
+
+	const int sw = Max( 2, view.width ), sh = Max( 2, view.height );
+	const int W = Max( 2, screen.width ), H = Max( 2, screen.height );
+
+	CMatRenderContextPtr pRenderContext( materials );
+
+	// what moves with the camera, from the stencil of the frame (the mask target shares its
+	// depth-stencil: the frame's pixels are its pixels)
+	if ( bTAA )
+	{
+		pRenderContext->PushRenderTargetAndViewport( GetDefRT_UpscaleMask(), 0, 0, sw, sh );
+		pRenderContext->ClearColor4ub( 0, 0, 0, 0 );
+		pRenderContext->ClearBuffers( true, false );
+		SetStencilTest( pRenderContext, true );
+		pRenderContext->DrawScreenSpaceRectangle( g_pMatUpscaleMask, 0, 0, sw, sh, 0, 0, 1, 1, 2, 2 );
+		pRenderContext->SetStencilEnable( false );
+		pRenderContext->PopRenderTargetAndViewport();
+	}
+
+	// the screen from here on, until DeferredTAA_EndUpscale
+	pRenderContext->PushRenderTargetAndViewport( NULL, screen.x, screen.y, W, H );
+	s_bUpscalePushed = true;
+
+	const int hw = g_tex_TAAHistory[0]->GetActualWidth(), hh = g_tex_TAAHistory[0]->GetActualHeight();
+	if ( !bTAA || hw < W || hh < H || screen.x != 0 || screen.y != 0 )
+	{
+		// no TAA this frame (FXAA or none): a plain bilinear stretch
+		Rect_t src = { 0, 0, sw, sh };
+		Rect_t dst = { screen.x, screen.y, W, H };
+		pRenderContext->CopyTextureToRenderTargetEx( 0, pScene, &src, &dst );
+		s_bReset = true;
+		return;
+	}
+
+	TAAView_t cur;
+	cur.origin = view.origin;
+	cur.angles = view.angles;
+	cur.fov = view.fov;
+	cur.aspect = view.m_flAspectRatio;
+
+	bool bReset = s_bReset || !s_bPrevValid || hw != s_iHistoryW || hh != s_iHistoryH;
+	if ( !bReset && ( s_Prev.origin - cur.origin ).LengthSqr() > Square( r_deferred_taa_reset_dist.GetFloat() ) )
+		bReset = true;
+
+	taaData_t &data = s_TAAData;
+	const TAAView_t &prev = bReset ? cur : s_Prev;
+	BuildViewProjRows( prev.angles, prev.fov, prev.aspect, data.vecPrev );
+	BuildViewProjRows( cur.angles, cur.fov, cur.aspect, data.vecCur );
+	const Vector vecDelta = prev.origin - cur.origin;
+	data.vecCamDelta.Init( vecDelta.x, vecDelta.y, vecDelta.z, 0.0f );
+	data.vecParams.Init( r_deferred_taa_history.GetFloat(), r_deferred_taa_history_min.GetFloat(),
+		r_deferred_taa_clip.GetFloat(), bReset ? 1.0f : 0.0f );
+	// (the history covers the screen: view / texture = the screen's part of the history target)
+	data.vecParams2.Init( (float)r_deferred_taa_debug.GetInt(), r_deferred_taa_motion.GetFloat(),
+		(float)W / hw, (float)H / hh );
+	data.vecTexel.Init( 1.0f / hw, 1.0f / hh, (float)hw, (float)hh );
+	static int s_iDitherFrame = 0;
+	s_iDitherFrame = ( s_iDitherFrame + 1 ) & 1023;
+	data.vecParams3.x = (float)s_iDitherFrame;
+	data.vecParams3.y = r_deferred_taa_motion_history.GetFloat();
+	data.vecParams3.z = r_deferred_taau_sharpness.GetFloat();
+	QUEUE_FIRE( CommitTAAData, data );
+
+	// where this frame's samples lie (frame pixels, y down) and the frame's size
+	float flSignX = 1.0f, flSignY = -1.0f;
+	sscanf( r_deferred_taau_jitter_sign.GetString(), "%f %f", &flSignX, &flSignY );
+	const int iRead = s_iHistory;
+	const int iWrite = s_iHistory ^ 1;
+	IMaterial *pMat = g_pMatTAAU[ iRead ];
+	bool bFound = false;
+	IMaterialVar *pVar = pMat->FindVar( "$lowres", &bFound, false );
+	if ( bFound && pVar )
+		pVar->SetVecValue( 1.0f / pScene->GetActualWidth(), 1.0f / pScene->GetActualHeight(), (float)sw, (float)sh );
+	pVar = pMat->FindVar( "$jitter", &bFound, false );
+	if ( bFound && pVar )
+		pVar->SetVecValue( s_flJitterX * flSignX, s_flJitterY * flSignY, (float)sw / W, (float)sh / H );
+
+	pRenderContext->DrawScreenSpaceRectangle( pMat, screen.x, screen.y, W, H,
+		0, 0, W - 1, H - 1, hw, hh );
+
+	Rect_t rect = { screen.x, screen.y, W, H };
+	pRenderContext->CopyRenderTargetToTextureEx( g_tex_TAAHistory[ iWrite ], 0, &rect, &rect );
+
+	s_iHistory = iWrite;
+	s_iHistoryW = hw;
+	s_iHistoryH = hh;
+	s_Prev = cur;
+	s_bPrevValid = true;
+	s_bReset = false;
+}
+
+void DeferredTAA_EndUpscale()
+{
+	if ( !s_bUpscalePushed )
+		return;
+	s_bUpscalePushed = false;
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->PopRenderTargetAndViewport();
 }

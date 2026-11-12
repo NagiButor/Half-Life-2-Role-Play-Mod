@@ -29,12 +29,17 @@ const float4 g_wFlags						: register( c15 );	// x weather enabled, y clouds val
 const float3 g_light_diffuse				: register( c16 );
 const float3 g_light_ambient_high			: register( c17 );
 const float3 g_light_ambient_low_half		: register( c18 );
+// HL2RPM: x 1 = the main view (the G-buffer has this screen's pixels): a pixel the G-buffer holds
+// geometry in is drawn over by it - nothing to compute (the sky goes first, without a depth test,
+// and used to run this whole shader for every pixel of the screen). zw 1 / G-buffer size
+const float4 g_wSkipCovered					: register( c19 );
 
 sampler2D sSkyLut : register( s0 );
 sampler2D sTransmittanceLut : register( s1 );
 sampler2D sSkyViewLut : register( s2 );
 sampler2D sClouds : register( s3 );
 sampler2D sWeatherMap : register( s4 );
+sampler2D sGBufferDepth : register( s5 );	// HL2RPM: G-buffer depth (0 = no geometry)
 
 struct PS_INPUT
 {
@@ -116,7 +121,7 @@ float3 getSunTransmittance( float3 pos, float3 sunDir )
 
 	float u = ( mu * 0.5 + 0.5 );
 	float v = ( r - groundRadiusMM ) / ( atmosphereRadiusMM - groundRadiusMM );
-	return tex2D( sTransmittanceLut, float2( u, v ) ).rgb;
+	return tex2Dlod( sTransmittanceLut, float4( u, v, 0, 0 ) ).rgb;
 }
 
 // HL2RPM: must match DirFromSkyViewUV in sky_atmo_skyview_lutgen_ps30
@@ -222,7 +227,7 @@ float4 Cirrus( float3 rayDir )
 	float2 windPerp = float2( -windDir.y, windDir.x );
 	float2 uv = float2( dot( p, windDir ) / 70000.0, dot( p, windPerp ) / 35000.0 );
 
-	float n = tex2D( sWeatherMap, uv ).b * 0.65 + tex2D( sWeatherMap, uv * 3.1 + 0.37 ).b * 0.35;
+	float n = tex2Dlod( sWeatherMap, float4( uv, 0, 0 ) ).b * 0.65 + tex2Dlod( sWeatherMap, float4( uv * 3.1 + 0.37, 0, 0 ) ).b * 0.35;
 	float d = saturate( ( n - ( 1.0 - amount * 0.6 ) ) / 0.3 );
 	d *= saturate( rayDir.z * 5.0 ) * saturate( ( 0.97 - rayDir.z ) * 4.0 );	// thin toward the horizon and the zenith
 	return float4( 1.0, 1.0, 1.0, d * 0.4 );
@@ -230,6 +235,13 @@ float4 Cirrus( float3 rayDir )
 
 float4 main( const PS_INPUT In ) : COLOR
 {
+	[branch]
+	if ( g_wSkipCovered.x > 0.5 )
+	{
+		if ( tex2Dlod( sGBufferDepth, float4( ( In.vScreenPos + 0.5 ) * g_wSkipCovered.zw, 0, 0 ) ).x >= 0.1 )
+			return float4( 0, 0, 0, 1 );
+	}
+
 	float exposure = max( g_procParams0.y, 0.0 );
 	float starsIntensity = max( g_procParams0.z, 0.0 );
 	float sunDiskIntensity = max( g_procParams0.w, 0.0 );
@@ -247,7 +259,7 @@ float4 main( const PS_INPUT In ) : COLOR
 	float groundDist = rayIntersectSphere( viewPos, rayDir, groundRadiusMM );
 
 	// ---- clear-sky atmosphere (lit by the global light: the sun, or the moon at night)
-	float3 lum = tex2D( sSkyViewLut, SkyViewUV( rayDir, lightDir ) ).rgb;
+	float3 lum = tex2Dlod( sSkyViewLut, float4( SkyViewUV( rayDir, lightDir ), 0, 0 ) ).rgb;
 
 	float sunAltDeg = asin( clamp( sunDir.z, -1.0, 1.0 ) ) * 57.2957795;
 
@@ -314,8 +326,11 @@ float4 main( const PS_INPUT In ) : COLOR
 		lum = lerp( lum, lum * float3( 0.25, 0.34, 0.42 ), saturate( night * 0.45 ) );
 	}
 
-	// ---- stars
+	// ---- stars (HL2RPM: the skies of the mod have $starsintensity 0 - not computed at all then)
 	float3 stars = 0.0;
+	const float starsVis = smooth01( remap01_clamped( -sunAltDeg, 6.0, 18.0 ) );
+	[branch]
+	if ( starsIntensity * starsVis > 0.0 )
 	{
 		float starU = atan2( rayDir.y, rayDir.x ) * ( 1.0 / ( 2.0 * PI ) ) + 0.5;
 		float starV = asin( clamp( rayDir.z, -1.0, 1.0 ) ) * ( 1.0 / PI ) + 0.5;
@@ -324,7 +339,6 @@ float4 main( const PS_INPUT In ) : COLOR
 		float2 uv = float2( frac( starU + 0.37 + starRot ), saturate( starV ) );
 		float2x2 rot = float2x2( 0.9659, -0.2588, 0.2588, 0.9659 );
 
-		float starsVis = smooth01( remap01_clamped( -sunAltDeg, 6.0, 18.0 ) );
 		float starMask = saturate( rayDir.z * 2.0 );
 		float starSum = 0.0;
 
@@ -385,7 +399,7 @@ float4 main( const PS_INPUT In ) : COLOR
 		if ( g_wFlags.y > 0.5 )
 		{
 			float2 cuv = ( In.vScreenPos + 0.5 ) * g_wScreen.xy * g_wScreen.z;
-			float4 clouds = tex2D( sClouds, cuv );
+			float4 clouds = tex2Dlod( sClouds, float4( cuv, 0, 0 ) );
 			if ( clouds.a >= 0.0 )
 			{
 				float T = saturate( clouds.a );

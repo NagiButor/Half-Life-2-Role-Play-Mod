@@ -2,6 +2,19 @@
 @PointClass base(Weapon) studio("models/weapons/w_shot_xm1014.mdl") sphere(fademindist) sphere(fademaxdist) = weapon_xm1014 : "XM1014" [
 ]
 
+// HL2RPM: melee weapons (game/server/hl2rpm_melee.cpp, models of the HL2 Melee Pack) //Pravka
+@PointClass base(Weapon) studio("models/weapons/hl2rpm/w_axe.mdl") sphere(fademindist) sphere(fademaxdist) = weapon_rpm_axe : "Axe (melee)" []
+@PointClass base(Weapon) studio("models/weapons/hl2rpm/w_bottle.mdl") sphere(fademindist) sphere(fademaxdist) = weapon_rpm_bottle : "Bottle (melee)" []
+@PointClass base(Weapon) studio("models/weapons/hl2rpm/w_brokenbottle.mdl") sphere(fademindist) sphere(fademaxdist) = weapon_rpm_brokenbottle : "Broken bottle (melee)" []
+@PointClass base(Weapon) studio("models/weapons/hl2rpm/w_hook.mdl") sphere(fademindist) sphere(fademaxdist) = weapon_rpm_hook : "Hook (melee)" []
+@PointClass base(Weapon) studio("models/weapons/hl2rpm/w_pan.mdl") sphere(fademindist) sphere(fademaxdist) = weapon_rpm_pan : "Frying pan (melee)" []
+@PointClass base(Weapon) studio("models/weapons/hl2rpm/w_pickaxe.mdl") sphere(fademindist) sphere(fademaxdist) = weapon_rpm_pickaxe : "Pickaxe (melee)" []
+@PointClass base(Weapon) studio("models/weapons/hl2rpm/w_pipe.mdl") sphere(fademindist) sphere(fademaxdist) = weapon_rpm_pipe : "Pipe (melee)" []
+@PointClass base(Weapon) studio("models/weapons/hl2rpm/w_pot.mdl") sphere(fademindist) sphere(fademaxdist) = weapon_rpm_pot : "Pot (melee)" []
+@PointClass base(Weapon) studio("models/weapons/hl2rpm/w_shovel.mdl") sphere(fademindist) sphere(fademaxdist) = weapon_rpm_shovel : "Shovel (melee)" []
+// HL2RPM: the Beretta 92 (game/server/hl2rpm_beretta.cpp, make_beretta.py) //Pravka
+@PointClass base(Weapon) studio("models/weapons/hl2rpm/w_beretta.mdl") sphere(fademindist) sphere(fademaxdist) = weapon_rpm_beretta : "Beretta 92 (pistol)" []
+
 
 @BaseClass base(BaseNPC, RappelNPC, GrenadeUser, PolicingNPC) = BaseCombine
 [
@@ -16,6 +29,16 @@
 		"weapon_shotgun" : "Shotgun"
 		"weapon_smg1" : "SMG1"
 		"weapon_stunstick" : "Stun Stick"
+		"weapon_rpm_axe" : "Axe (HL2RPM melee)" //Pravka
+		"weapon_rpm_bottle" : "Bottle (HL2RPM melee)" //Pravka
+		"weapon_rpm_brokenbottle" : "Broken bottle (HL2RPM melee)" //Pravka
+		"weapon_rpm_hook" : "Hook (HL2RPM melee)" //Pravka
+		"weapon_rpm_pan" : "Frying pan (HL2RPM melee)" //Pravka
+		"weapon_rpm_pickaxe" : "Pickaxe (HL2RPM melee)" //Pravka
+		"weapon_rpm_pipe" : "Pipe (HL2RPM melee)" //Pravka
+		"weapon_rpm_pot" : "Pot (HL2RPM melee)" //Pravka
+		"weapon_rpm_shovel" : "Shovel (HL2RPM melee)" //Pravka
+		"weapon_rpm_beretta" : "Beretta 92 (HL2RPM pistol)" //Pravka
 		"weapon_xm1014" : "XM1014"
 		"0" : "Nothing"
 	]
@@ -60,7 +83,20 @@
 	input SetAlternateCapable(bool) : "Sets whether the soldier is capable of using both grenades and energy balls at the same time."
 ]
 
-@PointClass base(Item) studio("models/combine_vests/militaryvest.mdl") = item_combine_soldier_suit : "CMB Soldier Suit" [
+//Pravka 2026-11-02: the suits as items lie on the ground as folded cloth with their hard parts
+@PointClass base(Item) studio("models/hl2rpm/items/suit_soldier.mdl") = item_combine_soldier_suit : "Overwatch soldier armor (suit)" [
+]
+@PointClass base(Item) studio("models/hl2rpm/items/suit_pcv.mdl") = item_suit_pcv : "P.C.V. suit" [
+]
+@PointClass base(Item) studio("models/hl2rpm/items/suit_cp.mdl") = item_suit_cp : "Civil Protection uniform (suit)" [
+]
+@PointClass base(Item) studio("models/hl2rpm/items/suit_prison.mdl") = item_suit_prison : "Nova Prospekt guard armor (suit)" [
+]
+@PointClass base(Item) studio("models/hl2rpm/items/suit_elite.mdl") = item_suit_elite : "Overwatch elite armor (suit)" [
+]
+@PointClass base(Item) studio("models/hl2rpm/items/suit_worker.mdl") = item_suit_worker : "Combine worker's coverall (suit, work HUD)" [
+]
+@PointClass base(Item) studio("models/hl2rpm/items/suit_hazmat.mdl") = item_suit_hazmat : "Hazmat suit (suit, work HUD with a dosimeter)" [
 ]
 
 @SolidClass base(Trigger) = func_loot_container : "Loot Container"
@@ -69,6 +105,7 @@
 	loot_sound_open(sound) : "Sound open" : ""
 	loot_sound_close(sound) : "Sound close" : ""
 	loot_items(string) : "Loot items" : ""
+	owner(string) : "Owner" : "" : "//Pravka NPC targetname or faction (Creation Kit): taking is theft - a witness of the owner turns hostile"
 ]
 
 @SolidClass base(Trigger) = trigger_dialog_start : "Start dialog when player enters trigger"
@@ -92,3 +129,105 @@
 	approach_distance(float) : "Approach distance" : 96 : "Distance to player at which dialog starts (used when npc_approach=1)."
 ]
 
+//Pravka HL2RPM Creation Kit: RPG entities (containers with locks, items of the item database, spawn points)
+@PointClass base(Targetname, Parentname, Angles, Studiomodel, RenderFields) studioprop() = prop_loot_container : "Loot container: a prop, USE opens the loot window"
+[
+	loot_displayname(string) : "Displayable name" : ""
+	loot_items(string) : "Loot items" : "" : "classname[:count];... and/or list:<loot list id> of the Creation Kit (rolled when first opened)"
+	loot_sound_open(sound) : "Sound open" : ""
+	loot_sound_close(sound) : "Sound close" : ""
+	lock_key(string) : "Key item" : "" : "Item id (Creation Kit) of the key that opens it"
+	lock_level(integer) : "Lockpick level" : 0 : "Lockpick skill needed (0 = no lock, 1..100)"
+	restock_hours(float) : "Restock, game hours" : 0 : "The loot list is rolled again after so many game hours (0 = never)"
+	owner(string) : "Owner" : "" : "//Pravka NPC targetname or faction (Creation Kit): taking is theft - a witness of the owner turns hostile"
+	input Lock(void) : "Lock it"
+	input Unlock(void) : "Unlock it"
+	output OnUnlocked(void) : "Opened with the key or picked"
+	output OnLockedUse(void) : "Used while locked"
+]
+
+@PointClass base(Targetname, Angles) studio("models/props_lab/clipboard.mdl") = item_rpm : "Item of the Creation Kit item database (note, key, money, generic)"
+[
+	item(string) : "Item id" : "" : "Id of the item in scripts/rpg/items.txt"
+	count(integer) : "Count" : 1 : "How many (stackable items: money)"
+	output OnPlayerPickup(void) : "The player picked it up"
+]
+
+@PointClass base(Targetname) iconsprite("editor/info_target.vmt") sphere(radius) = rpm_spawner : "Spawn point: keeps NPCs alive around itself while the player is near"
+[
+	npcs(string) : "NPCs" : "" : "def_or_class[:weight];... - NPC definitions of the Creation Kit (templates) or classnames"
+	count_min(integer) : "Alive, min" : 1
+	count_max(integer) : "Alive, max" : 3
+	radius(float) : "Radius" : 384
+	activate_dist(float) : "Active within" : 2500 : "Spawns only while the player is closer than this"
+	from_hour(float) : "From hour" : -1 : "-1 = always"
+	to_hour(float) : "To hour" : -1 : "-1 = always"
+	respawn_hours(float) : "Refill after, game hours" : 24 : "When all are dead (0 = never)"
+	require_flag(string) : "World flag" : "" : "Only while this world flag is set"
+	input Enable(void) : "Enable"
+	input Disable(void) : "Disable"
+	output OnSpawnNPC(ehandle) : "An NPC appeared (activator)"
+]
+
+//Pravka HL2RPM M6.5: terminals (game/server/hl2rpm_terminal.cpp) - the contents come from scripts/rpg/terminals.txt (Creation Kit, tab "Logic")
+@PointClass base(Targetname, Angles) studioprop() = rpm_terminal : "Terminal like in Fallout 4: USE moves the camera to the screen, the interface is drawn on the screen itself (records, commands, submenus, hacking with the word game)"
+[
+	model(studio) : "Model" : "models/props_lab/monitor01a.mdl" : "monitor01a (city computer), props_combine/combine_intmonitor001, combine_smallmonitor001, combine_interface001 have known screens; other models: set the screen keys"
+	terminal(string) : "Terminal id" : "" : "Id in scripts/rpg/terminals.txt (Creation Kit, tab Logic -> + terminal)"
+	style(choices) : "Style" : "" =
+	[
+		"" : "From the terminal definition"
+		"pc" : "City computer (green CRT)"
+		"combine" : "Combine console (teal)"
+	]
+	lock_level(integer) : "Hacking level override" : -1 : "-1 = from the definition, 0 = open, 1..100"
+	screen_pos(string) : "Screen center (model space)" : "" : "x y z; empty = known screen of the model or its +X face"
+	screen_ang(string) : "Screen facing (model space)" : "" : "pitch yaw 0 of the screen normal"
+	screen_size(string) : "Screen size" : "" : "width height in units"
+	output OnUsed(void) : "The player used it"
+	output OnHacked(void) : "Hacked with the word game"
+	output OnLockout(void) : "Locked out after the last wrong word"
+]
+
+//Pravka 2026-11-04: task markers for the AI assistant (Claude). The user sketches the map by hand and leaves tasks:
+// a point (rpm_claude_task) or a volume around a whole part of the map (func_rpm_claude_area, texture hl2rpm/tools/claude_area -
+// translucent Claude terracotta). Editor only: hl2rpm_vbsp drops both (with the brushes) at compile time - nothing reaches the BSP.
+// Claude finds them by name in the VMF (vmf.py tasks) and writes back into "reply" / "status".
+@BaseClass = RPMClaudeTask
+[
+	targetname(target_source) : "Name" : "" : "A short name of the task - Claude finds it by this name"
+	task(string) : "Task" : "" : "What to do here, in plain words (Hammer keeps up to ~1000 characters per field)"
+	task2(string) : "Task (more)" : "" : "Continuation of the task"
+	task3(string) : "Task (more 2)" : "" : "Continuation of the task"
+	kind(choices) : "Kind" : "geometry" : "What the task is about" =
+	[
+		"geometry" : "Geometry (brushes)"
+		"props" : "Props and details"
+		"lighting" : "Lighting"
+		"gameplay" : "NPCs, items, gameplay"
+		"sound" : "Sound and atmosphere"
+		"other" : "Other"
+	]
+	priority(choices) : "Priority" : 2 : "Which tasks first" =
+	[
+		1 : "High"
+		2 : "Normal"
+		3 : "Low"
+	]
+	status(choices) : "Status" : "todo" : "Claude moves it along" =
+	[
+		"todo" : "To do"
+		"doing" : "In progress"
+		"question" : "Claude has a question (see Reply)"
+		"done" : "Done (kept for history)"
+	]
+	reply(string) : "Claude's reply" : "" : "Claude writes here what was done or what needs clarifying"
+]
+
+@PointClass base(RPMClaudeTask) iconsprite("editor/hl2rpm/claude_task.vmt") color(217 119 87) = rpm_claude_task : "Task for Claude at this point: what to change here (editor only, not compiled into the map)"
+[
+]
+
+@SolidClass base(RPMClaudeTask) color(217 119 87) = func_rpm_claude_area : "Task for Claude about this whole volume: draw it around the part of the map to change with the translucent texture hl2rpm/tools/claude_area (editor only, not compiled into the map)"
+[
+]

@@ -5,6 +5,7 @@
 //===========================================================================//
 
 #include "cbase.h"
+#include "hl2rpm_char.h"
 #include "const.h"
 #include "baseplayer_shared.h"
 #include "trains.h"
@@ -1016,6 +1017,9 @@ void CBasePlayer::DeathSound( const CTakeDamageInfo &info )
 
 int CBasePlayer::TakeHealth( float flHealth, int bitsDamageType )
 {
+	// HL2RPM: Medicine and perks make healing stronger
+	if ( flHealth > 0.0f )
+		flHealth *= RPMChar::HealScale();
 	// clear out any damage types we healed.
 	// UNDONE: generic health should not heal any
 	// UNDONE: time-based damage
@@ -4040,7 +4044,8 @@ void CBasePlayer::PreThink(void)
 	// Quick-use dialog hook: if player pressed Use (E), attempt a short trace
 	// forward and start dialog if aimed at a named NPC. This is a safe fallback
 	// so designers don't need to modify every NPC Use implementation.
-	if ( (m_afButtonPressed & IN_USE) || (m_nButtons & IN_USE) )
+	// HL2RPM: only on the press - while E was held this restarted the dialog every frame
+	if ( m_afButtonPressed & IN_USE )
 	{
 		DevMsg("Use pressed: player=%s m_afButtonPressed=0x%X m_nButtons=0x%X\n", GetPlayerName(), m_afButtonPressed, m_nButtons );
 		Vector vecSrc = EyePosition();
@@ -7985,6 +7990,10 @@ ConVar player_autoswitch_on_first_pickup("player_autoswitch_on_pickup", "1", FCV
 void CBasePlayer::Weapon_Equip( CBaseCombatWeapon *pWeapon )
 {
 	BaseClass::Weapon_Equip( pWeapon );
+
+	// HL2RPM: one weapon on the player, the rest in the inventory
+	extern void RPMWeapons_OnEquip( CBasePlayer *pPlayer, CBaseCombatWeapon *pWeapon );
+	RPMWeapons_OnEquip( this, pWeapon );
 
 #ifdef MAPBASE
 	// BumpWeapon's code appeared to be deprecated; The same operation is already handled here, but with much more code involved.

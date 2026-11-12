@@ -6,6 +6,12 @@
 #include "procsky_atmo_vs30.inc"
 #include "procsky_atmo_ps30.inc"
 
+// HL2RPM: the sky is drawn first, without a depth test - the whole screen ran its shader, also where
+// buildings are drawn over it a moment later. In the main view the G-buffer of the same screen
+// tells which pixels geometry covers: they leave at once.
+static ConVar r_deferred_sky_skip_covered( "r_deferred_sky_skip_covered", "1", FCVAR_NONE,
+	"HL2RPM: the procedural sky skips the pixels the G-buffer has geometry in (main view only; 0 = shades every pixel)" );
+
 BEGIN_VS_SHADER( SkyAtmoProc, "" )
 
 	BEGIN_SHADER_PARAMS
@@ -62,6 +68,7 @@ BEGIN_VS_SHADER( SkyAtmoProc, "" )
 			pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
 			pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );	// HL2RPM clouds
 			pShaderShadow->EnableTexture( SHADER_SAMPLER4, true );	// HL2RPM weather map
+			pShaderShadow->EnableTexture( SHADER_SAMPLER5, true );	// HL2RPM G-buffer depth
 
 			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION, 1, NULL, 0 );
 
@@ -140,6 +147,29 @@ BEGIN_VS_SHADER( SkyAtmoProc, "" )
 			pShaderAPI->SetPixelShaderConstant( 14, w.vecSkyHorizon.Base(), 1, true );
 			float flFlags[4] = { w.bEnabled ? 1.0f : 0.0f, bCloudsValid ? 1.0f : 0.0f, 0.0f, 0.0f };
 			pShaderAPI->SetPixelShaderConstant( 15, flFlags, 1, true );
+
+			// HL2RPM: the main view - drawn to the back buffer over the whole G-buffer, not a reflection
+			// (water reflections, refractions, glass, monitors and the item preview have render targets
+			// of their own; a reflection of the main view's size would still be told by its flag)
+			float flSkip[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			ITexture *pGBufferDepth = GetDeferredExt()->GetTexture_Depth();
+			if ( r_deferred_sky_skip_covered.GetBool() && pGBufferDepth && !GetDeferredExt()->IsReflectionView()
+				&& pShaderAPI->GetRenderTargetEx( 0 ) == NULL )
+			{
+				ShaderViewport_t viewport;
+				if ( pShaderAPI->GetViewports( &viewport, 1 ) >= 1 && viewport.m_nTopLeftX == 0 && viewport.m_nTopLeftY == 0
+					&& viewport.m_nWidth == pGBufferDepth->GetActualWidth() && viewport.m_nHeight == pGBufferDepth->GetActualHeight() )
+				{
+					flSkip[0] = 1.0f;
+					flSkip[2] = 1.0f / (float)viewport.m_nWidth;
+					flSkip[3] = 1.0f / (float)viewport.m_nHeight;
+				}
+			}
+			if ( flSkip[0] > 0.0f )
+				BindTexture( SHADER_SAMPLER5, pGBufferDepth );
+			else
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER5, TEXTURE_BLACK );
+			pShaderAPI->SetPixelShaderConstant( 19, flSkip, 1, true );
 
 			// a lightning flash briefly turns the global light into the bolt: the sky keeps the sun / moon
 			if ( w.bEnabled )

@@ -23,6 +23,7 @@
 #include "activitylist.h"
 #include "engine/IEngineSound.h"
 #include "npc_BaseZombie.h"
+#include "hl2rpm_zombies.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -257,6 +258,7 @@ END_DATADESC()
 void CNPC_PoisonZombie::Precache( void )
 {
 	PrecacheModel( DefaultOrCustomModel( "models/zombie/poison.mdl" ) );
+	RPMZombie_Precache( RPMZ_POISON );
 
 	PrecacheScriptSound( "NPC_PoisonZombie.Die" );
 	PrecacheScriptSound( "NPC_PoisonZombie.ThrowWarn" );
@@ -283,6 +285,7 @@ void CNPC_PoisonZombie::Precache( void )
 //-----------------------------------------------------------------------------
 void CNPC_PoisonZombie::Spawn( void )
 {
+	RPMZombie_Choose( this, RPMZ_POISON );		// HL2RPM: other clothes (hl2rpm_zombies.cpp)
 	Precache();
 
 #ifndef MAPBASE // Controlled by KV

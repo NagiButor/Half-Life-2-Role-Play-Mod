@@ -74,6 +74,11 @@ static const GfxChoice_t s_DoFChoices[] =
 {
 	{ "#HL2RPM_Gfx_Off", 0 }, { "#HL2RPM_Gfx_DoF_Zoom", 1 }, { "#HL2RPM_Gfx_DoF_Always", 2 },
 };
+// HL2RPM: the 3D view drawn smaller and brought up to the screen by the TAA (r_hl2rpm_renderscale)
+static const GfxChoice_t s_RenderScaleChoices[] =
+{
+	{ "100%", 1.0f }, { "85%", 0.85f }, { "75%", 0.75f }, { "67%", 0.667f }, { "50%", 0.5f },
+};
 static const GfxChoice_t s_SharpenChoices[] =
 {
 	{ "#HL2RPM_Gfx_Off", 0 }, { "#HL2RPM_Gfx_Q_Low", 0.2f }, { "#HL2RPM_Gfx_Q_Medium", 0.4f }, { "#HL2RPM_Gfx_Q_High", 0.65f },
@@ -115,6 +120,7 @@ enum GfxSetting_e
 	GFX_WATER,				// r_deferred_water_views 0/1
 	GFX_AA,					// r_deferred_aa 0 none / 1 FXAA / 2 TAA
 	GFX_PBR,				// r_deferred_pbr 0/1
+	GFX_RENDERSCALE,		// r_hl2rpm_renderscale 1 / 0.85 / 0.75 / 0.667 / 0.5
 
 	GFX_SETTING_COUNT
 };
@@ -133,6 +139,7 @@ static const char *s_pszGfxConVars[GFX_SETTING_COUNT] =
 	"r_deferred_water_views",
 	"r_deferred_aa",
 	"r_deferred_pbr",
+	"r_hl2rpm_renderscale",
 };
 
 static const char *s_pszGfxLabels[GFX_SETTING_COUNT] =
@@ -149,6 +156,7 @@ static const char *s_pszGfxLabels[GFX_SETTING_COUNT] =
 	"#HL2RPM_Gfx_WaterReflect",
 	"#HL2RPM_Gfx_AA",
 	"#HL2RPM_Gfx_PBR",
+	"#HL2RPM_Gfx_RenderScale",
 };
 
 static const GfxChoiceList_t s_GfxChoices[GFX_SETTING_COUNT] =
@@ -165,6 +173,7 @@ static const GfxChoiceList_t s_GfxChoices[GFX_SETTING_COUNT] =
 	CHOICES( s_OnOffChoices ),
 	CHOICES( s_AAChoices ),
 	CHOICES( s_OnOffChoices ),
+	CHOICES( s_RenderScaleChoices ),
 };
 
 // Overall presets. The costs that matter most on the GPU are the sun shadow
@@ -172,12 +181,12 @@ static const GfxChoiceList_t s_GfxChoices[GFX_SETTING_COUNT] =
 // and the cloud raymarch resolution.
 static const float s_flGfxPresets[GFX_PRESET_COUNT][GFX_SETTING_COUNT] =
 {
-	//	sun	lamp clouds shafts rain wet	ssao soft bounce water aa	pbr
-	{	0,	1,	1,	0,	0.5f,	0,	0,	0,	0,	0,	0,	0	},	// very low
-	{	1,	2,	1,	1,	0.5f,	1,	0,	0,	1,	0,	2,	1	},	// low
-	{	2,	3,	2,	1,	1.0f,	1,	1,	1,	1,	1,	2,	1	},	// medium
-	{	3,	4,	2,	2,	1.0f,	1,	1,	1,	1,	1,	2,	1	},	// high
-	{	5,	5,	3,	3,	1.5f,	1,	1,	1,	1,	1,	2,	1	},	// ultra
+	//	sun	lamp clouds shafts rain wet	ssao soft bounce water aa	pbr	scale
+	{	0,	1,	1,	0,	0.5f,	0,	0,	0,	0,	0,	0,	0,	0.5f	},	// very low
+	{	1,	2,	1,	1,	0.5f,	1,	0,	0,	1,	0,	2,	1,	0.667f	},	// low
+	{	2,	3,	2,	1,	1.0f,	1,	1,	1,	1,	1,	2,	1,	0.75f	},	// medium
+	{	3,	4,	2,	2,	1.0f,	1,	1,	1,	1,	1,	2,	1,	0.75f	},	// high
+	{	5,	5,	3,	3,	1.5f,	1,	1,	1,	1,	1,	2,	1,	0.75f	},	// ultra
 };
 
 // ---------------------------------------------------------------------------
@@ -289,6 +298,49 @@ static const GfxPageDesc_t s_EffectsPage =
 };
 
 // ---------------------------------------------------------------------------
+// Sound and interface page (no presets): the language, the music of the mod, subtitles, the heart
+// and breath of a wounded man, the HUD helpers, the pause of the character windows
+// ---------------------------------------------------------------------------
+static const GfxChoice_t s_VolumeChoices[] =
+{
+	{ "#HL2RPM_Gfx_Off", 0 }, { "25 %", 0.25f }, { "50 %", 0.5f }, { "75 %", 0.75f }, { "100 %", 1.0f },
+};
+static const GfxChoice_t s_SwayChoices[] =
+{
+	{ "#HL2RPM_Gfx_Off", 0 }, { "#HL2RPM_Snd_Weak", 1 }, { "#HL2RPM_Snd_Strong", 2 },
+};
+static const GfxChoice_t s_LanguageChoices[] =
+{
+	{ "#HL2RPM_Lang_Auto", 0 }, { "#HL2RPM_Lang_Russian", 1 }, { "English", 2 },
+};
+
+static const char *s_pszSndConVars[] =
+{
+	"cl_rpm_language", "snd_rpm_music", "cl_rpm_subtitles", "cl_vitals_breath_volume", "cl_vitals_heartbeat_volume",
+	"cl_vitals_screen", "cl_vitals_sway", "cl_rpm_prompt", "cl_rpm_markers", "cl_rpm_suitboot", "cl_rpm_char_pause", "cl_rpm_menu",
+};
+static const char *s_pszSndLabels[] =
+{
+	"#HL2RPM_Snd_Language", "#HL2RPM_Snd_Music", "#HL2RPM_Snd_Subtitles", "#HL2RPM_Snd_Breath", "#HL2RPM_Snd_Heart",
+	"#HL2RPM_Snd_HurtScreen", "#HL2RPM_Snd_HurtSway", "#HL2RPM_Snd_Prompt", "#HL2RPM_Snd_Markers", "#HL2RPM_Snd_SuitBoot",
+	"#HL2RPM_Snd_CharPause", "#HL2RPM_Snd_NewWindows",
+};
+static const GfxChoiceList_t s_SndChoices[] =
+{
+	CHOICES( s_LanguageChoices ), CHOICES( s_VolumeChoices ), CHOICES( s_OnOffChoices ), CHOICES( s_VolumeChoices ),
+	CHOICES( s_VolumeChoices ), CHOICES( s_OnOffChoices ), CHOICES( s_SwayChoices ), CHOICES( s_OnOffChoices ),
+	CHOICES( s_OnOffChoices ), CHOICES( s_OnOffChoices ), CHOICES( s_OnOffChoices ), CHOICES( s_OnOffChoices ),
+};
+COMPILE_TIME_ASSERT( ARRAYSIZE( s_pszSndConVars ) == ARRAYSIZE( s_pszSndLabels ) && ARRAYSIZE( s_pszSndConVars ) == ARRAYSIZE( s_SndChoices ) );
+
+static const GfxPageDesc_t s_SoundPage =
+{
+	"HL2RPMSoundPage", "#HL2RPM_Options_Sound", NULL,
+	ARRAYSIZE( s_pszSndConVars ), s_pszSndConVars, s_pszSndLabels, s_SndChoices, NULL,
+	-1, "#HL2RPM_Snd_Hint",
+};
+
+// ---------------------------------------------------------------------------
 // Controls of the page.
 //
 // Any key typed while the Options dialog has the focus goes to GameUI's
@@ -374,7 +426,7 @@ CHL2RPMGraphicsPage::CHL2RPMGraphicsPage( Panel *pParent, const GfxPageDesc_t &d
 	m_bLoading = true;
 	m_flLoadedRestartValue = -1.0f;
 
-	m_pPresetLabel = new CGfxLabel( this, "PresetLabel", m_Desc.pszPresetLabel );
+	m_pPresetLabel = new CGfxLabel( this, "PresetLabel", m_Desc.pszPresetLabel ? m_Desc.pszPresetLabel : "" );
 	m_pPreset = new CGfxComboBox( this, "PresetCombo", GFX_PRESET_COUNT + 1, false );
 	m_pPreset->AddActionSignalTarget( this );
 	for ( int i = 0; i < GFX_PRESET_COUNT; i++ )
@@ -410,6 +462,12 @@ CHL2RPMGraphicsPage::CHL2RPMGraphicsPage( Panel *pParent, const GfxPageDesc_t &d
 	m_pNoteLabel = new CGfxLabel( this, "NoteLabel", "#HL2RPM_Gfx_RestartNote" );
 	m_pNoteLabel->SetVisible( false );
 	m_pHintLabel = new CGfxLabel( this, "HintLabel", m_Desc.pszHint );
+	if ( !m_Desc.pflPresets )
+	{
+		m_pPresetLabel->SetVisible( false );
+		m_pPreset->SetVisible( false );
+		m_pGPULabel->SetVisible( false );
+	}
 
 	LoadFromConVars();
 	m_bLoading = false;
@@ -445,9 +503,12 @@ void CHL2RPMGraphicsPage::PerformLayout()
 	const int iRow = clamp( ( GetTall() - 12 - 34 - iFooter ) / Max( 1, m_Desc.nSettings ), 22, 30 );
 	int y = 12;
 
-	m_pPresetLabel->SetBounds( x0, y, iLabelWide, 22 );
-	m_pPreset->SetBounds( x1, y, iComboWide, 22 );
-	y += 34;
+	if ( m_Desc.pflPresets )
+	{
+		m_pPresetLabel->SetBounds( x0, y, iLabelWide, 22 );
+		m_pPreset->SetBounds( x1, y, iComboWide, 22 );
+		y += 34;
+	}
 
 	for ( int s = 0; s < m_Desc.nSettings; s++ )
 	{
@@ -504,7 +565,7 @@ float CHL2RPMGraphicsPage::GetChoiceValue( int iSetting ) const
 
 int CHL2RPMGraphicsPage::DetectPreset() const
 {
-	for ( int p = 0; p < GFX_PRESET_COUNT; p++ )
+	for ( int p = 0; m_Desc.pflPresets && p < GFX_PRESET_COUNT; p++ )
 	{
 		bool bMatch = true;
 		for ( int s = 0; s < m_Desc.nSettings && bMatch; s++ )
@@ -517,7 +578,7 @@ int CHL2RPMGraphicsPage::DetectPreset() const
 
 void CHL2RPMGraphicsPage::SelectPreset( int iPreset )
 {
-	if ( iPreset < 0 || iPreset >= GFX_PRESET_COUNT )
+	if ( iPreset < 0 || iPreset >= GFX_PRESET_COUNT || !m_Desc.pflPresets )
 		return;
 
 	m_bLoading = true;
@@ -584,7 +645,7 @@ void CHL2RPMGraphicsPage::OnApplyChanges()
 // ---------------------------------------------------------------------------
 // Injector: waits for the Options dialog and adds the pages to it
 // ---------------------------------------------------------------------------
-static ConVar cl_options_graphics_select( "cl_options_graphics_select", "0", 0, "Dev: open the Options dialog on the Graphics page (2 = the Effects page)" );
+static ConVar cl_options_graphics_select( "cl_options_graphics_select", "0", 0, "Dev: open the Options dialog on the Graphics page (2 = the Effects page, 3 = Sound and interface)" );
 static ConVar cl_options_graphics_page( "cl_options_graphics_page", "1", FCVAR_ARCHIVE, "Add the HL2RPM Graphics and Effects pages to the Options dialog" );
 
 class CHL2RPMOptionsInjector : public Panel
@@ -633,21 +694,28 @@ public:
 		pEffects->AddActionSignalTarget( hDialog );
 		pDialog->AddPage( pEffects, s_EffectsPage.pszTitle );
 
+		CHL2RPMGraphicsPage *pSound = new CHL2RPMGraphicsPage( NULL, s_SoundPage );
+		pSound->AddActionSignalTarget( hDialog );
+		pDialog->AddPage( pSound, s_SoundPage.pszTitle );
+
 		// the tabs are laid out in one row without scrolling: two more tabs don't fit into the
 		// dialog's width (the last one was cut off - unreachable). Wider, still centered.
 		{
 			int dx, dy, dw, dh;
 			ipanel()->GetPos( hDialog, dx, dy );
 			ipanel()->GetSize( hDialog, dw, dh );
-			const int iExtra = 150;
-			ipanel()->SetSize( hDialog, dw + iExtra, dh );
-			ipanel()->SetPos( hDialog, Max( 0, dx - iExtra / 2 ), dy );
+			const int iExtra = 260;
+			// (and taller: the Graphics page has 13 rows since the render scale)
+			const int iExtraTall = 64;
+			ipanel()->SetSize( hDialog, dw + iExtra, dh + iExtraTall );
+			ipanel()->SetPos( hDialog, Max( 0, dx - iExtra / 2 ), Max( 0, dy - iExtraTall / 2 ) );
 			pPanel->InvalidateLayout( true );
 		}
 
 		if ( cl_options_graphics_select.GetBool() && pDialog->GetPropertySheet() )
 		{
-			pDialog->GetPropertySheet()->SetActivePage( ( cl_options_graphics_select.GetInt() == 2 ) ? pEffects : pPage );
+			const int iSel = cl_options_graphics_select.GetInt();
+			pDialog->GetPropertySheet()->SetActivePage( iSel == 3 ? pSound : iSel == 2 ? pEffects : pPage );
 
 			// the dialog opened from a console command starts off screen: center it
 			int sw, sh, dw, dh;

@@ -50,21 +50,8 @@ void InitSSAORTs()
 {
 	const unsigned int flags = TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_RENDERTARGET;
 
-	g_tex_SSAO.Init( materials->CreateNamedRenderTargetTextureEx2(
-		"_rt_hl2rpm_ssao",
-		128, 128,
-		RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP,
-		IMAGE_FORMAT_RGBA8888,
-		MATERIAL_RT_DEPTH_NONE,
-		flags, 0 ) );
-
-	g_tex_SSAOBlur.Init( materials->CreateNamedRenderTargetTextureEx2(
-		"_rt_hl2rpm_ssao_blur",
-		128, 128,
-		RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP,
-		IMAGE_FORMAT_RGBA8888,
-		MATERIAL_RT_DEPTH_NONE,
-		flags, 0 ) );
+	g_tex_SSAO.Init( CreateFrameSizedRT( "_rt_hl2rpm_ssao", 1, IMAGE_FORMAT_RGBA8888, MATERIAL_RT_DEPTH_NONE, flags ) );
+	g_tex_SSAOBlur.Init( CreateFrameSizedRT( "_rt_hl2rpm_ssao_blur", 1, IMAGE_FORMAT_RGBA8888, MATERIAL_RT_DEPTH_NONE, flags ) );
 
 	// the sky visibility map: r open part around a point on its own top, g the same under a
 	// cover, b the depth of the top (deferred_skyvis_ps30); bilinear

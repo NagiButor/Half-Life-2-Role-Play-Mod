@@ -6,6 +6,7 @@
 //=============================================================================//
 
 #include "cbase.h"
+#include "hl2rpm_audio.h"
 
 #include "ai_speech.h"
 
@@ -813,6 +814,10 @@ bool CAI_Expresser::SpeakDispatchResponse( AIConcept_t concept, AI_Response *res
 {
 	char response[ 256 ];
 	result->GetResponse( response, sizeof( response ) );
+
+	// HL2RPM: no lines about Gordon Freeman, stock chatter per NPC (hl2rpm_audio.cpp)
+	if ( result->GetType() != ResponseRules::RESPONSE_PRINT && !RPMSpeech::Allow( GetOuter(), (const char *)concept, response ) )
+		return false;
 
 	float delay = result->GetDelay();
 	

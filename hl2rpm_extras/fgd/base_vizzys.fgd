@@ -4842,6 +4842,9 @@
 	input SetMovingSound(string) : "Sets the sound to use when the door is moving."
 	input SetLockedSound(string) : "Sets the sound to use when the door is locked."
 	input SetUnlockedSound(string) : "Sets the sound to use when the door is unlocked."
+	//Pravka HL2RPM: lock of the RPG
+	rpm_key(string) : "HL2RPM: key item" : "" : "Item id (Creation Kit) of the key that opens the door"
+	rpm_lock_level(integer) : "HL2RPM: lockpick level" : 0 : "Lockpick skill needed to open it (0 = no lock, 1..100)"
 ]
 
 

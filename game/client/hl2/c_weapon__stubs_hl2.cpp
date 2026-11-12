@@ -39,6 +39,19 @@ STUB_WEAPON_CLASS( weapon_crossbow, WeaponCrossbow, C_BaseHLCombatWeapon );
 STUB_WEAPON_CLASS( weapon_slam, Weapon_SLAM, C_BaseHLCombatWeapon );
 #endif
 STUB_WEAPON_CLASS( weapon_crowbar, WeaponCrowbar, C_BaseHLBludgeonWeapon );
+// HL2RPM: the melee weapons of the HL2 Melee Pack (server: hl2rpm_melee.cpp)
+STUB_WEAPON_CLASS( weapon_rpm_axe, WeaponRPMAxe, C_BaseHLBludgeonWeapon );
+STUB_WEAPON_CLASS( weapon_rpm_bottle, WeaponRPMBottle, C_BaseHLBludgeonWeapon );
+STUB_WEAPON_CLASS( weapon_rpm_brokenbottle, WeaponRPMBrokenBottle, C_BaseHLBludgeonWeapon );
+STUB_WEAPON_CLASS( weapon_rpm_hook, WeaponRPMHook, C_BaseHLBludgeonWeapon );
+STUB_WEAPON_CLASS( weapon_rpm_pan, WeaponRPMPan, C_BaseHLBludgeonWeapon );
+STUB_WEAPON_CLASS( weapon_rpm_pickaxe, WeaponRPMPickaxe, C_BaseHLBludgeonWeapon );
+STUB_WEAPON_CLASS( weapon_rpm_pipe, WeaponRPMPipe, C_BaseHLBludgeonWeapon );
+STUB_WEAPON_CLASS( weapon_rpm_pot, WeaponRPMPot, C_BaseHLBludgeonWeapon );
+// HL2RPM: the Beretta 92 (server: hl2rpm_beretta.cpp)
+STUB_WEAPON_CLASS( weapon_rpm_beretta, WeaponRPMBeretta, C_BaseHLCombatWeapon );
+STUB_WEAPON_CLASS( weapon_rpm_shovel, WeaponRPMShovel, C_BaseHLBludgeonWeapon );
+STUB_WEAPON_CLASS( weapon_rpm_fists, WeaponRPMFists, C_BaseHLBludgeonWeapon );
 #ifdef HL2_EPISODIC
 STUB_WEAPON_CLASS( weapon_hopwire, WeaponHopwire, C_BaseHLCombatWeapon );
 //STUB_WEAPON_CLASS( weapon_proto1, WeaponProto1, C_BaseHLCombatWeapon );

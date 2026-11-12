@@ -21,6 +21,17 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
+// HL2RPM: every hint of the game is a notification (with the keys of the player in it)
+static void RPMHint_Show( const wchar_t *pszText )
+{
+	extern void RPMToast_Show( const char *message, const char *category );
+	wchar_t wszKeys[512];
+	char szHint[1024];
+	UTIL_ReplaceKeyBindings( pszText, 0, wszKeys, sizeof( wszKeys ) );
+	g_pVGuiLocalize->ConvertUnicodeToANSI( wszKeys, szHint, sizeof( szHint ) );
+	RPMToast_Show( szHint, "hint" );
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: Displays hints across the center of the screen
 //-----------------------------------------------------------------------------
@@ -312,11 +323,10 @@ void CHudHintDisplay::LocalizeAndDisplay( const char *pszHudTxtMsg, const char *
 		pszBuf = szBuf;
 	}
 
-	// make it visible
-	if ( SetHintText( pszBuf ) )
+	// HL2RPM: hints are notifications of the left, in the look of the other windows
+	if ( pszBuf && pszBuf[0] )
 	{
-		SetVisible( true );
-		g_pClientMode->GetViewportAnimationController()->StartAnimationSequence( "HintMessageShow" ); 
+		RPMHint_Show( pszBuf );
 
 		C_BasePlayer *pLocalPlayer = C_BasePlayer::GetLocalPlayer();
 		if ( pLocalPlayer )
@@ -807,15 +817,17 @@ void CHudHintKeyDisplay::MsgFunc_KeyHintText( bf_read &msg )
 	char szString[2048];
 	msg.ReadString( szString, sizeof(szString) );
 
-	// make it visible
-	if ( SetHintText( szString ) )
+	// HL2RPM: env_hudhint and the like come here (UTIL_HudHintText): a notification of the left
+	if ( !szString[0] )
+		return;
+	wchar_t wszPlain[512];
+	wchar_t *ws = g_pVGuiLocalize->Find( szString );
+	if ( !ws )
 	{
-		SetVisible( true );
- 		g_pClientMode->GetViewportAnimationController()->StartAnimationSequence( "KeyHintMessageShow" ); 
+		if ( szString[0] == '#' )
+			return;
+		g_pVGuiLocalize->ConvertANSIToUnicode( szString, wszPlain, sizeof( wszPlain ) );
+		ws = wszPlain;
 	}
-	else
-	{
-		// it's being cleared, hide the panel
-		g_pClientMode->GetViewportAnimationController()->StartAnimationSequence( "KeyHintMessageHide" ); 
-	}
+	RPMHint_Show( ws );
 }

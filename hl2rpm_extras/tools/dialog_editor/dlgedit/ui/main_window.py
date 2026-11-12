@@ -24,16 +24,24 @@ from .graph import GraphScene, GraphView, NodeItem
 from .inspector import Inspector
 from .settings_dialog import SettingsDialog
 from .simulator import SimulatorDialog
+from .rpg_pages import RPGMixin
+from .logic_pages import LogicMixin
+from .sound_pages import SoundMixin
+from .char_pages import CharMixin
 from .world_ctrl import WorldMixin
+from .. import logic
 
 APP_NAME = "HL2RPM Creation Kit"
 FILE_FILTER = "Проект HL2RPM (*.hl2dlg)"
 DEFAULT_MAPSRC = r"E:\XBLAH's modding tool\content\Mapbase\hl2rpm\mapsrc"
-HL2_ITEMS = ["item_healthkit", "item_healthvial", "item_battery", "item_suit", "item_ammo_pistol", "item_ammo_smg1",
+HL2_ITEMS = ["item_healthkit", "item_healthvial", "item_battery", "item_suit", "item_suit_pcv", "item_suit_cp",
+             "item_combine_soldier_suit", "item_suit_prison", "item_suit_elite", "item_suit_worker", "item_suit_hazmat", "item_ammo_pistol", "item_ammo_smg1",
              "item_ammo_smg1_grenade", "item_ammo_ar2", "item_ammo_ar2_altfire", "item_box_buckshot", "item_ammo_357",
              "item_ammo_crossbow", "item_rpg_round", "weapon_crowbar", "weapon_stunstick", "weapon_pistol", "weapon_357",
              "weapon_smg1", "weapon_ar2", "weapon_shotgun", "weapon_crossbow", "weapon_rpg", "weapon_frag",
-             "weapon_physcannon", "weapon_bugbait"]
+             "weapon_physcannon", "weapon_bugbait",
+             "weapon_rpm_axe", "weapon_rpm_bottle", "weapon_rpm_brokenbottle", "weapon_rpm_hook", "weapon_rpm_pan", "weapon_rpm_pickaxe", "weapon_rpm_pipe", "weapon_rpm_pot", "weapon_rpm_shovel",
+             "weapon_rpm_beretta"]
 
 
 def app_icon():
@@ -53,11 +61,13 @@ def app_icon():
     return QIcon(pm)
 
 
-class MainWindow(WorldMixin, QMainWindow):
+class MainWindow(WorldMixin, RPGMixin, LogicMixin, SoundMixin, CharMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowIcon(app_icon())
-        self.qs = QSettings("HL2RPM", "DialogEditor")
+        # tests set HL2RPM_CK_SETTINGS to their own name: otherwise their temporary projects become the user's
+        # "last project" and push the real one out of the recent list
+        self.qs = QSettings("HL2RPM", os.environ.get("HL2RPM_CK_SETTINGS") or "DialogEditor")
         self.project = None
         self.npc = None
         self.display_lang = "english"
@@ -79,6 +89,11 @@ class MainWindow(WorldMixin, QMainWindow):
         self.validate_timer.setSingleShot(True)
         self.validate_timer.setInterval(900)
         self.validate_timer.timeout.connect(lambda: self.run_validation(False))
+        # autosave: a copy next to the project every 5 minutes while there are unsaved changes
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.setInterval(5 * 60 * 1000)
+        self.autosave_timer.timeout.connect(self.autosave)
+        self.autosave_timer.start()
 
         self.gscene = GraphScene()
         self.view = GraphView(self.gscene)
@@ -148,6 +163,7 @@ class MainWindow(WorldMixin, QMainWindow):
         l.addLayout(bl)
         left.addTab(w, "NPC")
         left.addTab(self._build_palette(), "Объекты")
+        left.addTab(self._build_models_tab(), "Модели")
         left.addTab(self._build_cell_view(), "На карте")
 
         w = QWidget()
@@ -157,14 +173,18 @@ class MainWindow(WorldMixin, QMainWindow):
         self.quest_list.itemClicked.connect(lambda it: self.inspector.show_target(("quest", it.data(Qt.UserRole))))
         l.addWidget(self.quest_list, 1)
         bl = QHBoxLayout()
-        b = QPushButton("+ квест")
+        b = QPushButton("+ задание")
         b.clicked.connect(lambda: self.new_quest())
         bl.addWidget(b)
         bl.addStretch(1)
         l.addLayout(bl)
-        left.addTab(w, "Квесты")
+        left.addTab(w, "Задания")
         self.quest_tab = w
+        left.addTab(self._build_logic_tab(), "Логика")
         left.addTab(self._build_factions(), "Фракции")
+        left.addTab(self._build_items_tab(), "Предметы")
+        left.addTab(self._build_sound_tab(), "Звук")
+        left.addTab(self._build_char_tab(), "РПГ")
         self.left_tabs = left
         d = QDockWidget("Проект", self)
         d.setObjectName("dock_project")
@@ -266,13 +286,27 @@ class MainWindow(WorldMixin, QMainWindow):
         self.a_regen = self._act("Пересоздать весь липсинк", self.regenerate_all)
         self.a_rescan = self._act("Перечитать карты", self.rescan_maps)
         self.a_folder = self._act("Открыть папку игры", lambda: self._open_dir(self.project.settings.game_dir if self.project else ""))
-        pm.addActions([self.a_settings, self.a_validate, self.a_regen, self.a_rescan, self.a_folder])
+        self.a_translate = self._act("Автоперевод (Google)…", self.auto_translate)
+        pm.addActions([self.a_settings, self.a_validate, self.a_translate, self.a_regen, self.a_rescan, self.a_folder])
+
+        wm = mb.addMenu("&Мастера")
+        from . import wizards
+        wm.addAction(self._act("Новый торговец…", lambda: wizards.new_trader(self),
+                               tip="NPC-торговец: товары, деньги, диалог торговли, место перед камерой окна карты"))
+        wm.addAction(self._act("Задание: принеси / убей / поговори…", lambda: wizards.new_quest(self),
+                               tip="Задание с одной целью и варианты «Есть работа?» / «Готово» у заказчика"))
+        wm.addAction(self._act("Патруль ГО…", lambda: wizards.new_patrol(self),
+                               tip="Метрокоп, маршрут-квадрат вокруг камеры окна карты и пакет «патруль»"))
 
         gm = mb.addMenu("&Игра")
         self.a_sim = self._act("Проверить диалог (в редакторе)", self.simulate, "F5", "Пройти диалог прямо в редакторе: озвучка, квесты, условия")
         self.a_run = self._act("Запустить в игре", self.run_game, "F6", "Сохранить и запустить карту: с окна карты — с места камеры, из диалога — карту с этим NPC")
         self.a_reload = self._act("Обновить диалоги и мир в запущенной игре", self.reload_in_game, "F8")
+        self.a_teststate = self._act("Состояние для запуска…", self.edit_test_state,
+                                     tip="Задания, флаги, предметы, навыки, время — с ними стартует игра из редактора")
         gm.addActions([self.a_sim, self.a_run, self.a_reload])
+        gm.addSeparator()
+        gm.addAction(self.a_teststate)
 
         hm = mb.addMenu("Справка")
         hm.addAction(self._act("Управление", self.show_help, "F1"))
@@ -351,6 +385,11 @@ class MainWindow(WorldMixin, QMainWindow):
         self.rescan_maps(quiet=True)
         self.refresh_npc_list()
         self.refresh_quest_list()
+        self.refresh_logic_list()
+        self.refresh_item_tree()
+        self._sound_names = None
+        self.refresh_sound_tree()
+        self.refresh_char_tree()
         last = project.view.get("_last_npc", "")
         if project.npcs:
             self.select_npc(project.npc(last) or project.npcs[0])
@@ -403,16 +442,38 @@ class MainWindow(WorldMixin, QMainWindow):
             path, _ = QFileDialog.getOpenFileName(self, "Открыть проект", self.qs.value("last_dir", ""), FILE_FILTER)
         if not path:
             return
+        auto = path + ".autosave"
+        use_auto = False
+        if os.path.isfile(auto) and os.path.getmtime(auto) > os.path.getmtime(path) + 1:
+            r = QMessageBox.question(self, "Автосохранение",
+                                     "Есть автосохранение проекта новее файла (%s).\nПрограмма, похоже, закрылась без сохранения.\n\n"
+                                     "Открыть автосохранение? (Нет — открыть сохранённый файл)" % time.strftime("%d.%m %H:%M", time.localtime(os.path.getmtime(auto))))
+            use_auto = r == QMessageBox.Yes
         try:
-            p = Project.load(path)
+            p = Project.load(auto if use_auto else path)
+            p.path = path
         except Exception as e:
             QMessageBox.critical(self, "Открыть", "Не удалось открыть %s:\n%s" % (path, e))
             return
         self.qs.setValue("last_dir", os.path.dirname(path))
         self.set_project(p)
+        if use_auto:
+            self.dirty = True
+            self.update_title()
         st = p.view.get(self.npc.targetname if self.npc else "", None)
         if st:
             self.view.set_view_state(st)
+
+    def autosave(self):
+        p = self.project
+        if not p or not p.path or not self.dirty:
+            return
+        try:
+            with open(p.path + ".autosave", "w", encoding="utf-8") as f:
+                f.write(p.to_json())
+            self.statusBar().showMessage("Автосохранение: %s.autosave" % os.path.basename(p.path), 3000)
+        except OSError as e:
+            self.logln("Автосохранение не удалось: %s" % e)
 
     def save_as(self):
         if not self.project:
@@ -460,6 +521,13 @@ class MainWindow(WorldMixin, QMainWindow):
         except OSError as e:
             QMessageBox.critical(self, "Сохранение", "Не удалось записать проект:\n%s" % e)
             return False
+        if not self.save_vmfs():
+            return False
+        try:
+            if os.path.exists(p.path + ".autosave"):
+                os.remove(p.path + ".autosave")
+        except OSError:
+            pass
         self.dirty = False
         self.update_title()
         self.logln("Сохранено за %.1f с → %s: %s" % (time.time() - t0, p.settings.game_dir, rep.summary()))
@@ -553,6 +621,10 @@ class MainWindow(WorldMixin, QMainWindow):
     def _state(self):
         d = self.project.to_dict()
         d.pop("view", None)
+        # the maps' VMFs: only what differs from the files (objects placed in Hammer, edited here)
+        vm = {name: doc.state() for name, doc in getattr(self, "vmfdocs", {}).items()}
+        if any(st["mod"] or st["new"] for st in vm.values()):
+            d["_vmf"] = vm
         return json.dumps(d, ensure_ascii=False, sort_keys=True)
 
     def snapshot(self):
@@ -577,6 +649,9 @@ class MainWindow(WorldMixin, QMainWindow):
         cur = self.npc.targetname if self.npc else ""
         d = json.loads(s)
         d["view"] = self.project.view
+        vm = d.pop("_vmf", {})
+        for name, doc in getattr(self, "vmfdocs", {}).items():
+            doc.restore(vm.get(name, {"mod": {}, "new": []}))
         p = Project.from_dict(d)
         p.path = self.project.path
         self.project = p
@@ -587,8 +662,10 @@ class MainWindow(WorldMixin, QMainWindow):
         self.rebuild_scene()
         self.layer = p.layer(self.cur_map, create=True) if self.cur_map else None
         self.worldview.set_layer(self.layer)
+        self.sync_scene_from_vmf()
         self.refresh_palette()
         self.refresh_faction_list()
+        self.refresh_item_tree()
         self.refresh_cell_view()
         self.inspector.show_target(sel)
         if sel and sel[0] in ("node", "option", "returning", "start"):
@@ -623,6 +700,9 @@ class MainWindow(WorldMixin, QMainWindow):
         if structural:
             self.gscene.refresh_all()
             self.refresh_quest_list()
+            self.refresh_logic_list()
+            self.refresh_sound_tree()
+            self.refresh_char_tree()
         else:
             for it in self.gscene.node_items.values():
                 it.refresh()
@@ -661,6 +741,10 @@ class MainWindow(WorldMixin, QMainWindow):
                 continue
             maps = sorted({e.map for e in self.mapindex.find(n.targetname)} | {m for m, _ in self.project.placements(n.targetname)})
             onmap = (" · " + ", ".join(maps)) if maps else " · нет на картах"
+            if n.actor.is_template:
+                onmap = " · шаблон" + (" · " + ", ".join(maps) if maps else "")
+            elif n.actor.template:
+                onmap = " · от " + n.actor.template + onmap
             pk = " · пакетов %d" % len(n.actor.packages) if n.actor.packages else ""
             it = QListWidgetItem("%s\n   %s · %d реплик%s%s" % (n.targetname, name or "(без имени)", len(n.nodes), pk, onmap))
             it.setData(Qt.UserRole, n.targetname)
@@ -809,7 +893,7 @@ class MainWindow(WorldMixin, QMainWindow):
             return
         for q in self.project.quests:
             t, _ = text_for(q.title, self.display_lang, self.project.base_language)
-            it = QListWidgetItem("%s\n   %s · этапов %d · %s" % (q.id, t or "(без названия)", len(q.stages), q.owner or "?"))
+            it = QListWidgetItem("%s\n   %s · этапов %d · целей %d" % (q.id, t or "(без названия)", len(q.stages), len(q.all_objectives())))
             it.setData(Qt.UserRole, q.id)
             self.quest_list.addItem(it)
 
@@ -831,6 +915,15 @@ class MainWindow(WorldMixin, QMainWindow):
         s0.title[self.project.base_language] = "Выполнить задание"
         s1 = Stage()
         s1.title[self.project.base_language] = "Вернуться"
+        if self.npc:
+            # the usual "do it - come back": the return is a talk objective with the quest giver
+            from ..model import Objective
+            o = Objective("o1")
+            o.type = "talk"
+            o.target = self.npc.targetname
+            o.text[self.project.base_language] = "Вернуться к %s" % self.npc.targetname
+            s1.objectives.append(o)
+            s1.final = True
         q.stages = [s0, s1]
         q.rewards = [["item_healthkit", 1]]
         self.project.quests.append(q)
@@ -852,6 +945,13 @@ class MainWindow(WorldMixin, QMainWindow):
                     for ref in (o.set_stage, o.require_state, o.require_stage):
                         if ref and ref[0] == old:
                             ref[0] = new
+        for _w, _k, lst in logic.iter_logic(self.project):
+            for x in lst or []:
+                if x.get("quest") == old:
+                    x["quest"] = new
+        for e in self.project.events:
+            if e.on.startswith("quest_") and e.target == old:
+                e.target = new
         self.model_changed(True)
         self.inspector.show_target(("quest", new))
 
@@ -862,6 +962,18 @@ class MainWindow(WorldMixin, QMainWindow):
         self.project.quests.remove(q)
         self.model_changed(True)
         self.inspector.show_target(("npc",))
+
+    def edit_test_state(self):
+        if not self.project:
+            return
+        from .test_state_dialog import TestStateDialog
+        TestStateDialog(self).exec()
+
+    def auto_translate(self):
+        if not self.project:
+            return
+        from .translate_dialog import TranslateDialog
+        TranslateDialog(self).exec()
 
     def item_names(self):
         if self._items_cache is None:
@@ -1254,7 +1366,10 @@ class MainWindow(WorldMixin, QMainWindow):
         for pr in probs:
             cnt[pr.severity] += 1
             w = pr.where
-            where = {"npc": "NPC", "returning": "повторный визит", "quest": "квест"}.get(w[0], "")
+            where = {"npc": "NPC", "returning": "повторный визит", "quest": "задание", "logic": "логика",
+                     "event": "событие", "globals": "флаги и переменные"}.get(w[0], "")
+            if w[0] == "event":
+                where = "событие %s" % w[1]
             if w[0] == "node":
                 where = "реплика #%d" % w[1]
             elif w[0] == "option":
@@ -1286,9 +1401,28 @@ class MainWindow(WorldMixin, QMainWindow):
         if w[0] == "ref":
             self.focus_ref(w[1], w[2])
             return
+        if w[0] == "terminal":
+            self.left_tabs.setCurrentWidget(self.logic_tab)
+            self.inspector.show_target(w if len(w) > 1 else ("globals",))
+            return
+        if w[0] in ("event", "globals", "logic"):
+            self.left_tabs.setCurrentWidget(self.logic_tab)
+            self.inspector.show_target(w if w[0] != "logic" else ("globals",))
+            return
         if w[0] == "package":
             self.inspector.pkg_sel = w[1]
             self.open_npc(npc_name, tab=2)
+            return
+        if w[0] == "barks":
+            self.open_npc(npc_name, tab=3)
+            return
+        if w[0] in ("perk", "trait", "rpgrules", "newgame"):
+            self.left_tabs.setCurrentWidget(self.char_tab)
+            self.inspector.show_target(w)
+            return
+        if w[0] in ("track", "soundscape", "barkset"):
+            self.left_tabs.setCurrentWidget(self.sound_tab)
+            self.inspector.show_target(w)
             return
         npc = self.project.npc(npc_name)
         if npc and npc is not self.npc:
@@ -1391,8 +1525,9 @@ class MainWindow(WorldMixin, QMainWindow):
             mp, ok = QInputDialog.getText(self, "Карта", "Имя карты (без .bsp):")
             if not ok or not mp:
                 return
-        args = [s.hl2_exe, "-game", s.mod_dir, "-dev", "-console", "-novid", "+dialog_language", self.display_lang,
-                "+map", mp]
+        from .test_state_dialog import launch_args
+        args = [s.hl2_exe, "-game", s.mod_dir, "-dev", "-console", "-novid", "+dialog_language", self.display_lang] + \
+            launch_args(self.project) + ["+map", mp]
         self.logln("Запуск: " + " ".join('"%s"' % a if " " in a else a for a in args))
         subprocess.Popen(args, cwd=os.path.dirname(s.hl2_exe))
 

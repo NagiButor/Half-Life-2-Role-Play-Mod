@@ -442,9 +442,13 @@ public:
 
 	// HL2RPM: temporal anti-aliasing
 	virtual void CommitTAAData( const taaData_t &data ) = 0;
+
+	// HL2RPM: what of the world each point light reaches (deferred_lightreach.cpp: traced free
+	// distances, a cube of REACH_N x REACH_N per face and light) - lamps do not light through walls
+	virtual void CommitTexture_LightReach( ITexture *pReach ) = 0;
 };
 
-#define DEFERRED_EXTENSION_VERSION "DeferredExtensionVersion010"
+#define DEFERRED_EXTENSION_VERSION "DeferredExtensionVersion011"
 
 #ifdef STDSHADER_DX9_DLL_EXPORT
 
@@ -526,6 +530,9 @@ public:
 
 	virtual void CommitTAAData( const taaData_t &data );
 	inline const taaData_t &GetTAAData() { return m_dataTAA; }
+
+	virtual void CommitTexture_LightReach( ITexture *pReach );
+	inline ITexture *GetTexture_LightReach() { return m_pTexLightReach; }
 
 	inline ITexture *GetTexture_ShadowDepthRaw_Ortho( const int &index ) { return m_pTexShadowDepthRaw_Ortho[ index ]; }
 	inline ITexture *GetTexture_SSAO() { return m_pTexSSAO; }
@@ -654,6 +661,8 @@ private:
 	postfxData_t m_dataPostFX;
 
 	taaData_t m_dataTAA;
+
+	ITexture *m_pTexLightReach;
 };
 
 float *CDeferredExtension::GetOriginBase()

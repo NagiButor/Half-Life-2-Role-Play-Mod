@@ -1804,8 +1804,26 @@ static void Generate8BitBloomTexture( IMatRenderContext *pRenderContext, float f
 	pRenderContext->PopRenderTargetAndViewport();
 }
 
+// HL2RPM: the engine's post-processing did work whose result the deferred post-processing threw
+// away: a copy of the frame and the luminance histogram, though the tone map scale is clamped to 1
+// when it owns the exposure; the bloom texture (1/4 size, downsampled and blurred) for a bloom of
+// amount 0, and a full screen pass that then copied the frame onto itself (~0.65 ms in 1080p on
+// the GTX 960M). Skipped when nothing the engine pass does is in use (color correction, the
+// postprocess_controller's effects, software AA).
+static ConVar r_hl2rpm_engine_post_skip( "r_hl2rpm_engine_post_skip", "1", FCVAR_NONE,
+	"HL2RPM: skip the engine's histogram, bloom and post pass while the deferred post-processing owns exposure and bloom "
+	"and no color correction or post-process effect needs them (0 = always run)" );
+
 static void DoPreBloomTonemapping( IMatRenderContext *pRenderContext, int nX, int nY, int nWidth, int nHeight, float flAutoExposureMin, float flAutoExposureMax )
 {
+	if ( r_hl2rpm_engine_post_skip.GetBool() && DeferredPostFX_OwnsExposure() && !mat_show_histogram.GetInt() )
+	{
+		// (what the histogram would give: clamped to min = max = 1)
+		if ( mat_dynamic_tonemapping.GetInt() )
+			SetToneMapScale( pRenderContext, Max( 0.001f, flAutoExposureMin ), flAutoExposureMin, flAutoExposureMax );
+		return;
+	}
+
 	// Update HDR histogram before bloom
 	if ( mat_dynamic_tonemapping.GetInt() || mat_show_histogram.GetInt() )
 	{
@@ -2532,6 +2550,14 @@ void DoEnginePostProcessing( int x, int y, int w, int h, bool bFlashlightIsOn, b
 			// bloom, software-AA and colour-correction (applied in 1 pass, after generation of the bloom texture)
 			bool  bPerformSoftwareAA	= IsX360() && ( engine->GetDXSupportLevel() >= 90 ) && ( flAAStrength != 0.0f );
 			bool  bPerformBloom			= true; //!bPostVGui && ( flBloomScale > 0.0f ) && ( engine->GetDXSupportLevel() >= 90 );
+			// HL2RPM: (see r_hl2rpm_engine_post_skip) the bloom amount is 0 when the deferred post owns it;
+			// the pass is still needed for the postprocess_controller's effects
+			if ( r_hl2rpm_engine_post_skip.GetBool() && DeferredPostFX_OwnsBloom() && flBloomScale <= 0.0f && !mat_debug_bloom.GetInt() )
+			{
+				const PostProcessParameters_t defaults;
+				if ( !( s_LocalPostProcessParameters != defaults ) && s_viewFadeColor[3] <= 0.0f )
+					bPerformBloom = false;
+			}
 			bool  bPerformColCorrect	= !bPostVGui && 
 										  ( g_pMaterialSystemHardwareConfig->GetDXSupportLevel() >= 90) &&
 										  ( g_pMaterialSystemHardwareConfig->GetHDRType() != HDR_TYPE_FLOAT ) &&

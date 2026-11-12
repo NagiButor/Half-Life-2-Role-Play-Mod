@@ -1,0 +1,45 @@
+# toggle costs on trainstation street view
+|cl_weather_tour_step 8; r_hl2rpm_gpuprof 1; sv_weather partlycloudy 0; sv_timecycle_set_time 13
+|setpos -2954 -3625 60; setang -5 69 0
+shot|setpos -2954 -3625 60; setang -5 69 0
+shot|r_deferred_bounce 0; setpos -2954 -3625 60; setang -5 69 0
+|r_deferred_bounce 1
+shot|r_deferred_lightreach 0; setpos -2954 -3625 60; setang -5 69 0
+|r_deferred_lightreach 1
+shot|r_deferred_light_shadow_budget 0; setpos -2954 -3625 60; setang -5 69 0
+|r_deferred_light_shadow_budget 4
+shot|r_deferred_shadow_quality_pointspot 3; setpos -2954 -3625 60; setang -5 69 0
+|r_deferred_shadow_quality_pointspot 5
+shot|r_deferred_contact_shadows 0; setpos -2954 -3625 60; setang -5 69 0
+|r_deferred_contact_shadows 1
+shot|r_csm_pcss 0; setpos -2954 -3625 60; setang -5 69 0
+|r_csm_pcss 1
+shot|r_csm_shadow_normal 0; setpos -2954 -3625 60; setang -5 69 0
+|r_csm_shadow_normal 2
+shot|r_weather_sunshafts 0; setpos -2954 -3625 60; setang -5 69 0
+|r_weather_sunshafts 3
+shot|r_weather_godrays 0; setpos -2954 -3625 60; setang -5 69 0
+|r_weather_godrays 1
+shot|r_weather_clouds 0; setpos -2954 -3625 60; setang -5 69 0
+|r_weather_clouds 3
+shot|r_deferred_gi 0; setpos -2954 -3625 60; setang -5 69 0
+|r_deferred_gi 1
+shot|r_deferred_ssao 0; setpos -2954 -3625 60; setang -5 69 0
+|r_deferred_ssao 1
+shot|r_deferred_reflections 0; setpos -2954 -3625 60; setang -5 69 0
+|r_deferred_reflections 1
+shot|r_deferred_pom 0; setpos -2954 -3625 60; setang -5 69 0
+|r_deferred_pom 1
+shot|mat_motion_blur_enabled 0; setpos -2954 -3625 60; setang -5 69 0
+|mat_motion_blur_enabled 1
+shot|r_deferred_pbr 0; setpos -2954 -3625 60; setang -5 69 0
+|r_deferred_pbr 1
+shot|r_skybox 0; setpos -2954 -3625 60; setang -5 69 0
+|r_skybox 1
+shot|r_weather_motes 0; setpos -2954 -3625 60; setang -5 69 0
+|r_weather_motes 1
+shot|r_drawdetailprops 0; setpos -2954 -3625 60; setang -5 69 0
+|r_drawdetailprops 1
+shot|r_deferred_hd_textures 0; setpos -2954 -3625 60; setang -5 69 0
+|r_deferred_hd_textures 1
+shot|setpos -2954 -3625 60; setang -5 69 0

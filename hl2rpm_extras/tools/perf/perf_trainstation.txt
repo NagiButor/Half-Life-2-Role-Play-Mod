@@ -1,0 +1,8 @@
+# perf scenario: rpm_trainstation_testoptimization (run_game.ps1 -Map rpm_trainstation_testoptimization -Width 1920 -Height 1080 -StepsFile ...)
+|cl_weather_tour_step 10; r_hl2rpm_gpuprof 1; sv_weather partlycloudy 0; sv_timecycle_set_time 13
+|setpos -2954 -3625 60; setang -5 69 0
+shot|setpos -2954 -3625 60; setang -5 69 0
+shot|setpos -2954 -3625 60; setang -40 69 0
+shot|setpos -2954 -3625 60; setang 0 249 0
+|sv_timecycle_set_time 23
+shot|setpos -2954 -3625 60; setang -5 69 0

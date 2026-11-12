@@ -5,6 +5,7 @@
 //===========================================================================//
 
 #include "cbase.h"
+#include "hl2rpm_char.h"
 #include "globalstate.h"
 #include "isaverestore.h"
 #include "client.h"
@@ -1632,6 +1633,9 @@ void CBaseEntity::TakeDamage( const CTakeDamageInfo &inputInfo )
 		// Modify damage if we have a filter that does that
 		DamageFilterDamageMod(info);
 #endif
+
+		// HL2RPM: the weapon skill of the player, critical hits, damage resistance of perks
+		RPMChar::ModifyDamage( info, this );
 
 #ifdef MAPBASE_VSCRIPT
 		if (m_ScriptScope.IsInitialized() && g_Hook_OnTakeDamage.CanRunInScope( m_ScriptScope ))

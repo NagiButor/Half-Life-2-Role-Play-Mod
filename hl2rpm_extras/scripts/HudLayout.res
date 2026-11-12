@@ -36,6 +36,64 @@
 	}
 
 	// HL2RPM: without the HEV suit - a heart monitor in the place of the health box (hud_vitals.cpp)
+	HudRPMSubtitles
+	{
+		"fieldName"		"HudRPMSubtitles"
+		"xpos"	"0"
+		"ypos"	"0"
+		"wide"	"f0"
+		"tall"	"f0"
+		"visible" "1"
+		"enabled" "1"
+	}
+
+	// HL2RPM: the use prompt under the crosshair (hl2rpm_prompthud.cpp)
+	HudRPMPrompt
+	{
+		"fieldName"		"HudRPMPrompt"
+		"xpos"	"0"
+		"ypos"	"0"
+		"wide"	"f0"
+		"tall"	"f0"
+		"visible" "1"
+		"enabled" "1"
+	}
+
+	// HL2RPM: the HUD of a suit (hl2rpm_suithud.cpp)
+	HudRPMSuit
+	{
+		"fieldName"		"HudRPMSuit"
+		"xpos"	"0"
+		"ypos"	"0"
+		"wide"	"f0"
+		"tall"	"f0"
+		"visible" "1"
+		"enabled" "1"
+	}
+
+	// HL2RPM: the boot screen of a suit (hl2rpm_suitboot.cpp)
+	HudRPMSuitBoot
+	{
+		"fieldName"		"HudRPMSuitBoot"
+		"xpos"	"0"
+		"ypos"	"0"
+		"wide"	"f0"
+		"tall"	"f0"
+		"visible" "1"
+		"enabled" "1"
+	}
+
+	HudRPMMarkers
+	{
+		"fieldName"		"HudRPMMarkers"
+		"xpos"	"0"
+		"ypos"	"0"
+		"wide"	"f0"
+		"tall"	"f0"
+		"visible" "1"
+		"enabled" "1"
+	}
+
 	HudVitals
 	{
 		"fieldName"		"HudVitals"

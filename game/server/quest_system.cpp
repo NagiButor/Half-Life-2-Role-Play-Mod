@@ -6,6 +6,11 @@
 #include "inventory_system.h"
 #include "recipientfilter.h"
 #include "usermessages.h"
+#include "hl2rpm_logic.h"
+#include "hl2rpm_rpg.h"
+#include "hl2rpm_world.h"
+#include "KeyValues.h"
+#include "tier1/fmtstr.h"
 
 static CQuestSystem g_QuestSystem;
 ConVar quest_reward_debug( "quest_reward_debug", "0", FCVAR_GAMEDLL, "Debug quest reward granting with DevMsg (requires developer 1)" );
@@ -82,7 +87,18 @@ static void CopyQuestDef( QuestDef &dst, const QuestDef &src )
 		outStage.killTargets.RemoveAll();
 		for ( int j = 0; j < inStage.killTargets.Count(); ++j )
 			outStage.killTargets.AddToTail( inStage.killTargets[j] );
+
+		outStage.objectives.RemoveAll();
+		for ( int j = 0; j < inStage.objectives.Count(); ++j )
+			outStage.objectives.AddToTail( inStage.objectives[j] );
+		outStage.pActions = inStage.pActions;
+		outStage.next = inStage.next;
+		outStage.final = inStage.final;
 	}
+	dst.xp = src.xp;
+	dst.pOnComplete = src.pOnComplete;
+	dst.pOnFail = src.pOnFail;
+	dst.pFailConds = src.pFailConds;
 
 	dst.rewards.RemoveAll();
 	for ( int i = 0; i < src.rewards.Count(); ++i )
@@ -92,6 +108,20 @@ static void CopyQuestDef( QuestDef &dst, const QuestDef &src )
 		outReward.itemName = src.rewards[i].itemName;
 		outReward.amount = src.rewards[i].amount;
 	}
+}
+
+// the longest start of a UTF-8 string that fits in maxBytes without cutting a character
+static CUtlString Utf8Prefix( const char *s, int maxBytes )
+{
+	int n = 0, len = s ? Q_strlen( s ) : 0;
+	if ( len <= maxBytes )
+		return CUtlString( s ? s : "" );
+	n = maxBytes;
+	while ( n > 0 && ( (unsigned char)s[n] & 0xC0 ) == 0x80 )
+		--n;
+	CUtlString out;
+	out.SetDirect( s, n );
+	return out;
 }
 
 static const QuestStageDef *GetQuestStageDef( const QuestDef &def, int stage )
@@ -125,6 +155,9 @@ CQuestSystem::CQuestSystem()
 
 void CQuestSystem::LevelInitPreEntity()
 {
+	m_LastMarkers = "-";		// the client forgets its markers on a new level
+	m_LastTracked = "-";
+	m_flNextMarkers = 0.0f;
 	// HL2RPM: a new game starts without quests; a changelevel keeps them, a loaded
 	// game gets them from the save (see the save/restore block below)
 	if ( gpGlobals->eLoadType == MapLoad_NewGame || gpGlobals->eLoadType == MapLoad_Background )
@@ -163,6 +196,18 @@ void CQuestSystem::PrintState() const
 CON_COMMAND_F( quest_dump, "Print the quests and reputation of the player", FCVAR_GAMEDLL )
 {
 	QuestSystem().PrintState();
+}
+
+// Tab menu - Quests - Enter: track this quest (again - track none: the markers of all quests)
+CON_COMMAND_F( rpm_quest_track, "HL2RPM: rpm_quest_track <quest id> - its markers on the HUD (the same again - all quests)", FCVAR_GAMEDLL | FCVAR_CLIENTCMD_CAN_EXECUTE )
+{
+	CBasePlayer *pPlayer = UTIL_GetCommandClient();
+	if ( !pPlayer || args.ArgC() < 2 )
+		return;
+	KeyValues *pPl = RPMState::Section( "player" );
+	pPl->SetString( "tracked", Q_stricmp( pPl->GetString( "tracked", "" ), args[1] ) ? args[1] : "" );
+	QuestSystem().ForceMarkers();
+	QuestSystem().Think( pPlayer );
 }
 
 CON_COMMAND_F( quest_grant, "Test: give the player a quest: quest_grant <id>", FCVAR_GAMEDLL | FCVAR_CHEAT )
@@ -252,8 +297,6 @@ void CQuestSystem::FireGameEvent( IGameEvent *event )
 		if ( attackerUserId > 0 )
 			attacker = UTIL_PlayerByUserId( attackerUserId );
 	}
-	if ( !attacker )
-		return;
 
 	int victimEntIndex = event->GetInt( "entindex_killed", -1 );
 	if ( victimEntIndex <= 0 )
@@ -261,6 +304,11 @@ void CQuestSystem::FireGameEvent( IGameEvent *event )
 
 	CBaseEntity *victim = UTIL_EntityByIndex( victimEntIndex );
 	if ( !victim )
+		return;
+
+	// HL2RPM: "kill" events of the Creation Kit (whoever killed), XP for NPCs of the kit
+	RPMLogic::NoteKill( victim, attacker ? (CBaseEntity *)attacker : ( attackerEntIndex > 0 ? UTIL_EntityByIndex( attackerEntIndex ) : NULL ) );
+	if ( !attacker )
 		return;
 
 	PlayerData *data = FindPlayerDataByEntIndex( attacker->entindex() );
@@ -342,6 +390,22 @@ void CQuestSystem::FireGameEvent( IGameEvent *event )
 			}
 			SendQuestLogToPlayer( attacker );
 		}
+
+		// HL2RPM: "kill" objectives of the stage
+		if ( stageDef )
+		{
+			CUtlString questId = st.id;		// st may move: the actions of a new stage can add quests
+			for ( int o = 0; o < stageDef->objectives.Count(); ++o )
+			{
+				const QuestObjDef &obj = stageDef->objectives[o];
+				if ( Q_stricmp( obj.type, "kill" ) || !RPMLogic::NameMatches( obj.target, victim ) )
+					continue;
+				int have = ObjectiveProgress( questId, obj.id );
+				if ( have < obj.count )
+					SetObjectiveProgress( attacker, *def, obj, have + 1 );
+			}
+			AdvanceIfDone( attacker, questId );
+		}
 	}
 }
 
@@ -371,6 +435,7 @@ void CQuestSystem::RegisterQuestDef( const QuestDef &def )
 void CQuestSystem::ClearQuestDefs()
 {
 	m_QuestDefs.RemoveAll();
+	RPMLogic::FreePool( RPMLogic::POOL_QUESTS );
 }
 
 const QuestDef *CQuestSystem::FindQuestDef( const char *questId ) const
@@ -468,7 +533,14 @@ bool CQuestSystem::GrantQuest( CBasePlayer *player, const char *questId )
 	st->state = kQuestState_Active;
 	st->stage = 0;
 	st->progress = 0;
-	NotifyQuestStateChanged( player, questId, st->state );
+	ClearObjectives( questId );
+	NotifyQuestStateChanged( player, questId, kQuestState_Active );
+	CUtlString id = questId;		// the actions may change the quest list
+	// a new quest becomes the tracked one (New Vegas): its markers on the HUD
+	RPMState::Section( "player" )->SetString( "tracked", id.Get() );
+	m_flNextMarkers = 0.0f;
+	RPMLogic::NoteQuest( player, id, "quest_start", INT_MIN );
+	EnterStage( player, id, 0 );
 	SendQuestLogToPlayer( player );
 	return true;
 }
@@ -486,6 +558,15 @@ bool CQuestSystem::CompleteQuest( CBasePlayer *player, const char *questId )
 	st->state = kQuestState_Completed;
 	NotifyQuestStateChanged( player, questId, st->state );
 	const QuestDef *def = FindQuestDef( questId );
+	if ( def )
+	{
+		RPMLogic::AddXP( player, def->xp );
+		RPMLogic::Ctx_t ctx;
+		ctx.pPlayer = player;
+		ctx.pszQuest = def->id.Get();
+		RPMLogic::Run( def->pOnComplete, ctx );
+		RPMLogic::NoteQuest( player, def->id.Get(), "quest_complete", INT_MIN );
+	}
 	if ( quest_reward_debug.GetBool() )
 	{
 		SendToastToPlayer( player, "quest", UTIL_VarArgs( "Quest completed: %s", questId ? questId : "" ), "friends/friend_online.wav" );
@@ -536,6 +617,15 @@ bool CQuestSystem::FailQuest( CBasePlayer *player, const char *questId, int repP
 	NotifyQuestStateChanged( player, questId, st->state );
 	if ( repPenalty != 0 )
 		AddReputation( player, repPenalty );
+	const QuestDef *def = FindQuestDef( questId );
+	if ( def )
+	{
+		RPMLogic::Ctx_t ctx;
+		ctx.pPlayer = player;
+		ctx.pszQuest = def->id.Get();
+		RPMLogic::Run( def->pOnFail, ctx );
+		RPMLogic::NoteQuest( player, def->id.Get(), "quest_fail", INT_MIN );
+	}
 	SendQuestLogToPlayer( player );
 	return true;
 }
@@ -548,8 +638,325 @@ bool CQuestSystem::SetQuestStage( CBasePlayer *player, const char *questId, int 
 
 	st->stage = stage;
 	st->progress = 0;
+	CUtlString id = questId;
+	EnterStage( player, id, stage );
 	SendQuestLogToPlayer( player );
 	return true;
+}
+
+//-----------------------------------------------------------------------------
+// HL2RPM: objectives of the stages (Creation Kit)
+//-----------------------------------------------------------------------------
+static KeyValues *ObjSection()
+{
+	return RPMState::Section( "qobj" );
+}
+
+static CUtlString ObjKey( const char *questId, const char *objId )
+{
+	CUtlString k;
+	k.Format( "%s.%s", questId ? questId : "", objId ? objId : "" );
+	return k;
+}
+
+static const QuestObjDef *FindObjective( const QuestDef &def, const char *objId, int *pStage = NULL )
+{
+	for ( int s = 0; s < def.stages.Count(); ++s )
+		for ( int o = 0; o < def.stages[s].objectives.Count(); ++o )
+			if ( !Q_stricmp( def.stages[s].objectives[o].id, objId ) )
+			{
+				if ( pStage )
+					*pStage = s;
+				return &def.stages[s].objectives[o];
+			}
+	return NULL;
+}
+
+int CQuestSystem::ObjectiveProgress( const char *questId, const char *objId ) const
+{
+	return ObjSection()->GetInt( ObjKey( questId, objId ), 0 );
+}
+
+bool CQuestSystem::IsObjectiveDone( const char *questId, const char *objId ) const
+{
+	const QuestDef *def = FindQuestDef( questId );
+	const QuestObjDef *obj = def ? FindObjective( *def, objId ) : NULL;
+	return obj && ObjectiveProgress( questId, objId ) >= Max( 1, obj->count );
+}
+
+void CQuestSystem::ClearObjectives( const char *questId )
+{
+	KeyValues *s = ObjSection();
+	CUtlString prefix;
+	prefix.Format( "%s.", questId );
+	for ( KeyValues *k = s->GetFirstSubKey(); k; )
+	{
+		KeyValues *next = k->GetNextKey();
+		if ( !Q_strnicmp( k->GetName(), prefix, prefix.Length() ) )
+		{
+			s->RemoveSubKey( k );
+			k->deleteThis();
+		}
+		k = next;
+	}
+}
+
+void CQuestSystem::SetObjectiveProgress( CBasePlayer *player, const QuestDef &def, const QuestObjDef &obj, int progress )
+{
+	int need = Max( 1, obj.count );
+	int was = ObjectiveProgress( def.id, obj.id );
+	progress = clamp( progress, 0, need );
+	if ( progress == was )
+		return;
+	ObjSection()->SetInt( ObjKey( def.id, obj.id ), progress );
+	bool ru = RPMLogic::IsRussian();
+	const char *text = obj.text.IsEmpty() ? def.title.Get() : obj.text.Get();
+	if ( progress >= need )
+		SendToastToPlayer( player, "quest", CFmtStr( ru ? "Цель выполнена: %s" : "Objective complete: %s", text ), "friends/friend_online.wav" );
+	else if ( need > 1 && progress > was )
+		SendToastToPlayer( player, "quest", CFmtStr( "%s (%d/%d)", text, progress, need ), "friends/friend_join.wav" );
+	SendQuestLogToPlayer( player );
+}
+
+bool CQuestSystem::CompleteObjective( CBasePlayer *player, const char *questId, const char *objId )
+{
+	const QuestDef *def = FindQuestDef( questId );
+	const QuestObjDef *obj = def ? FindObjective( *def, objId ) : NULL;
+	if ( !obj )
+	{
+		Warning( "QuestSystem: no objective '%s' in quest '%s'\n", objId ? objId : "", questId ? questId : "" );
+		return false;
+	}
+	SetObjectiveProgress( player, *def, *obj, Max( 1, obj->count ) );
+	CUtlString id = questId;
+	AdvanceIfDone( player, id );
+	return true;
+}
+
+bool CQuestSystem::StageDone( const QuestDef &def, int stage ) const
+{
+	const QuestStageDef *st = GetQuestStageDef( def, stage );
+	if ( !st || st->objectives.Count() == 0 )
+		return false;		// a stage without objectives waits for the actions of dialogs / events
+	for ( int o = 0; o < st->objectives.Count(); ++o )
+	{
+		const QuestObjDef &obj = st->objectives[o];
+		if ( !obj.optional && ObjectiveProgress( def.id, obj.id ) < Max( 1, obj.count ) )
+			return false;
+	}
+	return true;
+}
+
+void CQuestSystem::AdvanceIfDone( CBasePlayer *player, const char *questId )
+{
+	if ( m_iThinkDepth > 8 )
+		return;
+	const PlayerQuestState *st = FindPlayerQuest( player, questId );
+	const QuestDef *def = FindQuestDef( questId );
+	if ( !st || !def || st->state != kQuestState_Active || !StageDone( *def, st->stage ) )
+		return;
+	m_iThinkDepth++;
+	const QuestStageDef &stage = def->stages[st->stage];
+	int next = stage.next >= 0 ? stage.next : st->stage + 1;
+	CUtlString id = questId;
+	if ( stage.final || next >= def->stages.Count() )
+		CompleteQuest( player, id );
+	else
+		SetQuestStage( player, id, next );
+	m_iThinkDepth--;
+}
+
+void CQuestSystem::EnterStage( CBasePlayer *player, const char *questId, int stage )
+{
+	const QuestDef *def = FindQuestDef( questId );
+	const QuestStageDef *st = def ? GetQuestStageDef( *def, stage ) : NULL;
+	if ( !st )
+		return;
+	bool ru = RPMLogic::IsRussian();
+	if ( stage > 0 || st->objectives.Count() )
+	{
+		const char *text = st->objectives.Count() && !st->objectives[0].text.IsEmpty() ? st->objectives[0].text.Get() : st->title.Get();
+		if ( text && text[0] )
+			SendToastToPlayer( player, "quest", CFmtStr( ru ? "Новая цель: %s" : "New objective: %s", text ), "friends/friend_join.wav" );
+	}
+	m_LastMarkers = "-";		// the markers of the new objectives at once
+	m_flNextMarkers = 0.0f;
+	RPMLogic::Ctx_t ctx;
+	ctx.pPlayer = player;
+	ctx.pszQuest = def->id.Get();
+	RPMLogic::NoteQuest( player, def->id.Get(), "quest_stage", stage );
+	m_iThinkDepth++;
+	RPMLogic::Run( st->pActions, ctx );
+	m_iThinkDepth--;
+}
+
+void CQuestSystem::OnTalk( CBasePlayer *player, CBaseEntity *npc )
+{
+	PlayerData *data = player ? FindPlayerDataByEntIndex( player->entindex() ) : NULL;
+	for ( int i = 0; data && i < data->quests.Count(); ++i )
+	{
+		if ( data->quests[i].state != kQuestState_Active )
+			continue;
+		CUtlString id = data->quests[i].id;
+		const QuestDef *def = FindQuestDef( id );
+		const QuestStageDef *st = def ? GetQuestStageDef( *def, data->quests[i].stage ) : NULL;
+		for ( int o = 0; st && o < st->objectives.Count(); ++o )
+			if ( !Q_stricmp( st->objectives[o].type, "talk" ) && RPMLogic::NameMatches( st->objectives[o].target, npc ) )
+				SetObjectiveProgress( player, *def, st->objectives[o], st->objectives[o].count );
+		AdvanceIfDone( player, id );
+	}
+}
+
+void CQuestSystem::OnUse( CBasePlayer *player, CBaseEntity *ent )
+{
+	PlayerData *data = player ? FindPlayerDataByEntIndex( player->entindex() ) : NULL;
+	for ( int i = 0; data && i < data->quests.Count(); ++i )
+	{
+		if ( data->quests[i].state != kQuestState_Active )
+			continue;
+		CUtlString id = data->quests[i].id;
+		const QuestDef *def = FindQuestDef( id );
+		const QuestStageDef *st = def ? GetQuestStageDef( *def, data->quests[i].stage ) : NULL;
+		for ( int o = 0; st && o < st->objectives.Count(); ++o )
+			if ( !Q_stricmp( st->objectives[o].type, "use" ) && RPMLogic::NameMatches( st->objectives[o].target, ent ) )
+				SetObjectiveProgress( player, *def, st->objectives[o], st->objectives[o].count );
+		AdvanceIfDone( player, id );
+	}
+}
+
+void CQuestSystem::Think( CBasePlayer *player )
+{
+	PlayerData *data = player ? FindPlayerDataByEntIndex( player->entindex() ) : NULL;
+	for ( int i = 0; data && i < data->quests.Count(); ++i )
+	{
+		if ( data->quests[i].state != kQuestState_Active )
+			continue;
+		CUtlString id = data->quests[i].id;
+		const QuestDef *def = FindQuestDef( id );
+		if ( !def )
+			continue;
+		RPMLogic::Ctx_t ctx;
+		ctx.pPlayer = player;
+		ctx.pszQuest = def->id.Get();
+		if ( def->pFailConds && RPMLogic::Check( def->pFailConds, ctx ) )
+		{
+			FailQuest( player, id, 0 );
+			continue;
+		}
+		const QuestStageDef *st = GetQuestStageDef( *def, data->quests[i].stage );
+		for ( int o = 0; st && o < st->objectives.Count(); ++o )
+		{
+			const QuestObjDef &obj = st->objectives[o];
+			int need = Max( 1, obj.count );
+			int have = ObjectiveProgress( id, obj.id );
+			if ( have >= need )
+				continue;
+			if ( !Q_stricmp( obj.type, "collect" ) )
+				SetObjectiveProgress( player, *def, obj, InventorySystem::CountItem( player, obj.item ) );
+			else if ( !Q_stricmp( obj.type, "go" ) )
+			{
+				Vector pos;
+				int zone = RPMWorld::FindZone( obj.target );
+				bool bThere = zone >= 0 ? RPMWorld::IsInZone( zone, player->GetAbsOrigin() ) :
+					( RPMLogic::TargetPos( obj.target, ctx, pos ) && ( pos - player->GetAbsOrigin() ).Length() <= obj.radius );
+				if ( bThere )
+					SetObjectiveProgress( player, *def, obj, need );
+			}
+			else if ( !Q_stricmp( obj.type, "cond" ) && RPMLogic::Check( obj.pConds, ctx ) )
+				SetObjectiveProgress( player, *def, obj, need );
+		}
+		AdvanceIfDone( player, id );
+	}
+	SendMarkers( player );
+}
+
+static ConVar rpm_markers_debug( "rpm_markers_debug", "0", FCVAR_GAMEDLL, "HL2RPM: print the quest markers sent to the HUD and the tracked quest" );
+
+void CQuestSystem::SendMarkers( CBasePlayer *player )
+{
+	if ( gpGlobals->curtime < m_flNextMarkers )
+		return;
+	m_flNextMarkers = gpGlobals->curtime + 0.5f;
+	CUtlString out;
+	PlayerData *data = player ? FindPlayerDataByEntIndex( player->entindex() ) : NULL;
+	// the tracked quest (Tab menu - Quests, Enter): markers only of it; none or not active - of all
+	const char *tracked = RPMState::Section( "player" )->GetString( "tracked", "" );
+	bool bTrackedActive = false;
+	for ( int i = 0; data && tracked[0] && i < data->quests.Count(); ++i )
+		if ( data->quests[i].state == kQuestState_Active && !Q_stricmp( data->quests[i].id, tracked ) )
+			bTrackedActive = true;
+	if ( !bTrackedActive )
+		tracked = "";
+	if ( m_LastTracked != tracked )
+	{
+		m_LastTracked = tracked;
+		engine->ClientCommand( player->edict(), "rpm_quest_tracked \"%s\"\n", tracked );
+	}
+	for ( int i = 0; data && i < data->quests.Count(); ++i )
+	{
+		if ( data->quests[i].state != kQuestState_Active )
+			continue;
+		if ( tracked[0] && Q_stricmp( data->quests[i].id, tracked ) )
+			continue;
+		const QuestDef *def = FindQuestDef( data->quests[i].id );
+		const QuestStageDef *st = def ? GetQuestStageDef( *def, data->quests[i].stage ) : NULL;
+		RPMLogic::Ctx_t ctx;
+		ctx.pPlayer = player;
+		for ( int o = 0; st && o < st->objectives.Count(); ++o )
+		{
+			const QuestObjDef &obj = st->objectives[o];
+			Vector pos;
+			if ( !obj.marker || obj.target.IsEmpty() || ObjectiveProgress( def->id, obj.id ) >= Max( 1, obj.count ) )
+				continue;
+			if ( !Q_stricmp( obj.type, "kill" ) )
+			{
+				// the nearest living one that matches
+				CBaseEntity *pBest = NULL;
+				float flBest = FLT_MAX;
+				for ( CBaseEntity *pEnt = gEntList.FirstEnt(); pEnt; pEnt = gEntList.NextEnt( pEnt ) )
+				{
+					if ( !pEnt->MyNPCPointer() || !pEnt->IsAlive() || !RPMLogic::NameMatches( obj.target, pEnt ) )
+						continue;
+					float d = ( pEnt->GetAbsOrigin() - player->GetAbsOrigin() ).LengthSqr();
+					if ( d < flBest )
+					{
+						flBest = d;
+						pBest = pEnt;
+					}
+				}
+				if ( !pBest )
+					continue;
+				pos = pBest->WorldSpaceCenter();
+			}
+			else if ( !RPMLogic::TargetPos( obj.target, ctx, pos ) )
+				continue;
+			char label[128];
+			Q_strncpy( label, obj.text.IsEmpty() ? def->title.Get() : obj.text.Get(), sizeof( label ) );
+			for ( char *c = label; *c; ++c )
+				if ( *c == ';' || *c == '~' || *c == '"' )
+					*c = ' ';
+			if ( !out.IsEmpty() )
+				out.Append( ";" );
+			out.Append( CFmtStr( "%.0f %.0f %.0f~%s", pos.x, pos.y, pos.z + 12.0f, label ) );
+		}
+	}
+	if ( out == m_LastMarkers )
+		return;
+	m_LastMarkers = out;
+	if ( rpm_markers_debug.GetBool() )
+		Msg( "[quests] markers (tracked '%s'): %s\n", tracked, out.IsEmpty() ? "none" : out.Get() );
+	engine->ClientCommand( player->edict(), "rpm_markers \"%s\"\n", out.Get() );
+}
+
+void CQuestSystem::DebugSetQuest( CBasePlayer *player, const char *questId, QuestState state, int stage )
+{
+	PlayerQuestState *st = FindOrCreatePlayerQuest( player, questId );
+	if ( !st )
+		return;
+	st->state = state;
+	st->stage = stage;
+	st->progress = 0;
+	m_LastMarkers = "-";
 }
 
 void CQuestSystem::SendQuestLogToPlayer( CBasePlayer *player ) const
@@ -577,6 +984,26 @@ void CQuestSystem::SendQuestLogToPlayer( CBasePlayer *player ) const
 
 		CUtlString stageTitle = GetQuestTitleForStage( *def, st.stage );
 		CUtlString stageDesc = GetQuestDescForStage( *def, st.stage );
+		// HL2RPM: the objectives of the current stage under its description
+		const QuestStageDef *pStage = GetQuestStageDef( *def, st.stage );
+		if ( st.state == kQuestState_Active && pStage )
+		{
+			for ( int o = 0; o < pStage->objectives.Count(); ++o )
+			{
+				const QuestObjDef &obj = pStage->objectives[o];
+				if ( obj.text.IsEmpty() )
+					continue;
+				int need = Max( 1, obj.count ), have = ObjectiveProgress( def->id, obj.id );
+				if ( !stageDesc.IsEmpty() )
+					stageDesc.Append( "\n" );
+				stageDesc.Append( have >= need ? "[x] " : "[  ] " );
+				stageDesc.Append( obj.text );
+				if ( need > 1 )
+					stageDesc.Append( CFmtStr( " (%d/%d)", Min( have, need ), need ) );
+				if ( obj.optional )
+					stageDesc.Append( RPMLogic::IsRussian() ? " (необязательно)" : " (optional)" );
+			}
+		}
 		if ( st.state == kQuestState_Completed && def->stages.Count() > 0 )
 		{
 			stageTitle = "Done: ";
@@ -596,16 +1023,33 @@ void CQuestSystem::SendQuestLogToPlayer( CBasePlayer *player ) const
 			}
 		}
 
+		// HL2RPM: a user message holds 255 bytes - the titles are cut, the description goes in parts
+		// (a Russian description of 120 letters alone is 240 bytes)
+		CUtlString title = Utf8Prefix( def->title.Get(), 60 );
+		stageTitle = Utf8Prefix( stageTitle.Get(), 60 );
+		int used = 1 + st.id.Length() + 1 + 1 + 2 + 2 + title.Length() + 1 + stageTitle.Length() + 1 + 1;
+		CUtlString first = Utf8Prefix( stageDesc.Get(), Max( 0, 240 - used ) );
 		UserMessageBegin( filter, "Quests_Update" );
 		WRITE_BYTE( kQuestsUpdate_QuestAdd );
 		WRITE_STRING( st.id.Get() );
 		WRITE_BYTE( (int)st.state );
 		WRITE_SHORT( st.stage );
 		WRITE_SHORT( st.progress );
-		WRITE_STRING( def->title.Get() );
+		WRITE_STRING( title.Get() );
 		WRITE_STRING( stageTitle.Get() );
-		WRITE_STRING( stageDesc.Get() );
+		WRITE_STRING( first.Get() );
 		MessageEnd();
+		for ( const char *rest = stageDesc.Get() + first.Length(); *rest; )
+		{
+			CUtlString part = Utf8Prefix( rest, 240 );
+			if ( part.IsEmpty() )
+				break;
+			UserMessageBegin( filter, "Quests_Update" );
+			WRITE_BYTE( kQuestsUpdate_QuestDescMore );
+			WRITE_STRING( part.Get() );
+			MessageEnd();
+			rest += part.Length();
+		}
 	}
 
 	UserMessageBegin( filter, "Quests_Update" );
@@ -665,19 +1109,20 @@ void CQuestSystem::NotifyQuestStateChanged( CBasePlayer *player, const char *que
 
 	const char *sound = "";
 	const char *prefix = "";
+	const bool ru = RPMLogic::IsRussian();
 	if ( newState == kQuestState_Active )
 	{
-		prefix = "Quest started: ";
+		prefix = ru ? "Новое задание: " : "Quest started: ";
 		sound = "friends/friend_join.wav";
 	}
 	else if ( newState == kQuestState_Completed )
 	{
-		prefix = "Quest completed: ";
+		prefix = ru ? "Задание выполнено: " : "Quest completed: ";
 		sound = "friends/friend_online.wav";
 	}
 	else if ( newState == kQuestState_Failed )
 	{
-		prefix = "Quest failed: ";
+		prefix = ru ? "Задание провалено: " : "Quest failed: ";
 		sound = "friends/friend_online.wav";
 	}
 

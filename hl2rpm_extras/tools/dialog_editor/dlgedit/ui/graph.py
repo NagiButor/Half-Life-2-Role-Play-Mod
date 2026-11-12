@@ -110,6 +110,8 @@ def option_badges(o, project):
         conds.append("%s: этап ≥ %d" % tuple(o.require_stage))
     if conds:
         b.append(Badge("если", theme.BADGE_COND, "показывается, только если " + "; ".join(conds)))
+    if o.trade:
+        b.append(Badge("торговля", theme.BADGE_STAGE, "диалог закрывается, открывается окно торговли этого NPC"))
     if o.spoils:
         b.append(Badge("конец NPC", theme.BADGE_SPOIL, "после этого NPC больше не разговаривает"))
     elif o.close and o.next == -1:

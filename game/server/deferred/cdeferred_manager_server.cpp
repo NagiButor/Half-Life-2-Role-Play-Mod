@@ -175,6 +175,44 @@ static float ComputeEntityLightRadius( KeyValues *entity, const int color[4] )
 }
 
 // ---------------------------------------------------------------------------
+// HL2RPM: the falloff of a converted light - the engine's own. A classic light fades as
+// I0 * S / ( c + l d + q d^2 ) (vrad: S = c + 100 l + 10000 q, I0 = the light at 100 units).
+// The converted lights fell off as ( 1 - d / r )^power instead: with the power of 1 (light)
+// or the light_spot's cone exponent, a lamp was still bright at its radius and stopped there
+// (a circle on the floor and the walls), a floodlight of brightness 3000 lit a street 4000
+// units off at 10 x. The shader (common_lighting_fxc.h DeferredLightFalloff) takes a negative
+// power as k in I0 * ( k + 100^2 ) / ( k + d^2 ), windowed to 0 at the radius. k = c / q for
+// the usual lights; with a linear term it is the k that keeps the light at 100 units and at
+// the radius; a constant-only light does not fall off (the window ends it).
+// ---------------------------------------------------------------------------
+ConVar r_deferred_convert_engine_falloff( "r_deferred_convert_engine_falloff", "1", FCVAR_ARCHIVE,
+	"Converted light / light_spot entities and compiled lights fall off as the engine's 1 / (c + l d + q d^2); 0 = the old ( 1 - d / r )^power (takes a map reload)" );
+
+static float EngineFalloffParam( float c, float l, float q, float flRadius )
+{
+	c = Max( c, 0.0f );
+	l = Max( l, 0.0f );
+	q = Max( q, 0.0f );
+	if ( c <= 0.0f && l <= 0.0f && q <= 0.0f )
+		q = 1.0f;
+
+	float k;
+	if ( l <= 0.0f && q > 0.0f )
+	{
+		k = c / q;
+	}
+	else
+	{
+		// match the light at the radius: ( k + 1e4 ) / ( k + R^2 ) = A
+		const float R = Max( flRadius, 200.0f );
+		const float S = c + 100.0f * l + 10000.0f * q;
+		const float A = S / Max( c + l * R + q * R * R, 1e-6f );
+		k = ( A < 0.9999f ) ? ( A * R * R - 10000.0f ) / ( 1.0f - A ) : 1e9f;
+	}
+	return -clamp( k, 1.0f, 1e9f );
+}
+
+// ---------------------------------------------------------------------------
 // HL2RPM: compiled lights (dworldlight_t) -> light_deferred
 // ---------------------------------------------------------------------------
 ConVar r_deferred_convert_worldlights( "r_deferred_convert_worldlights", "1", 0, "Turn the map's compiled lights (incl. texture lights) into deferred lights" );
@@ -338,13 +376,28 @@ static void ConvertWorldLights( const dworldlight_t *lights, int lightCount, con
 		}
 		flRadius = clamp( flRadius, 96.0f, 1600.0f );
 
-		// deferred falloff is ( 1 - d / r )^2: match the compiled light at 100 units
-		const float flRef = Min( 100.0f, flRadius * 0.5f );
-		const float flFalloffAtRef = ( 1.0f - flRef / flRadius ) * ( 1.0f - flRef / flRadius );
-		float flRatio = bSurface ? flRef * flRef : ( light.constant_attn + flRef * light.linear_attn + flRef * flRef * light.quadratic_attn );
-		if ( flRatio <= 0.0f )
-			flRatio = 1.0f;
-		Vector col = light.intensity * ( 1.0f / ( flRatio * Max( flFalloffAtRef, 0.05f ) ) );
+		Vector col;
+		float flPower = 2.0f;
+		if ( r_deferred_convert_engine_falloff.GetBool() )
+		{
+			// the compiled light at 100 units and its own curve (texture lights: 1 / d^2)
+			float flS = bSurface ? 10000.0f : ( light.constant_attn + 100.0f * light.linear_attn + 10000.0f * light.quadratic_attn );
+			if ( flS <= 0.0f )
+				flS = 1.0f;
+			col = light.intensity * ( 1.0f / flS );
+			flPower = bSurface ? EngineFalloffParam( 0.0f, 0.0f, 1.0f, flRadius )
+				: EngineFalloffParam( light.constant_attn, light.linear_attn, light.quadratic_attn, flRadius );
+		}
+		else
+		{
+			// deferred falloff is ( 1 - d / r )^2: match the compiled light at 100 units
+			const float flRef = Min( 100.0f, flRadius * 0.5f );
+			const float flFalloffAtRef = ( 1.0f - flRef / flRadius ) * ( 1.0f - flRef / flRadius );
+			float flRatio = bSurface ? flRef * flRef : ( light.constant_attn + flRef * light.linear_attn + flRef * flRef * light.quadratic_attn );
+			if ( flRatio <= 0.0f )
+				flRatio = 1.0f;
+			col = light.intensity * ( 1.0f / ( flRatio * Max( flFalloffAtRef, 0.05f ) ) );
+		}
 		const float flColMax = Max( col.x, Max( col.y, col.z ) );
 		if ( flColMax > 4.0f )
 			col *= 4.0f / flColMax;
@@ -362,7 +415,7 @@ static void ConvertWorldLights( const dworldlight_t *lights, int lightCount, con
 			break;
 
 		lightEntity->KeyValue( GetLightParamName( LPARAM_DIFFUSE ), UTIL_VarArgs( "%f %f %f 255", col.x * 255.0f, col.y * 255.0f, col.z * 255.0f ) );
-		lightEntity->KeyValue( GetLightParamName( LPARAM_POWER ), 2.0f );
+		lightEntity->KeyValue( GetLightParamName( LPARAM_POWER ), flPower );
 		lightEntity->KeyValue( GetLightParamName( LPARAM_RADIUS ), flRadius );
 		lightEntity->KeyValue( GetLightParamName( LPARAM_VIS_DIST ), flRadius * 3.0f + 512.0f );
 		lightEntity->KeyValue( GetLightParamName( LPARAM_VIS_RANGE ), flRadius * 1.5f + 256.0f );
@@ -749,6 +802,12 @@ void CDeferredManagerServer::LevelInitPreEntity()
 			if ( light.origin.DistToSqr( pos ) > 4.0f * 4.0f )
 				continue;
 
+			// (vrad's attenuation - also what it made of _fifty_percent_distance / _zero_percent_distance)
+			entity->SetFloat( "_constant_attn", light.constant_attn );
+			entity->SetFloat( "_linear_attn", light.linear_attn );
+			entity->SetFloat( "_quadratic_attn", light.quadratic_attn );
+			entity->SetInt( "_hl2rpm_compiled", 1 );
+
 			if ( light.type == emit_point )
 			{
 				entity->SetFloat( "_distance", ComputeLightRadius( light ) );
@@ -846,6 +905,24 @@ void CDeferredManagerServer::LevelInitPreEntity()
 
 		const float radius = type == 2 ? entity->GetFloat( "spotlightlength" ) : ComputeEntityLightRadius( entity, color );
 		lightEntity->KeyValue( szParamRadius, radius );
+
+		// HL2RPM: light and light_spot fall off as the engine's lights (EngineFalloffParam) - the spot's
+		// _exponent is its cone's, not a distance curve. (point_spotlight and its paired light_spot - a
+		// beam with volumetrics - keep their curve; the shader now ends it at the radius without an edge.)
+		if ( ( type == 0 || type == 1 ) && r_deferred_convert_engine_falloff.GetBool() )
+		{
+			if ( entity->GetFloat( "_fifty_percent_distance" ) > 0.0f && !entity->GetInt( "_hl2rpm_compiled" ) )
+			{
+				// (no compiled light to take the curve from: half the light at that distance)
+				const float flFifty = entity->GetFloat( "_fifty_percent_distance" );
+				lightEntity->KeyValue( szParamPower, -flFifty * flFifty );
+			}
+			else
+			{
+				lightEntity->KeyValue( szParamPower, EngineFalloffParam( entity->GetFloat( "_constant_attn" ),
+					entity->GetFloat( "_linear_attn" ), entity->GetFloat( "_quadratic_attn" ), radius ) );
+			}
+		}
 		lightEntity->KeyValue( szParamVisDist, radius * 2 );
 		lightEntity->KeyValue( szParamVisRange, radius * 1.25f );
 		lightEntity->KeyValue( szParamShadowDist, radius * ( 5.f / 6.f ) );

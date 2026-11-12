@@ -593,6 +593,18 @@ void CNPC_MetroPolice::PrescheduleThink( void )
 			m_bKeepFacingPlayer = false;
 		}
 	}
+	else if ( BatonActive() && m_PolicingBehavior.IsEnabled() == false && !GetEnemy() &&
+		m_NPCState != NPC_STATE_COMBAT && gpGlobals->curtime > m_flBatonDebounceTime &&
+		gpGlobals->curtime - GetLastEnemyTime() > 6.0f && !IsCurSchedule( SCHED_METROPOLICE_DEACTIVATE_BATON, false ) )
+	{
+		// HL2RPM: the baton went off only for a "non-criminal" player, which the mod's player always is
+		// (no gordon_precriminal state): after any fight the cop kept it sparking - and his angry idle -
+		// forever. Put it away a few seconds after the last enemy is gone. The flag may already be off
+		// with the baton still on (nothing reselected the schedule): the condition interrupts the
+		// current schedule (a daily routine walk too) so SelectSchedule puts it away.
+		m_bShouldActivateBaton = false;
+		SetCondition( COND_METROPOLICE_CHANGE_BATON_STATE );
+	}
 
 	if( IsOnFire() )
 	{

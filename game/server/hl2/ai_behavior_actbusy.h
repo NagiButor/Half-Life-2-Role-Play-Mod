@@ -177,6 +177,13 @@ private:
 	bool			m_bForceActBusy;
 	Activity		m_ForcedActivity;
 	bool			m_bTeleportToBusy;
+	// HL2RPM: during the first moments of the entry the NPC slides exactly onto the marker of the
+	// Creation Kit (the path ends within a few units; the seats of the animation library need the spot)
+	Vector			m_vecRPMSnapFrom;
+	float			m_flRPMSnapYaw;
+	float			m_flRPMSnapStart;
+	void			RPMStartSnap();
+	void			RPMRunSnap();
 	bool			m_bUseNearestBusy;
 	bool			m_bLeaving;
 	bool			m_bVisibleOnly;

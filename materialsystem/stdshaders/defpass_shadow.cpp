@@ -125,7 +125,7 @@ void DrawPassShadowPass( const defParms_shadow &info, CBaseVSShader *pShader, IM
 		const int radiosityOutput = DEFCFG_ENABLE_RADIOSITY != 0
 			&& pShaderAPI->GetFloatRenderingParameter( FLOAT_RENDERPARM_DEFERRED_SHADOW_RADIOSITY ) > 0.5f;
 
-		if ( pDeferredContext->m_bMaterialVarsChanged || !pDeferredContext->HasCommands( CDeferredPerMaterialContextData::DEFSTAGE_SHADOW ) )
+		if ( pDeferredContext->NeedsCommands( CDeferredPerMaterialContextData::DEFSTAGE_SHADOW ) )
 		{
 			tmpBuf.Reset();
 

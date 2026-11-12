@@ -1,0 +1,160 @@
+//========= HL2RPM ============================================================//
+//
+// A model on the card of an item (game/client/hl2rpm_itempreview.cpp). The deferred
+// passes need the G-buffer and the light buffer of a scene; a model turning in a
+// window has neither, so DEFERRED_MODEL draws it here instead, at
+// DEFERRED_RENDER_STAGE_PREVIEW: the same textures and PBR values, in the light of
+// a small photo studio that stays where it is while the model turns - a warm key
+// from above on the left, a cool fill, a rim from behind, a soft box to mirror.
+//
+// The vertex shader is the decals' deferred_decal_vs30 (compressed vertices,
+// skinning, flexes; world position and normal).
+//
+//=============================================================================//
+
+// STATIC:		"BUMPMAP"				"0..1"
+
+#include "common_ps_fxc.h"
+
+sampler sBase						: register( s0 );
+sampler sBump						: register( s1 );
+sampler sMask						: register( s2 );
+
+const float4 g_vecEye				: register( c0 );	// xyz the eye
+const float4 g_vecSurface			: register( c1 );	// x roughness, y metalness, z F0 of a non-metal, w the bump alpha scales the gloss
+const float4 g_vecSelfIllum			: register( c2 );	// rgb tint, w 0 none, 1 base alpha, 2 mask rgb, 3 mask alpha
+const float4 g_vecMask				: register( c3 );	// x alpha test reference (0 none), y + z * base alpha masks the reflections, w so does the bump alpha
+const float4 g_vecRim				: register( c4 );	// rgb the color of the window's theme
+const float4 g_vecMisc				: register( c5 );	// x the mask texture (rgb) masks the reflections, y the base alpha is the opacity
+
+// the studio: directions to the lights, world space (the camera looks along +x, +y is on its left)
+static const float3 LIGHT_KEY		= float3( -0.542f, 0.497f, 0.678f );
+static const float3 LIGHT_FILL		= float3( -0.703f, -0.703f, -0.100f );
+static const float3 LIGHT_RIM		= float3( 0.755f, -0.352f, 0.553f );
+static const float3 COLOR_KEY		= float3( 1.30f, 1.24f, 1.14f );
+static const float3 COLOR_FILL		= float3( 0.38f, 0.42f, 0.50f );
+static const float3 COLOR_RIM		= float3( 0.85f, 0.90f, 1.05f );
+static const float3 AMBIENT_TOP		= float3( 0.48f, 0.50f, 0.55f );
+static const float3 AMBIENT_BOTTOM	= float3( 0.22f, 0.21f, 0.20f );
+
+struct PS_INPUT
+{
+	float2 vTexCoord				: TEXCOORD0;
+	float3 vWorldPos				: TEXCOORD1;
+	float4 vWorldNormal_Depth		: TEXCOORD2;
+	float4 vColor					: TEXCOORD3;
+};
+
+// the tangent frame from the screen derivatives (the decal's: the model's own tangents would take a
+// vertex shader of their own)
+float3x3 CotangentFrame( float3 N, float3 p, float2 uv )
+{
+	const float3 dp1 = ddx( p );
+	const float3 dp2 = ddy( p );
+	const float2 duv1 = ddx( uv );
+	const float2 duv2 = ddy( uv );
+	const float3 dp2perp = cross( dp2, N );
+	const float3 dp1perp = cross( N, dp1 );
+	const float3 T = dp2perp * duv1.x + dp1perp * duv2.x;
+	const float3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+	const float flInvMax = rsqrt( max( dot( T, T ), dot( B, B ) ) + 1e-20f );
+	return float3x3( T * flInvMax, B * flInvMax, N );
+}
+
+// GGX; light colors are "illuminance / pi", as in the deferred passes
+float3 Specular( float3 N, float3 V, float3 L, float3 F0, float a )
+{
+	const float a2 = a * a;
+	const float3 H = normalize( V + L );
+	const float NH = saturate( dot( N, H ) );
+	const float NL = saturate( dot( N, L ) );
+	const float NV = saturate( dot( N, V ) ) + 1e-3f;
+	const float VH = saturate( dot( V, H ) );
+	const float d = NH * NH * ( a2 - 1.0f ) + 1.0f;
+	const float k = a * 0.5f;
+	const float flD = a2 / ( d * d + 1e-6f );
+	const float flG = 0.25f / ( ( NL * ( 1.0f - k ) + k ) * ( NV * ( 1.0f - k ) + k ) );
+	const float3 F = F0 + ( 1.0f - F0 ) * pow( 1.0f - VH, 5.0f );
+	return min( flD * flG, 16.0f ) * F * NL;
+}
+
+// what a reflection sees: a dark room, a light ceiling, the soft box of the key light
+float3 Studio( float3 R, float roughness )
+{
+	const float3 room = lerp( float3( 0.05f, 0.05f, 0.05f ), float3( 0.40f, 0.43f, 0.48f ), smoothstep( 0.4f, 1.0f, R.z * 0.5f + 0.5f ) );
+	const float flBox = pow( saturate( dot( R, LIGHT_KEY ) ), lerp( 40.0f, 3.0f, roughness ) );
+	return room + float3( 1.2f, 1.15f, 1.05f ) * flBox * lerp( 1.0f, 0.3f, roughness );
+}
+
+// Karis' fit of the split sum
+float3 EnvSpecular( float3 F0, float NV, float roughness )
+{
+	const float4 r = roughness * float4( -1.0f, -0.0275f, -0.572f, 0.022f ) + float4( 1.0f, 0.0425f, 1.04f, -0.04f );
+	const float a004 = min( r.x * r.x, exp2( -9.28f * NV ) ) * r.x + r.y;
+	const float2 AB = float2( -1.04f, 1.04f ) * a004 + r.zw;
+	return F0 * AB.x + AB.y;
+}
+
+float4 main( const PS_INPUT In ) : COLOR0
+{
+	const float4 base = tex2D( sBase, In.vTexCoord );
+	if ( g_vecMask.x > 0.0f )
+		clip( base.a - g_vecMask.x );
+
+	const float3 V = normalize( g_vecEye.xyz - In.vWorldPos );
+	float3 N = normalize( In.vWorldNormal_Depth.xyz );
+	if ( dot( N, V ) < 0.0f )
+		N = -N;		// the back of a two-sided surface
+
+	float flBumpAlpha = 1.0f;
+#if BUMPMAP
+	{
+		const float4 bump = tex2D( sBump, In.vTexCoord );
+		flBumpAlpha = bump.a;
+		const float3 n = bump.xyz * 2.0f - 1.0f;
+		N = normalize( mul( n, CotangentFrame( N, In.vWorldPos, In.vTexCoord ) ) );
+	}
+#endif
+
+	const float4 mask = tex2D( sMask, In.vTexCoord );
+
+	const float3 albedo = base.rgb;
+	const float flMetal = g_vecSurface.y;
+	const float flGloss = ( 1.0f - g_vecSurface.x ) * lerp( 1.0f, flBumpAlpha, g_vecSurface.w );
+	const float flRoughness = clamp( 1.0f - flGloss, 0.08f, 1.0f );
+	const float a = flRoughness * flRoughness;
+	const float3 F0 = lerp( g_vecSurface.zzz, albedo, flMetal );
+	const float flReflect = saturate( g_vecMask.y + g_vecMask.z * base.a ) * lerp( 1.0f, flBumpAlpha, g_vecMask.w ) * lerp( 1.0f, mask.r, g_vecMisc.x );
+
+	// the metals of the stock textures are painted and rusty: not all of the color goes
+	const float NV = saturate( dot( N, V ) );
+	float3 diffuse = lerp( AMBIENT_BOTTOM, AMBIENT_TOP, N.z * 0.5f + 0.5f );
+	diffuse += COLOR_KEY * saturate( dot( N, LIGHT_KEY ) );
+	diffuse += COLOR_FILL * saturate( dot( N, LIGHT_FILL ) );
+	diffuse += COLOR_RIM * saturate( dot( N, LIGHT_RIM ) ) * 0.5f;
+
+	float3 spec = COLOR_KEY * Specular( N, V, LIGHT_KEY, F0, a );
+	spec += COLOR_FILL * Specular( N, V, LIGHT_FILL, F0, a );
+	spec += COLOR_RIM * Specular( N, V, LIGHT_RIM, F0, a );
+	spec += Studio( reflect( -V, N ), flRoughness ) * EnvSpecular( F0, NV, flRoughness );
+
+	float3 color = albedo * ( 1.0f - flMetal * 0.7f ) * diffuse + spec * flReflect;
+
+	// the edge of the object takes the color of the window, a little
+	const float flEdge = 1.0f - NV;
+	color += g_vecRim.rgb * flEdge * flEdge * 0.5f * saturate( N.z * 0.6f + 0.6f );
+
+	// glowing parts
+	if ( g_vecSelfIllum.w > 0.5f )
+	{
+		float3 glow = g_vecSelfIllum.w < 1.5f ? base.aaa : ( g_vecSelfIllum.w < 2.5f ? mask.rgb : mask.aaa );
+		color = lerp( color, albedo * g_vecSelfIllum.rgb, saturate( glow ) );
+	}
+
+	// a shoulder, without bleaching the colors
+	const float flPeak = max( max( color.r, color.g ), max( color.b, 1e-4f ) );
+	if ( flPeak > 0.8f )
+		color *= ( 0.8f + 0.2f * ( 1.0f - exp( -( flPeak - 0.8f ) / 0.2f ) ) ) / flPeak;
+
+	return float4( color, g_vecMisc.y > 0.5f ? base.a : 1.0f );
+}

@@ -976,6 +976,16 @@
 		"weapon_shotgun" : "Shotgun"
 		"weapon_smg1" : "SMG1"
 		"weapon_stunstick" : "Stun Stick"
+		"weapon_rpm_axe" : "Axe (HL2RPM melee)" //Pravka
+		"weapon_rpm_bottle" : "Bottle (HL2RPM melee)" //Pravka
+		"weapon_rpm_brokenbottle" : "Broken bottle (HL2RPM melee)" //Pravka
+		"weapon_rpm_hook" : "Hook (HL2RPM melee)" //Pravka
+		"weapon_rpm_pan" : "Frying pan (HL2RPM melee)" //Pravka
+		"weapon_rpm_pickaxe" : "Pickaxe (HL2RPM melee)" //Pravka
+		"weapon_rpm_pipe" : "Pipe (HL2RPM melee)" //Pravka
+		"weapon_rpm_pot" : "Pot (HL2RPM melee)" //Pravka
+		"weapon_rpm_shovel" : "Shovel (HL2RPM melee)" //Pravka
+		"weapon_rpm_beretta" : "Beretta 92 (HL2RPM pistol)" //Pravka
 		//"weapon_beerbottle" : "Beer Bottle"
 		//"weapon_beerbottle2" : "Beer Bottle2"
 		"0"  : "Nothing"
@@ -2123,6 +2133,16 @@
 		"weapon_shotgun"  : "Shotgun"
 		"weapon_smg1"  : "SMG1"
 		"weapon_stunstick"  : "Stun Stick"
+		"weapon_rpm_axe" : "Axe (HL2RPM melee)" //Pravka
+		"weapon_rpm_bottle" : "Bottle (HL2RPM melee)" //Pravka
+		"weapon_rpm_brokenbottle" : "Broken bottle (HL2RPM melee)" //Pravka
+		"weapon_rpm_hook" : "Hook (HL2RPM melee)" //Pravka
+		"weapon_rpm_pan" : "Frying pan (HL2RPM melee)" //Pravka
+		"weapon_rpm_pickaxe" : "Pickaxe (HL2RPM melee)" //Pravka
+		"weapon_rpm_pipe" : "Pipe (HL2RPM melee)" //Pravka
+		"weapon_rpm_pot" : "Pot (HL2RPM melee)" //Pravka
+		"weapon_rpm_shovel" : "Shovel (HL2RPM melee)" //Pravka
+		"weapon_rpm_beretta" : "Beretta 92 (HL2RPM pistol)" //Pravka
 		"0"  : "Nothing"
 	]
 
@@ -2436,6 +2456,16 @@
 		"weapon_shotgun" : "Shotgun"
 		"weapon_smg1" : "SMG1"
 		"weapon_stunstick" : "Stun Stick"
+		"weapon_rpm_axe" : "Axe (HL2RPM melee)" //Pravka
+		"weapon_rpm_bottle" : "Bottle (HL2RPM melee)" //Pravka
+		"weapon_rpm_brokenbottle" : "Broken bottle (HL2RPM melee)" //Pravka
+		"weapon_rpm_hook" : "Hook (HL2RPM melee)" //Pravka
+		"weapon_rpm_pan" : "Frying pan (HL2RPM melee)" //Pravka
+		"weapon_rpm_pickaxe" : "Pickaxe (HL2RPM melee)" //Pravka
+		"weapon_rpm_pipe" : "Pipe (HL2RPM melee)" //Pravka
+		"weapon_rpm_pot" : "Pot (HL2RPM melee)" //Pravka
+		"weapon_rpm_shovel" : "Shovel (HL2RPM melee)" //Pravka
+		"weapon_rpm_beretta" : "Beretta 92 (HL2RPM pistol)" //Pravka
 		"0" : "Nothing"
 	]
 ]
@@ -4268,8 +4298,8 @@
 @PointClass base(ItemHealth) studio("models/items/healthkit.mdl") = item_healthkit : "Small Health Kit" []
 @PointClass base(ItemHealth) studio("models/healthvial.mdl") = item_healthvial : "Personal Health Kit" []
 @PointClass base(ItemAmmo) studio("models/items/combine_rifle_ammo01.mdl") = item_ammo_ar2_altfire : "AR2 Alt-fire Round" []
-@PointClass base(Item) studio("models/items/hevsuit.mdl") = item_suit : "HEV Suit"
-//Pravka
+@PointClass base(Item) studio("models/hl2rpm/items/suit_hev.mdl") = item_suit : "HEV Suit"
+//Pravka (model: the folded H.E.V. of the mod, 2026-11-02)
 [
 	spawnflags(Flags) =
 	[

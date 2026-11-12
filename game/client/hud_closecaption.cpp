@@ -23,6 +23,7 @@
 #include "datacache/idatacache.h"
 #include "SoundEmitterSystem/isoundemittersystembase.h"
 
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -32,7 +33,7 @@ extern ISoundEmitterSystemBase *soundemitterbase;
 
 // Marked as FCVAR_USERINFO so that the server can cull CC messages before networking them down to us!!!
 #ifdef MAPBASE
-ConVar closecaption( "closecaption", "1", FCVAR_ARCHIVE | FCVAR_ARCHIVE_XBOX | FCVAR_USERINFO, "Enable close captioning." );
+ConVar closecaption( "closecaption", "0", FCVAR_USERINFO, "Enable close captioning. HL2RPM: unused, the stock captions are cut out" );
 #else
 ConVar closecaption( "closecaption", "0", FCVAR_ARCHIVE | FCVAR_ARCHIVE_XBOX | FCVAR_USERINFO, "Enable close captioning." );
 #endif
@@ -844,28 +845,10 @@ CHudCloseCaption::CHudCloseCaption( const char *pElementName )
 
 	vgui::ivgui()->AddTickSignal( GetVPanel(), 0 );
 
-	if ( !IsX360() )
-	{
-		g_pVGuiLocalize->AddFile( "resource/closecaption_%language%.txt", "GAME", true );
-	}
-
+	// HL2RPM: the stock close captions are cut out - the panel stays (the engine and the scenes call it), but
+	// nothing is loaded and nothing is shown. What NPCs of the Creation Kit say has its own subtitles
+	// (hl2rpm_subtitles.cpp).
 	HOOK_HUD_MESSAGE( CHudCloseCaption, CloseCaption );
-
-	char uilanguage[ 64 ];
-	engine->GetUILanguage( uilanguage, sizeof( uilanguage ) );
-
-	if ( !Q_stricmp( uilanguage, "english" ) )
-	{
-		english.SetValue( 1 );
-	}
-	else
-	{
-		english.SetValue( 0 );
-	}
-
-	char dbfile [ 512 ];
-	Q_snprintf( dbfile, sizeof( dbfile ), "resource/closecaption_%s.dat", uilanguage );
-	InitCaptionDictionary( dbfile );
 }
 
 //-----------------------------------------------------------------------------
@@ -1208,6 +1191,9 @@ void CHudCloseCaption::Paint( void )
 
 void CHudCloseCaption::OnTick( void )
 {
+	SetVisible( false );		// HL2RPM: cut out, see the constructor
+	return;
+
 	// See if any async work has completed
 	ProcessAsyncWork();
 
@@ -1442,6 +1428,8 @@ bool CHudCloseCaption::StreamHasCommand( const wchar_t *stream, const wchar_t *s
 
 void CHudCloseCaption::Process( const wchar_t *stream, float duration, const char *tokenstream, bool fromplayer, bool direct )
 {
+	return;		// HL2RPM: cut out, see the constructor
+
 	if ( !direct )
 	{
 		if ( !closecaption.GetBool() )
@@ -2431,6 +2419,8 @@ extern void Hack_FixEscapeChars( char *str );
 
 void CHudCloseCaption::ProcessCaptionDirect( const char *tokenname, float duration, bool fromplayer /* = false */ )
 {
+	return;		// HL2RPM: cut out, see the constructor
+
 	m_bVisibleDueToDirect = true;
 
 	char token[ 512 ];
@@ -2565,7 +2555,7 @@ void CHudCloseCaption::_ProcessSentenceCaptionStream( int wordCount, const char 
 
 bool CHudCloseCaption::ProcessCaption( const char *tokenname, float duration, bool fromplayer /* = false */, bool direct /* = false */ )
 {
-	return AddAsyncWork( tokenname, false, duration, fromplayer, direct );
+	return false;		// HL2RPM: cut out, see the constructor
 }
 
 void CHudCloseCaption::_ProcessCaption( const wchar_t *caption, const char *tokenname, float duration, bool fromplayer, bool direct )

@@ -9,6 +9,18 @@ void InitDeferredRTs( bool bInitial = false );
 void RequestDeferredRTRefresh();
 void ServiceDeferredRTRefresh();
 
+// HL2RPM: render scale - the 3D view drawn into a smaller frame (_rt_hl2rpm_scene) and brought up
+// to the screen by the TAA (deferred_taa.cpp, DeferredTAA_DrawUpscale). Latched with the
+// screen-sized render targets: they all take the size of the 3D frame then.
+bool DeferredRenderScale_IsActive();
+void DeferredRenderScale_GetFrameSize( int &w, int &h );	// the 3D frame (the back buffer when not scaled)
+float DeferredRenderScale_GetScale();						// frame width / back buffer width (1 when not scaled)
+ITexture *GetDefRT_Scene();									// the 3D frame when scaled, else NULL
+ITexture *GetDefRT_SceneCopy();								// a copy of it for the passes that read the frame
+ITexture *GetDefRT_UpscaleMask();							// what moves with the camera (TAA stencil), as a texture
+// a render target the size of the 3D frame / iDivisor (1 or 4) - what the deferred passes draw
+ITexture *CreateFrameSizedRT( const char *pszName, int iDivisor, int iFormat, int iDepth, unsigned int nFlags );
+
 ITexture *GetDefRT_Normals();
 ITexture *GetDefRT_Depth();
 ITexture *GetDefRT_Albedo();
@@ -44,6 +56,13 @@ ITexture *GetShadowDepthRT_Ortho( int index );
 
 ITexture *GetShadowColorRT_Proj( int index );
 ITexture *GetShadowDepthRT_Proj( int index );
+// HL2RPM: what the light pass reads from a spot shadow slot unless a lamp's own map is put there
+ITexture *GetShadowSampleRT_Proj( int index );
+
+// HL2RPM: the pool of spot shadow maps kept between frames (deferred_shadowcache.cpp)
+#define MAX_SHADOW_CACHE_PROJ	24
+int GetNumShadowCacheRT_Proj();
+ITexture *GetShadowCacheRT_Proj( int index );
 
 ITexture *GetShadowColorRT_DP( int index );
 ITexture *GetShadowDepthRT_DP( int index );

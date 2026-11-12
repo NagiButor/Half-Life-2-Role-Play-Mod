@@ -282,6 +282,16 @@
 #define FIRST_SHARED_LIGHTDATA_CONSTANT_FXC c31
 #define MAX_LIGHTDATA_CONSTANT_ROWS 193
 
+/* HL2RPM: light reach maps (client deferred_lightreach.cpp, lightingpass_point_ps30): per point light
+ * a cube of LIGHTREACH_N x LIGHTREACH_N free distances per face, traced against the world; the faces
+ * of a light side by side (+x -x +y -y +z -z), LIGHTREACH_SLOTS_X lights a row of the atlas
+ */
+#define LIGHTREACH_N			16
+#define LIGHTREACH_SLOTS_X		16
+#define LIGHTREACH_SLOTS_Y		32
+#define LIGHTREACH_ATLAS_W		( LIGHTREACH_N * 6 * LIGHTREACH_SLOTS_X )
+#define LIGHTREACH_ATLAS_H		( LIGHTREACH_N * LIGHTREACH_SLOTS_Y )
+
 /* Projectable VGUI settings
  */
 #define PROJECTABLE_VGUI_RES 512

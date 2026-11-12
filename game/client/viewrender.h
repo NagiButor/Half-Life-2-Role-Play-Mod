@@ -235,6 +235,12 @@ protected:
 	// the first portal we're looking out of is a water portal, so our view effectively originates under the water.
 	void			BuildWorldRenderLists( bool bDrawEntities, int iForceViewLeaf = -1, bool bUseCacheIfEnabled = true, bool bShadowDepth = false, float *pReflectionWaterHeight = NULL );
 
+	// HL2RPM: only the leaves of the map in this view's frustum, no world surface lists - for a
+	// shadow view that draws the world from the renderer's own meshes (deferred_worldmesh.cpp).
+	// The renderables are collected from these leaves as from a world list. False: not possible
+	// (the leaves of the map are not known) - build the world lists instead.
+	bool			BuildLeafListsOnly();
+
 	// Purpose: Builds render lists for renderables. Called once for refraction, once for over water
 	void			BuildRenderableRenderLists( int viewID );
 
