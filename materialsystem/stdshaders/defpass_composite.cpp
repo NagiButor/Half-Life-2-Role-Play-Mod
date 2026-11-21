@@ -697,9 +697,7 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 		// HL2RPM: caustics under the water (refraction view, see composite_ps30)
 		{
 			const float flStrength = r_deferred_water_caustics.GetFloat();
-			// (w: the albedo's mip bias while TAA jitters the frame - textures stay crisp)
-			float flCaustics[4] = { flStrength, pShaderAPI->CurrentTime() * 0.6f, 1.0f / 48.0f,
-				GetDeferredExt()->GetTAAData().vecParams3.y };
+			float flCaustics[4] = { flStrength, pShaderAPI->CurrentTime() * 0.6f, 1.0f / 48.0f, 0.0f };
 			pShaderAPI->SetPixelShaderConstant( 23, flCaustics, 1, true );
 		}
 

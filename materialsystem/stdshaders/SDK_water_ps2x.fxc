@@ -6,6 +6,8 @@
 // STATIC: "REFRACT"						"0..1"
 // STATIC: "ABOVEWATER"						"0..1"
 // STATIC: "BLURRY_REFRACT"					"0..1"	[ps20b]
+// HL2RPM: flowing water of Portal 2 / L4D2 ($flowmap: normals carried along a flow map, $flow_colortexture: a color layer carried the same way)
+// STATIC: "FLOWMAP"						"0..1"	[ps20b]
 
 // When we turn NORMAL_DECODE_MODE on, this shader only needs 0..1, not 0..2
 // STATIC: "NORMAL_DECODE_MODE"				"0..0"	[XBOX]
@@ -16,10 +18,16 @@
 // DYNAMIC: "WRITE_DEPTH_TO_DESTALPHA"		"0..0"	[ps20b] [XBOX]
 
 // SKIP: $MULTITEXTURE && $BASETEXTURE
+// SKIP: $FLOWMAP && $MULTITEXTURE
+// SKIP: $FLOWMAP && $BASETEXTURE
+// SKIP: $FLOWMAP && $BLURRY_REFRACT
+// (the gamma table lookup of CONVERT_TO_SRGB is one dependent read more than ps_2_b takes after the flow: X4018; water.cpp turns the flow off there)
+// SKIP: $FLOWMAP && $CONVERT_TO_SRGB
 
 #if defined(SHADER_MODEL_PS_2_0)
 #	define BLURRY_REFRACT 0
 #	define WRITE_DEPTH_TO_DESTALPHA 0
+#	define FLOWMAP 0
 #endif
 
 #include "water_ps2x_helper.h"
@@ -36,6 +44,11 @@ sampler LightmapSampler			: register( s3 );
 sampler NormalSampler			: register( s4 );
 sampler LightSampler			: register( s6 );	// HL2RPM: the light buffer of the deferred renderer (water.cpp)
 sampler SkySampler				: register( s7 );	// HL2RPM: its SSAO target (g: the sky visibility)
+#if FLOWMAP
+sampler FlowSampler				: register( s8 );	// HL2RPM: $flowmap (rg: the flow, 0.5 = still)
+sampler FlowNoiseSampler		: register( s9 );	// HL2RPM: $flow_noise_texture (g: the phase offset, so the cycles don't pulse together)
+sampler FlowColorSampler		: register( s10 );	// HL2RPM: $flow_colortexture (the goo's own color, carried by the flow)
+#endif
 
 const HALF4 vRefractTint			: register( c1 );
 const HALF4 vReflectTint			: register( c4 );
@@ -50,6 +63,13 @@ const float4 g_FoamColor			: register( c10 );	// HL2RPM (water.cpp)
 const float4 g_BodyLight			: register( c11 );	// HL2RPM (water.cpp, water_ps2x_helper.h)
 const float4 g_BodyAmbient			: register( c12 );
 const float4 g_WaterKind			: register( c13 );	// HL2RPM (water.cpp): xyz how much faster than the average each color fades, w its own color's glow
+#if FLOWMAP
+const float4 g_FlowParams1			: register( c14 );	// HL2RPM (water.cpp): x flow map uv per unit, y normal uv per unit, z scroll distance, w bump strength
+const float4 g_FlowParams2			: register( c15 );	// x time x timescale, y 1 / ( 2 x interval ), z noise uv per unit, w color layer on (0/1)
+const float4 g_FlowColorParams1		: register( c16 );	// x color uv per unit, y 1 / ( 2 x color interval ), z color scroll distance, w displacement by the normal
+const float4 g_FlowColorParams2		: register( c17 );	// x color weight exponent, y color brightness, z color opacity, w unused
+const float4 g_FlowColorTint		: register( c18 );	// rgb linear tint for $flow_colortexture
+#endif
 
 #define g_WaterFogStart			g_WaterFogParams.x
 #define g_WaterFogEndMinusStart	g_WaterFogParams.y
@@ -107,6 +127,13 @@ float4 main( PS_INPUT i ) : COLOR
 	params.vWaterKind = g_WaterKind;
 	params.vEyePos = g_EyePos;
 	params.vWorldPos = i.vWorldPos_projPosW.xyz;
+#if FLOWMAP
+	params.vFlowParams1 = g_FlowParams1;
+	params.vFlowParams2 = g_FlowParams2;
+	params.vFlowColorParams1 = g_FlowColorParams1;
+	params.vFlowColorParams2 = g_FlowColorParams2;
+	params.vFlowColorTint = g_FlowColorTint.rgb;
+#endif
 
 	float4 result;
 	float fogFactor;
@@ -115,6 +142,9 @@ float4 main( PS_INPUT i ) : COLOR
 #if BASETEXTURE
 			   BaseTextureSampler, 
 			   LightmapSampler, 
+#endif
+#if FLOWMAP
+			   FlowSampler, FlowNoiseSampler, FlowColorSampler,
 #endif
 			   NormalSampler, RefractSampler, ReflectSampler, LightSampler, SkySampler,
 			   result, fogFactor );

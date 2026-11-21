@@ -5,7 +5,7 @@ taken from the previous build (build.Cached)."""
 import numpy as np
 
 from . import build as B
-from .sets import eat_chair, fists, kimodo_clips, lean_wall, lie_bed, lie_ground, sit_chair, sit_couch, sit_ground, stand_idle
+from .sets import eat_chair, kimodo_clips, lean_wall, lie_bed, lie_ground, sit_chair, sit_couch, sit_ground
 
 STOCK = {
     "male": ("models/humans/male_ss.mdl", "models/humans/male_shared_original.mdl"),
@@ -126,35 +126,6 @@ def entries(skel):
                               ("rpm_search_exit", kimodo_clips.search_exit, {"fadein": 0.1, "fadeout": 0.25})):
             make, o = _single(fn)
             o.update(opt)
-            out.append((name, make, o))
-    if skel in ("male", "female"):
-        # a standing idle made of a Kimodo motion, for NPCs and the player
-        for name, act in (("rpm_idle_bored", "ACT_IDLE"), ("rpm_pidle_bored", "ACT_HL2MP_IDLE")):
-            make, o = _single(kimodo_clips.idle_bored)
-            o.update({"loop": True, "activity": act, "weight": 1, "fadein": 0.4, "fadeout": 0.3})
-            out.append((name, make, o))
-        # standing idles of unarmed citizens: ACT_IDLE variants next to the stock idle_subtle
-        for name, fn in stand_idle.ALL:
-            make, o = _single(fn)
-            o.update({"loop": True, "activity": "ACT_IDLE", "weight": 1, "fadein": 0.4, "fadeout": 0.3})
-            out.append((name, make, o))
-            # the same for the player's body in third person (Mapbase's player animation state, unarmed)
-            make2, o2 = _single(fn)
-            o2.update({"loop": True, "activity": "ACT_HL2MP_IDLE", "weight": 1, "fadein": 0.4, "fadeout": 0.3})
-            out.append((name.replace("rpm_idle_", "rpm_pidle_"), make2, o2))
-    if humans:
-        # fists (weapon_rpm_fists): the guard and the punches
-        make, o = _single(fists.stance)
-        o.update({"loop": True, "activity": "ACT_RPM_FIST_STANCE", "weight": 1, "fadein": 0.2, "fadeout": 0.2})
-        out.append(("rpm_fist_stance", make, o))
-        for name, fn, w in (("rpm_fist_jab", fists.jab, 3), ("rpm_fist_cross", fists.cross, 2),
-                            ("rpm_fist_hook", fists.hook, 2), ("rpm_fist_uppercut", fists.uppercut, 1)):
-            make, o = _single(fn)
-            o.update({"activity": "ACT_RPM_FIST_PUNCH", "weight": w, "fadein": 0.08, "fadeout": 0.15})
-            out.append((name, make, o))
-        for name, fn, act in (("rpm_fist_flinch", fists.flinch, "ACT_RPM_FIST_FLINCH"), ("rpm_fist_shove", fists.shove, "ACT_RPM_FIST_SHOVE")):
-            make, o = _single(fn)
-            o.update({"activity": act, "weight": 1, "fadein": 0.08, "fadeout": 0.15})
             out.append((name, make, o))
     return out
 

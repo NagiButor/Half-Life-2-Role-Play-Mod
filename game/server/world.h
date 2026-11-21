@@ -97,6 +97,7 @@ private:
 	CNetworkVar( bool, m_bStartDark );
 	CNetworkVar( bool, m_bColdWorld );
 	bool m_bDisplayTitle;
+	bool m_bHasSkyname;
 };
 
 

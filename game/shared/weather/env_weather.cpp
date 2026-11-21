@@ -7,6 +7,9 @@
 #include "cbase.h"
 #include "weather/env_weather.h"
 #include "timecycle/env_timecycle.h"
+#ifdef GAME_DLL
+#include "deferred/deferred_shared_common.h"
+#endif
 
 #include "tier0/memdbgon.h"
 
@@ -105,6 +108,9 @@ static ConVar sv_weather_procedural_sky( "sv_weather_procedural_sky", "1", FCVAR
 static void ApplyProceduralSky()
 {
 	if ( !sv_weather_procedural_sky.GetBool() )
+		return;
+
+	if ( !GetDeferredManager() || !GetDeferredManager()->IsDeferredRenderingEnabled() )
 		return;
 
 	static ConVarRef sv_skyname( "sv_skyname", false );

@@ -1,0 +1,47 @@
+"SDK_Water"
+{
+	// HL2RPM Portal 2 water port (orig: toxicslime_a3_03 / a3_bomb_flings)
+	"%compilewater" 1
+	"%tooltexture" "hl2rpm/water/p2_tex/p2_tool_water"
+	"$abovewater" 1
+	"$forceexpensive" 1
+	"$envmap" "env_cubemap"
+	"$normalmap" "hl2rpm/water/p2_tex/p2_river_normal_sharp"
+	"$flowmap" "hl2rpm/water/p2_tex/p2_toxic_flowmap"
+	"$flow_worlduvscale" "0.4"
+	"$flow_normaluvscale" "160.0"
+	"$flow_timeintervalinseconds" "0.45"
+	"$flow_uvscrolldistance" "0.12"
+	"$flow_bumpstrength" "1.0"
+	"$flow_timescale" "0.95"
+	"$flow_noise_texture" "hl2rpm/water/p2_tex/p2_water_noise"
+	"$flow_noise_scale" "0.0009"
+	"$flow_colortexture" "hl2rpm/water/p2_tex/p2_toxicslime_color"
+	"$color_flow_uvscale" "175.0"
+	"$color_flow_timeintervalinseconds" "3.6"
+	"$color_flow_uvscrolldistance" "0.15"
+	"$color_flow_lerpexp" "0.98"
+	"$color_flow_displacebynormalstrength" "0.018"
+	"$flow_color_intensity" "0.84"
+	"$flow_color_opacity" "0.96"
+	"$flow_color_tint" "{188 152 132}"
+	"$reflecttexture" "_rt_WaterReflection"
+	"$reflectentities" 1
+	"$reflectamount" "0.22"
+	"$reflecttint" "{185 198 198}"
+	"$bottommaterial" "hl2rpm/water/p2_goo_beneath"
+	"$surfaceprop" "slime"
+	"$fogenable" 1
+	"$fogstart" "0"
+	"$fogend" "90"
+	"$fogcolor" "{38 24 14}"
+	"$water_absorb" "[0.85 1.05 1.55 2.2]"
+	"$water_glow" "0.0"
+	"$scale" "[1 1]"
+	"Proxies"
+	{
+		"WaterLOD"
+		{
+		}
+	}
+}

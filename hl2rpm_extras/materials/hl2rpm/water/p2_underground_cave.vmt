@@ -1,0 +1,50 @@
+"SDK_Water"
+{
+	// HL2RPM Portal 2 water port (orig: liquids/water_underground_cave)
+	"%compilewater" 1
+	"%tooltexture" "hl2rpm/water/p2_tex/p2_tool_water"
+	"$abovewater" 1
+	"$forceexpensive" 1
+	"$envmap" "env_cubemap"
+	"$normalmap" "hl2rpm/water/p2_tex/p2_river_normal_sharp"
+	"$flowmap" "hl2rpm/water/p2_tex/p2_toxic_flowmap"
+	"$flow_worlduvscale" "1.5"
+	"$flow_normaluvscale" "160.0"
+	"$flow_timeintervalinseconds" "0.45"
+	"$flow_uvscrolldistance" "0.11"
+	"$flow_bumpstrength" "1.0"
+	"$flow_timescale" "1.0"
+	"$flow_noise_texture" "hl2rpm/water/p2_tex/p2_water_noise"
+	"$flow_noise_scale" "0.001"
+	"$flow_colortexture" "hl2rpm/water/p2_tex/p2_toxicslime_color"
+	"$color_flow_uvscale" "260.0"
+	"$color_flow_timeintervalinseconds" "3.8"
+	"$color_flow_uvscrolldistance" "0.18"
+	"$color_flow_lerpexp" "0.98"
+	"$color_flow_displacebynormalstrength" "0.03"
+	"$flow_color_intensity" "1.02"
+	"$flow_color_opacity" "0.58"
+	"$flow_color_tint" "{220 202 178}"
+	"$reflecttexture" "_rt_WaterReflection"
+	"$reflectentities" 1
+	"$reflectamount" "0.26"
+	"$reflecttint" "{190 205 205}"
+	"$refracttexture" "_rt_WaterRefraction"
+	"$refractamount" "0.3"
+	"$refracttint" "{175 158 110}"
+	"$bottommaterial" "hl2rpm/water/p2_goo_beneath"
+	"$surfaceprop" "slime"
+	"$fogenable" 1
+	"$fogstart" "0"
+	"$fogend" "85"
+	"$fogcolor" "{58 35 20}"
+	"$water_absorb" "[0.85 1.0 1.45 1.45]"
+	"$water_glow" "0.0"
+	"$scale" "[1 1]"
+	"Proxies"
+	{
+		"WaterLOD"
+		{
+		}
+	}
+}

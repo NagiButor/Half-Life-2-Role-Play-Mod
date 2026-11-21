@@ -30,7 +30,34 @@ struct DrawWater_params_t
 	float4 vBodyLight;			// HL2RPM: x 1 / the light of the open sky and sun of the moment, y the most the water's own color is lit by (x that light), z density of the water's fog (1 = the material's), w 1 = by the path of the view ray, 0 = by the depth alone
 	float4 vBodyAmbient;		// HL2RPM: rgb the least light of the water's own color where the sky is in sight (x the same: the sky light and what the water passes on from where the sun reaches it), w uv scale of the sky visibility target
 	float4 vWaterKind;			// HL2RPM: xyz how much faster than the average each color fades on the way through the water, w how much its own color glows (radioactive)
+#if FLOWMAP
+	float4 vFlowParams1;		// HL2RPM: x flow map uv per unit, y normal uv per unit, z scroll distance, w bump strength
+	float4 vFlowParams2;		// x time x timescale, y 1 / ( 2 x interval ), z noise uv per unit, w color layer on
+	float4 vFlowColorParams1;	// x color uv per unit, y 1 / ( 2 x color interval ), z color scroll distance, w displacement by the normal
+	float4 vFlowColorParams2;	// x color weight exponent, y color brightness, z color opacity
+	float3 vFlowColorTint;		// rgb linear tint for $flow_colortexture
+#endif
 };
+
+#if FLOWMAP
+// HL2RPM: the flow of Portal 2 / Left 4 Dead 2 water (A. Vlachos, "Water Flow in Portal 2", 2010):
+// a texture is carried along the flow vector of the map for one interval, then starts over; two
+// layers half an interval apart are blended so that neither reset is seen, every interval is shifted
+// by its own offset (no visible repetition), and a noise texture shifts the phase from place to place
+// (the whole surface would pulse together otherwise). Returns the blend of the two layers' uv:
+// xy layer 1, zw layer 2; flWeight2 - the share of layer 2.
+float4 FlowUV( float2 vUv, float2 vFlow, float flTime, float flOoTwoIntervals, float flNoisePhase, float flScroll, out float flWeight2 )
+{
+	const float flT = flTime * flOoTwoIntervals + flNoisePhase;
+	const float flPhase1 = frac( flT );
+	const float flPhase2 = frac( flT + 0.5f );
+	const float flOffset1 = floor( flT ) * 0.311f;
+	const float flOffset2 = floor( flT + 0.5f ) * 0.311f + 0.5f;
+	flWeight2 = abs( 2.0f * flPhase1 - 1.0f );
+	return float4( vUv + flOffset1 + vFlow * ( flPhase1 * flScroll ),
+				   vUv + flOffset2 + vFlow * ( flPhase2 * flScroll ) );
+}
+#endif
 
 // HL2RPM: with the deferred renderer the alpha of the refraction view is the depth under the
 // water surface, sqrt( depth / 1024 units ), the same for every water in sight
@@ -47,6 +74,11 @@ void DrawWater( in DrawWater_params_t i,
 				in sampler BaseTextureSampler,
 			    in sampler LightmapSampler,
 #endif
+#if FLOWMAP
+				in sampler FlowSampler,
+				in sampler FlowNoiseSampler,
+				in sampler FlowColorSampler,
+#endif
 				in sampler NormalSampler,
 			    in sampler RefractSampler,
 			    in sampler ReflectSampler,
@@ -57,7 +89,23 @@ void DrawWater( in DrawWater_params_t i,
 	bool bReflect = REFLECT ? true : false;
 	bool bRefract = REFRACT ? true : false;
 
-#if MULTITEXTURE
+#if FLOWMAP
+	// HL2RPM: the normal carried by the flow map. World x / -y is the uv of a floor face in Hammer
+	// (the flow maps of Portal 2 are drawn in it); the tangent space of a water face is the same.
+	const float2 vWorldUv = float2( i.vWorldPos.x, -i.vWorldPos.y );
+	const float4 vFlowTexel = tex2D( FlowSampler, vWorldUv * i.vFlowParams1.x );
+	const float2 vFlow = vFlowTexel.rg * 2.0f - 1.0f;
+	const float flNoise = tex2D( FlowNoiseSampler, vWorldUv * i.vFlowParams2.z ).g;
+	float flFlowWeight2;
+	const float4 vFlowUv = FlowUV( vWorldUv * i.vFlowParams1.y, vFlow, i.vFlowParams2.x, i.vFlowParams2.y, flNoise, i.vFlowParams1.z, flFlowWeight2 );
+	const float4 vNormalTexel1 = tex2D( NormalSampler, vFlowUv.xy );
+	const float4 vNormalTexel2 = tex2D( NormalSampler, vFlowUv.zw );
+	float4 vNormal;
+	vNormal.xy = lerp( vNormalTexel1.xy, vNormalTexel2.xy, flFlowWeight2 ) * 2.0f - 1.0f;
+	vNormal.xy *= i.vFlowParams1.w;
+	vNormal.z = sqrt( saturate( 1.0f - dot( vNormal.xy, vNormal.xy ) ) );
+	vNormal.a = lerp( vNormalTexel1.a, vNormalTexel2.a, flFlowWeight2 );
+#elif MULTITEXTURE
 	float4 vNormal  = tex2D( NormalSampler, i.vBumpTexCoord );
 	float4 vNormal1 = tex2D( NormalSampler, i.vExtraBumpTexCoord.xy );
 	float4 vNormal2 = tex2D( NormalSampler, i.vExtraBumpTexCoord.zw );
@@ -98,7 +146,12 @@ void DrawWater( in DrawWater_params_t i,
 
 #if ABOVEWATER
 	const float flRefractAlpha = vUnwarpedRefract.a;
+#if FLOWMAP && !REFRACT
+	// HL2RPM: a flowing goo without refraction (its body is opaque): the full depth of its fog
+	float waterFogDepthValue = 1.0f;
+#else
 	float waterFogDepthValue = DecodeRefractFog( flRefractAlpha, i, flPath );
+#endif
 #else
 	// We don't actually have valid depth values in alpha when we are underwater looking out, so 
 	// just set to farthest value.
@@ -189,6 +242,7 @@ void DrawWater( in DrawWater_params_t i,
 #	endif
 #else
 	vReflectColor *= i.vReflectTint;
+#if REFRACT
 	HALF4 vRefractColor = tex2D( RefractSampler, vRefractTexCoord );
 	// HL2RPM: the wave offset can land where nothing under the water was drawn - past the far
 	// bank, above the waterline of a wall: the cleared target (black, alpha 0; every drawn pixel
@@ -199,8 +253,11 @@ void DrawWater( in DrawWater_params_t i,
 	// depend on this sample is one dependent texture read more than ps_2_b takes, X4018)
 	if ( i.fRefractDepthEncoded > 0.5f && vRefractColor.a < ( 0.5f / 255.0f ) )
 		vRefractColor = vUnwarpedRefract;
+#else
+	HALF4 vRefractColor = float4( 0.0f, 0.0f, 0.0f, 1.0f );
+#endif
 	// get the depth value from the refracted sample to be used for fog.
-#	if ABOVEWATER
+#	if ABOVEWATER && !( FLOWMAP && !REFRACT )
 	// Don't mess with this in the underwater case since we don't really have
 	// depth values there.
 	waterFogDepthValue = DecodeRefractFog( vRefractColor.a, i, flPath );
@@ -227,7 +284,11 @@ void DrawWater( in DrawWater_params_t i,
 		// up on the four - X4018)
 		float3 vLightUnder = tex2D( LightSampler, vRefractTexCoord ).rgb * i.vBodyLight.x;
 #else
+#if FLOWMAP && !REFRACT
+		const float2 vSpread = float2( 0.012f, 0.021f );
+#else
 		const float2 vSpread = float2( 0.0045f, 0.008f );
+#endif
 		float3 vLightUnder = tex2D( LightSampler, vRefractTexCoord + vSpread ).rgb;
 		vLightUnder += tex2D( LightSampler, vRefractTexCoord - vSpread ).rgb;
 		vLightUnder += tex2D( LightSampler, vRefractTexCoord + float2( vSpread.x, -vSpread.y ) ).rgb;
@@ -263,8 +324,33 @@ void DrawWater( in DrawWater_params_t i,
 	// HL2RPM: each color fades at its own rate (the kind of water, water.cpp): clear water loses the
 	// red first and turns blue-green with depth, silt water loses the blue and browns; a radioactive
 	// water's own color glows in the dark as well
+#if FLOWMAP && !REFRACT
+	// (an opaque goo: all fog - pow( 0, k ) folded by the compiler is an infinity literal, X4579)
+	const float3 vFogBlend = float3( 1.0f, 1.0f, 1.0f );
+#else
 	const float3 vFogBlend = 1.0f - pow( saturate( 1.0f - flFogBlend ).xxx, i.vWaterKind.xyz );
+#endif
 	vRefractColor.rgb = lerp( vRefractColor.rgb, i.waterFogColor.rgb * LINEAR_LIGHT_SCALE * max( vBodyLight, i.vWaterKind.www ), vFogBlend );
+#if FLOWMAP
+	// HL2RPM: the goo's own color, carried by the flow like the normals (its own interval and scroll,
+	// a little displaced by the waves), lit by the light at the place like the water's fog color
+	if ( i.vFlowParams2.w > 0.5f )
+	{
+		const float2 vColorUv = vWorldUv * i.vFlowColorParams1.x + vNormal.xy * i.vFlowColorParams1.w;
+		float flColorWeight2;
+		const float4 vColorUvs = FlowUV( vColorUv, vFlow, i.vFlowParams2.x, i.vFlowColorParams1.y, flNoise, i.vFlowColorParams1.z, flColorWeight2 );
+		const float4 vColor1 = tex2D( FlowColorSampler, vColorUvs.xy );
+		const float4 vColor2 = tex2D( FlowColorSampler, vColorUvs.zw );
+		// (the exponent sharpens the change from one layer to the other, as in Portal 2)
+		const float flW2 = pow( flColorWeight2, i.vFlowColorParams2.x );
+		const float flW1 = pow( 1.0f - flColorWeight2, i.vFlowColorParams2.x );
+		const float4 vGoo = ( vColor1 * flW1 + vColor2 * flW2 ) / max( flW1 + flW2, 0.001f );
+		vRefractColor.rgb = lerp( vRefractColor.rgb,
+			vGoo.rgb * i.vFlowColorTint * LINEAR_LIGHT_SCALE * i.vFlowColorParams2.y * max( vBodyLight, i.vWaterKind.www ), i.vFlowColorParams2.z );
+		// Matte surface scum/foam in alpha dampens mirror reflection; glossy liquid between reflects crisply
+		fFresnel *= lerp( 1.0f, 0.35f, saturate( vGoo.a * i.vFlowColorParams2.z ) );
+	}
+#endif
 #else
 	float waterFogFactor = saturate( ( i.vProjPos.z - i.fWaterFogStart ) / i.fWaterFogEndMinusStart );
 	vRefractColor = lerp( vRefractColor, i.waterFogColor * LINEAR_LIGHT_SCALE, waterFogFactor );
@@ -297,6 +383,11 @@ void DrawWater( in DrawWater_params_t i,
 	HALF3 diffuseComponent = baseSample.rgb * diffuseLighting;
 #endif
 
+#if FLOWMAP
+	// HL2RPM: a flowing water/goo without refraction still has its body (fog color, goo color)
+	// under the reflection
+	result = bReflect ? lerp( vRefractColor, vReflectColor, fFresnel ) : vRefractColor;
+#else
 	if( bReflect && bRefract )
 	{
 		result = lerp( vRefractColor, vReflectColor, fFresnel );
@@ -317,6 +408,7 @@ void DrawWater( in DrawWater_params_t i,
 	{
 		result = float4( 0.0f, 0.0f, 0.0f, 0.0f );
 	}
+#endif
 
 #if ABOVEWATER
 	// HL2RPM: foam where the water is shallow - along the shore and around whatever stands in it

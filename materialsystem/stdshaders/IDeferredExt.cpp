@@ -50,10 +50,6 @@ CDeferredExtension::CDeferredExtension()
 	m_pTexSSAO = NULL;
 	m_pTexSSAOBlur = NULL;
 
-	m_pTexGIProbes = NULL;
-	m_pTexGIProbesFar = NULL;
-	m_pTexGI = NULL;
-	m_pTexGIBlur = NULL;
 	m_pTexLightReach = NULL;
 
 	m_pflCommonLightData = NULL;
@@ -293,14 +289,6 @@ void CDeferredExtension::CommitGIData( const giData_t &data )
 	m_dataGI = data;
 }
 
-void CDeferredExtension::CommitTexture_GI( ITexture *pProbes, ITexture *pProbesFar, ITexture *pGI, ITexture *pBlur )
-{
-	m_pTexGIProbes = pProbes;
-	m_pTexGIProbesFar = pProbesFar;
-	m_pTexGI = pGI;
-	m_pTexGIBlur = pBlur;
-}
-
 void CDeferredExtension::CommitTexture_LightReach( ITexture *pReach )
 {
 	m_pTexLightReach = pReach;
@@ -309,9 +297,4 @@ void CDeferredExtension::CommitTexture_LightReach( ITexture *pReach )
 void CDeferredExtension::CommitPostFXData( const postfxData_t &data )
 {
 	m_dataPostFX = data;
-}
-
-void CDeferredExtension::CommitTAAData( const taaData_t &data )
-{
-	m_dataTAA = data;
 }

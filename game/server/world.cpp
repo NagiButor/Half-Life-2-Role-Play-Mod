@@ -430,9 +430,13 @@ bool CWorld::KeyValue( const char *szKeyName, const char *szValue )
 {
 	if ( FStrEq(szKeyName, "skyname") )
 	{
-		// Sent over net now.
-		ConVarRef skyname( "sv_skyname" );
-		skyname.SetValue( szValue );
+		if ( szValue && szValue[0] )
+		{
+			// Sent over net now.
+			ConVarRef skyname( "sv_skyname" );
+			skyname.SetValue( szValue );
+			m_bHasSkyname = true;
+		}
 	}
 	else if ( FStrEq(szKeyName, "newunit") )
 	{
@@ -486,6 +490,7 @@ CWorld::CWorld( )
 #endif
 
 	m_bColdWorld = false;
+	m_bHasSkyname = false;
 }
 
 CWorld::~CWorld( )
@@ -544,6 +549,13 @@ void CWorld::Spawn( void )
 	// world model
 	SetModelName( AllocPooledString( modelinfo->GetModelName( GetModel() ) ) );
 	AddFlag( FL_WORLDBRUSH );
+
+	// HL2RPM: if the map has no skyname set in Hammer, start with a real texture skybox
+	if ( !m_bHasSkyname )
+	{
+		ConVarRef skyname( "sv_skyname" );
+		skyname.SetValue( "sky_day01_01" );
+	}
 
 	g_EventQueue.Init();
 	Precache( );

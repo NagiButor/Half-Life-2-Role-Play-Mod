@@ -21,7 +21,6 @@
 #include "deferred/deferred_lightreach.h"
 #include "deferred/deferred_gi.h"
 #include "deferred/deferred_postfx.h"
-#include "deferred/deferred_taa.h"
 #include "deferred/deferred_occlusion.h"
 
 #include "tier0/memdbgon.h"
@@ -123,7 +122,6 @@ void CLightingManager::LevelShutdownPostEntity()
 	DeferredBounce_Clear();
 	DeferredGI_Reset();
 	DeferredPostFX_Reset();
-	DeferredTAA_Reset();
 
 	m_hRenderLights.Purge();
 

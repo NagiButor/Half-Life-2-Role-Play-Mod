@@ -11,7 +11,6 @@
 #include "deferred/deferred_gi.h"
 #include "deferred/deferred_postfx.h"
 #include "deferred/deferred_pom.h"
-#include "deferred/deferred_taa.h"
 #include "deferred/deferred_shared_common.h"
 
 #include "materialsystem/itexture.h"
@@ -1359,7 +1358,6 @@ public:
 		ShutdownGI();
 		DeferredPostFX_Shutdown();
 		DeferredPOM_Shutdown();
-		DeferredTAA_Shutdown();
 		ShutdownWeatherTextures();
 	}
 };

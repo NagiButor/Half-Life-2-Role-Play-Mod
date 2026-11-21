@@ -52,10 +52,8 @@ sampler sCloudNoise							: register( s5 );
 sampler sSSAO								: register( s6 );
 const float4 g_vecAmbientCtrl				: register( c70 );	// y indoor ambient, w AO uv scale (0 = off)
 
-// ---- HL2RPM: world-space indirect light (GI probes, deferred_gi_ps30) ----
-// half resolution, blurred: rgb indirect light / Shape( n ), a coverage (0 = the sky light above)
-sampler sGI									: register( s7 );
-const float4 g_vecGIApply					: register( c72 );	// x on, y debug (ambient only), z contact shadows debug, w GI uv scale
+// ---- HL2RPM: contact shadows debug flag (c72.z; old probe GI removed, replaced by Zenteon TurboGI) ----
+const float4 g_vecGIApply					: register( c72 );	// z contact shadows debug
 
 // ---- HL2RPM: contact shadows - a short march toward the sun through the depth buffer ----
 const float4 g_matWorldToScreen[4]			: register( c73 );	// world -> screen texture coords of this view (rows, c73 - c76)
@@ -698,22 +696,7 @@ PS_OUTPUT main( const PS_INPUT In )
 #endif
 	}
 
-	// HL2RPM: the GI probes know where the sky really is in sight (windows, doors) and the sun
-	// light bounced off lit surfaces: their indirect light replaces the sky light wherever the
-	// grid around the camera covers the point (bumps keep their shading through Shape( n ))
-	if ( g_vecGIApply.x > 0.5 && !bSkybox )
-	{
-		const float4 gi = tex2D( sGI, uvHalfRes * g_vecGIApply.w );
-		ambient = lerp( ambient, gi.rgb * ( 0.6 + 0.4 * flNormal.z ), gi.a );
-	}
 	ambient *= aoSky.x;
-
-	// r_deferred_gi_debug 1..5: the ambient light alone (with r_deferred_debug_lighting_only 1)
-	if ( g_vecGIApply.y > 0.5 )
-	{
-		Out.vColor_0 = WriteLighting( float4( ambient, 0 ) );
-		return Out;
-	}
 
 	// HL2RPM (PBR): the specular term of the light buffer is a luminance - what the surface
 	// mirrors, for a reflectance of 1 from the front (the composite pass, which knows the

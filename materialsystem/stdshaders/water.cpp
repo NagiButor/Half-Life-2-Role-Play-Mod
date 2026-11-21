@@ -152,6 +152,26 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 		// HL2RPM: the kind of water (r_deferred_water_types)
 		SHADER_PARAM( WATER_ABSORB, SHADER_PARAM_TYPE_VEC4, "[0 0 0 0]", "how much faster than the average each color fades in the water (rgb), w its density (x the material's fog); not set = by the material's name" )
 		SHADER_PARAM( WATER_GLOW, SHADER_PARAM_TYPE_FLOAT, "-1", "how much the water's own color glows (radioactive: 1 .. 2); -1 = by the material's name" )
+		// HL2RPM: flowing water of Portal 2 / Left 4 Dead 2 (water_ps2x_helper.h, FlowUV)
+		SHADER_PARAM( FLOWMAP, SHADER_PARAM_TYPE_TEXTURE, "", "flow map: rg = the flow (0.5 = still); the normals (and $flow_colortexture) are carried along it" )
+		SHADER_PARAM( FLOW_WORLDUVSCALE, SHADER_PARAM_TYPE_FLOAT, "1", "the flow map repeats every 1024 / this units of the world" )
+		SHADER_PARAM( FLOW_NORMALUVSCALE, SHADER_PARAM_TYPE_FLOAT, "160", "units of the world per repeat of the normal map" )
+		SHADER_PARAM( FLOW_TIMEINTERVALINSECONDS, SHADER_PARAM_TYPE_FLOAT, "0.4", "seconds of one interval of the flow" )
+		SHADER_PARAM( FLOW_UVSCROLLDISTANCE, SHADER_PARAM_TYPE_FLOAT, "0.2", "how far (normal map uv) the normals travel in one interval at full flow" )
+		SHADER_PARAM( FLOW_BUMPSTRENGTH, SHADER_PARAM_TYPE_FLOAT, "1", "strength of the waves" )
+		SHADER_PARAM( FLOW_TIMESCALE, SHADER_PARAM_TYPE_FLOAT, "1", "speed of the flow's time" )
+		SHADER_PARAM( FLOW_NOISE_TEXTURE, SHADER_PARAM_TYPE_TEXTURE, "", "noise (g) shifting the phase of the flow from place to place" )
+		SHADER_PARAM( FLOW_NOISE_SCALE, SHADER_PARAM_TYPE_FLOAT, "0.0005", "noise uv per unit of the world" )
+		SHADER_PARAM( FLOW_DEBUG, SHADER_PARAM_TYPE_INTEGER, "0", "unused (Portal 2 compatibility)" )
+		SHADER_PARAM( FLOW_COLORTEXTURE, SHADER_PARAM_TYPE_TEXTURE, "", "a color layer carried by the flow (the goo of Portal 2; its $basetexture there)" )
+		SHADER_PARAM( COLOR_FLOW_UVSCALE, SHADER_PARAM_TYPE_FLOAT, "276", "units of the world per repeat of the color layer" )
+		SHADER_PARAM( COLOR_FLOW_TIMEINTERVALINSECONDS, SHADER_PARAM_TYPE_FLOAT, "4", "seconds of one interval of the color layer" )
+		SHADER_PARAM( COLOR_FLOW_UVSCROLLDISTANCE, SHADER_PARAM_TYPE_FLOAT, "0.1", "how far (color uv) the color travels in one interval" )
+		SHADER_PARAM( COLOR_FLOW_LERPEXP, SHADER_PARAM_TYPE_FLOAT, "1", "exponent of the blend of the color's two layers" )
+		SHADER_PARAM( COLOR_FLOW_DISPLACEBYNORMALSTRENGTH, SHADER_PARAM_TYPE_FLOAT, "0.01", "how much the waves displace the color layer" )
+		SHADER_PARAM( FLOW_COLOR_INTENSITY, SHADER_PARAM_TYPE_FLOAT, "1", "brightness of the color layer in the light at the place" )
+		SHADER_PARAM( FLOW_COLOR_OPACITY, SHADER_PARAM_TYPE_FLOAT, "1", "how much the color layer covers what is under the surface" )
+		SHADER_PARAM( FLOW_COLOR_TINT, SHADER_PARAM_TYPE_COLOR, "[1 1 1]", "tint of the color layer" )
 	END_SHADER_PARAMS
 
 	SHADER_INIT_PARAMS()
@@ -293,6 +313,42 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 		{
 			LoadTexture( BASETEXTURE, TEXTUREFLAGS_SRGB );
 		}
+		// HL2RPM: flowing water
+		if ( params[FLOWMAP]->IsDefined() )
+		{
+			LoadTexture( FLOWMAP );
+		}
+		if ( params[FLOW_NOISE_TEXTURE]->IsDefined() )
+		{
+			LoadTexture( FLOW_NOISE_TEXTURE );
+		}
+		if ( params[FLOW_COLORTEXTURE]->IsDefined() )
+		{
+			LoadTexture( FLOW_COLORTEXTURE, TEXTUREFLAGS_SRGB );
+		}
+	}
+
+	// HL2RPM: the flow (water_ps2x_helper.h) - ps_2_b, not together with the stock texture layers
+	inline bool UsesFlowMap( IMaterialVar **params ) const
+	{
+		if ( !params[FLOWMAP]->IsTexture() || !g_pHardwareConfig->SupportsPixelShaders_2_b() )
+			return false;
+		// (no flow combos with the shader's own sRGB conversion: SDK_water_ps2x.fxc)
+		if ( g_pHardwareConfig->NeedsShaderSRGBConversion() )
+		{
+			static bool s_bTold = false;
+			if ( !s_bTold )
+			{
+				s_bTold = true;
+				Warning( "[water] flowing water ($flowmap) is off: this hardware converts to sRGB in the shader\n" );
+			}
+			return false;
+		}
+		if ( params[BASETEXTURE]->IsTexture() || params[BLURREFRACT]->GetIntValue() != 0 )
+			return false;
+		float flScroll1[4];
+		params[SCROLL1]->GetVecValue( flScroll1, 4 );
+		return fabs( flScroll1[0] ) <= 0.0f;
 	}
 
 	inline void GetVecParam( int constantVar, float *val )
@@ -346,6 +402,15 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 			// water's color is seen in)
 			pShaderShadow->EnableTexture( SHADER_SAMPLER6, true );
 			pShaderShadow->EnableTexture( SHADER_SAMPLER7, true );
+			// HL2RPM: the flow map, its noise and the color layer carried by it
+			const bool bFlow = UsesFlowMap( params );
+			if ( bFlow )
+			{
+				pShaderShadow->EnableTexture( SHADER_SAMPLER8, true );
+				pShaderShadow->EnableTexture( SHADER_SAMPLER9, true );
+				pShaderShadow->EnableTexture( SHADER_SAMPLER10, true );
+				pShaderShadow->EnableSRGBRead( SHADER_SAMPLER10, true );
+			}
 
 			int fmt = VERTEX_POSITION | VERTEX_NORMAL | VERTEX_TANGENT_S | VERTEX_TANGENT_T;
 
@@ -390,6 +455,7 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 				SET_STATIC_PIXEL_SHADER_COMBO( MULTITEXTURE,fabs(Scroll1.x) > 0.0);
 				SET_STATIC_PIXEL_SHADER_COMBO( BASETEXTURE, params[BASETEXTURE]->IsTexture() );
 				SET_STATIC_PIXEL_SHADER_COMBO( BLURRY_REFRACT, params[BLURREFRACT]->GetIntValue() );
+				SET_STATIC_PIXEL_SHADER_COMBO( FLOWMAP, bFlow );
 				SET_STATIC_PIXEL_SHADER_COMBO( NORMAL_DECODE_MODE, (int) nNormalDecodeMode );
 				SET_STATIC_PIXEL_SHADER( sdk_water_ps20b );
 			}
@@ -538,6 +604,7 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 			// its daylight color.
 			float c11[4] = { 1.0f, 1.0f, 1.0f, 0.0f };
 			float c12[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+			float flWorld = 1.0f;
 			ITexture *pLightAccum = NULL;
 			ITexture *pSkyVis = NULL;
 			if ( GetDeferredExt()->IsDeferredLightingEnabled() )
@@ -559,7 +626,6 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 					const lightData_Global_t &light = GetDeferredExt()->GetLightData_Global();
 					Vector vecSun = light.diff.AsVector3D();
 					float flUp = light.vecLight.z;
-					float flWorld = 1.0f;
 					if ( weather.bEnabled )
 					{
 						vecSun = weather.vecSkyLightDiff.AsVector3D();
@@ -612,6 +678,52 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 				c13[3] = MAX( params[WATER_GLOW]->GetFloatValue(), 0.0f );
 			}
 			pShaderAPI->SetPixelShaderConstant( 13, c13, 1 );
+
+			// HL2RPM: the flow (water_ps2x_helper.h)
+			if ( UsesFlowMap( params ) )
+			{
+				BindTexture( SHADER_SAMPLER8, FLOWMAP, -1 );
+				if ( params[FLOW_NOISE_TEXTURE]->IsTexture() )
+					BindTexture( SHADER_SAMPLER9, FLOW_NOISE_TEXTURE, -1 );
+				else
+					pShaderAPI->BindStandardTexture( SHADER_SAMPLER9, TEXTURE_BLACK );
+				const bool bColor = params[FLOW_COLORTEXTURE]->IsTexture();
+				if ( bColor )
+					BindTexture( SHADER_SAMPLER10, FLOW_COLORTEXTURE, -1 );
+				else
+					pShaderAPI->BindStandardTexture( SHADER_SAMPLER10, TEXTURE_WHITE );
+
+				const float flNormalScale = MAX( params[FLOW_NORMALUVSCALE]->GetFloatValue(), 1.0f );
+				const float flInterval = MAX( params[FLOW_TIMEINTERVALINSECONDS]->GetFloatValue(), 0.01f );
+				const float flColorScale = MAX( params[COLOR_FLOW_UVSCALE]->GetFloatValue(), 1.0f );
+				const float flColorInterval = MAX( params[COLOR_FLOW_TIMEINTERVALINSECONDS]->GetFloatValue(), 0.01f );
+				float c14[4] = { params[FLOW_WORLDUVSCALE]->GetFloatValue() / 1024.0f, 1.0f / flNormalScale,
+					params[FLOW_UVSCROLLDISTANCE]->GetFloatValue(), params[FLOW_BUMPSTRENGTH]->GetFloatValue() };
+				// (the time wraps every hour: the phase of a float time loses its precision after a long session)
+				const float flTime = fmodf( pShaderAPI->CurrentTime(), 3600.0f ) * params[FLOW_TIMESCALE]->GetFloatValue();
+				float c15[4] = { flTime, 0.5f / flInterval, params[FLOW_NOISE_SCALE]->GetFloatValue(), bColor ? 1.0f : 0.0f };
+				float c16[4] = { 1.0f / flColorScale, 0.5f / flColorInterval,
+					params[COLOR_FLOW_UVSCROLLDISTANCE]->GetFloatValue(), params[COLOR_FLOW_DISPLACEBYNORMALSTRENGTH]->GetFloatValue() };
+				// Follow the time-of-day world light scale just like $fogcolor (weather_render.cpp),
+				// unless the liquid itself glows ($water_glow > 0); deferred lamps still light it via vBodyLight.
+				const float flColorWorld = ( GetDeferredExt()->IsDeferredLightingEnabled() && c13[3] <= 0.0f ) ? flWorld : 1.0f;
+				float c17[4] = { MAX( params[COLOR_FLOW_LERPEXP]->GetFloatValue(), 0.1f ),
+					params[FLOW_COLOR_INTENSITY]->GetFloatValue() * flColorWorld,
+					clamp( params[FLOW_COLOR_OPACITY]->GetFloatValue(), 0.0f, 1.0f ), 0.0f };
+				pShaderAPI->SetPixelShaderConstant( 14, c14, 1 );
+				pShaderAPI->SetPixelShaderConstant( 15, c15, 1 );
+				pShaderAPI->SetPixelShaderConstant( 16, c16, 1 );
+				pShaderAPI->SetPixelShaderConstant( 17, c17, 1 );
+				if ( params[FLOW_COLOR_TINT]->IsDefined() )
+				{
+					SetPixelShaderConstantGammaToLinear( 18, FLOW_COLOR_TINT );
+				}
+				else
+				{
+					float c18[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+					pShaderAPI->SetPixelShaderConstant( 18, c18, 1 );
+				}
+			}
 
 			pShaderAPI->SetPixelShaderFogParams( 8 );
 

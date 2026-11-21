@@ -9,11 +9,13 @@
 #include "deferred_light_lump.h"
 
 #include "vgui_controls/MessageBox.h"
+#include "materialsystem/materialsystem_config.h"
 
-#include "deferred/deferred_taa.h"
 #include "tier0/memdbgon.h"
 
 static ConVar r_deferred( "r_deferred", "1", FCVAR_ARCHIVE | FCVAR_REPLICATED, "Enable deferred renderer (requires SM3)." );
+static ConVar r_deferred_disable_msaa( "r_deferred_disable_msaa", "1", FCVAR_ARCHIVE,
+	"Turn the engine's MSAA (Video -> anti-aliasing) off while the deferred renderer runs: it smooths nothing there and costs about 2 ms a frame at 8x. FXAA (r_deferred_aa) does the anti-aliasing." );
 
 static CDeferredManagerClient __g_defmanager;
 CDeferredManagerClient *GetDeferredManager()
@@ -47,7 +49,7 @@ CDeferredManagerClient::~CDeferredManagerClient()
 bool CDeferredManagerClient::Init()
 {
 
-	m_bDefRenderingEnabled = r_deferred.GetBool() && CommandLine() && CommandLine()->FindParm( "-nodeferred" ) == 0;
+	m_bDefRenderingEnabled = Deferred_ReadInitialEnabled();
 
 	if (!m_bDefRenderingEnabled) {
 		Msg( "Skipping deferred lighting because r_deferred is 0 or -nodeferred is set\n" );
@@ -125,8 +127,27 @@ bool CDeferredManagerClient::Init()
 
 	view = g_pCurrentViewRender;
 
-	// HL2RPM: the engine's MSAA smooths nothing here and costs frame time (deferred_taa.cpp)
-	DeferredAA_DisableMSAA();
+	// HL2RPM: the engine's MSAA smooths nothing here and costs frame time
+	{
+		static bool s_bDisabledMSAA = false;
+		if ( !s_bDisabledMSAA )
+		{
+			s_bDisabledMSAA = true;
+			const int nSamples = materials->GetCurrentConfigForVideoCard().m_nAASamples;
+			if ( nSamples > 1 )
+			{
+				if ( r_deferred_disable_msaa.GetBool() )
+				{
+					Msg( "[deferred] MSAA x%d smooths nothing in the deferred renderer and costs frame time: off for this session (mat_antialias 0; r_deferred_disable_msaa 0 keeps it). FXAA does the anti-aliasing.\n", nSamples );
+					engine->ClientCmd_Unrestricted( "mat_antialias 0\n" );
+				}
+				else
+				{
+					Msg( "[deferred] MSAA x%d is on (Options -> Video -> anti-aliasing): the deferred renderer gets nothing from it and it costs frame time (r_deferred_disable_msaa 1 turns it off)\n", nSamples );
+				}
+			}
+		}
+	}
 
 	Msg("Deferred lighting enabled (use -nodeferred in the command line to disable if necessary)\n");
 	return true;

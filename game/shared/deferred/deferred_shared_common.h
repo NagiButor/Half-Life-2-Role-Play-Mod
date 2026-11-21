@@ -140,6 +140,7 @@ enum LIGHT_PARAM_ID
 	LPARAM_COUNT,
 };
 const char *GetLightParamName( LIGHT_PARAM_ID id );
+bool Deferred_ReadInitialEnabled();
 
 
 #include "networkstringtabledefs.h"

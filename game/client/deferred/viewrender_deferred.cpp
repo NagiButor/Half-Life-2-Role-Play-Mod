@@ -37,7 +37,6 @@
 #include "deferred/deferred_ssao.h"
 #include "deferred/deferred_gi.h"
 #include "deferred/deferred_postfx.h"
-#include "deferred/deferred_taa.h"
 #include "deferred/deferred_worldmesh.h"
 #include "deferred/deferred_occlusion.h"
 #include "deferred/deferred_gpuprof.h"
@@ -3385,8 +3384,10 @@ static void DeferredSoftParticleDepth( const CViewSetup &view )
 // HL2RPM: the deferred renderer has no working MSAA - the composite reads one lit surface
 // per pixel, whatever mat_antialias says. Thin geometry (the ribs of corrugated metal, roof
 // trims, railings, wires) became dotted lines that crawled while the player walked (turning
-// hides it: the engine's motion blur). FXAA on the final frame instead, or TAA
-// (r_deferred_aa, deferred_taa.cpp).
+// hides it: the engine's motion blur). FXAA smooths the final frame instead.
+static ConVar r_deferred_aa( "r_deferred_aa", "1", FCVAR_ARCHIVE,
+	"Anti-aliasing of the deferred renderer: 0 none, 1 FXAA", true, 0.0f, true, 1.0f );
+
 static void DrawDeferredFXAA( const CViewSetup &view )
 {
 	static IMaterial *s_pMatFXAA = NULL;
@@ -3566,8 +3567,6 @@ void CDeferredViewRender::DrawWorldComposite( const CViewSetup &view, int nClear
 void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 {
 	bool bResetLightAccum = false;
-	// HL2RPM: the global light of this frame for the GI probes (sun direction for the bounce)
-	lightData_Global_t giLightState;
 	const bool bRadiosityEnabled = DEFCFG_ENABLE_RADIOSITY != 0 && r_deferred_radiosity.GetBool() && AreRadiosityRTsAvailable();
 	bool bDrawDebugShadow = false;
 
@@ -3660,7 +3659,6 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 			GetWeatherSystem()->ApplyLightningFlash( lightDataState, GetGlobalLight()->HasShadow() );
 
 		QUEUE_FIRE( CommitLightData_Global, lightDataState );
-		giLightState = lightDataState;
 
 		// HL2RPM: top-down depth map that tells where rain can fall. Before the weather
 		// constants of the frame, which carry its matrix: the other way round the frame that
@@ -3714,18 +3712,12 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 	if ( building_cubemaps.GetBool() )
 		engine->GetScreenSize( lightingView.width, lightingView.height );
 
-	// HL2RPM: world-space indirect light (GI probes) and ambient occlusion of the sky light (SSAO +
-	// sky visibility), read by the global light pass
-	// (the SSAO target first: its sky visibility is what the GI estimates the light beyond its
-	// probes from)
+	// HL2RPM: camera sky visibility for indoor dust motes / sunshaft dust, plus ambient
+	// occlusion & sky visibility (SSAO + SkyVis), read by the global light pass.
+	DeferredGI_UpdateCameraSky( lightingView.origin );
 	{
 		GPUPROF_SCOPE( "ssao" );
 		DeferredSSAO_Render( lightingView );
-	}
-	{
-		GPUPROF_SCOPE( "gi" );
-		CPUPROF_SCOPE( "gi" );
-		DeferredGI_Render( lightingView, giLightState );
 	}
 
 	CMatRenderContextPtr pRenderContext( materials );
@@ -4376,20 +4368,28 @@ void CDeferredViewRender::DrawViewModels( const CViewSetup &view, bool drawViewm
 			UpdateRefractIfNeededByList( translucentViewModelList );
 		}
 
-		// HL2RPM: TAA - the weapon moves with the camera: its pixels are marked in the stencil
-		// and not reprojected (in the composite, the pass that ends up in the frame)
-		if ( !bGBuffer )
-			DeferredTAA_MarkCameraAttached( true );
+		// Draw only opaque meshes (STUDIO_TWOPASS) into both G-buffer and composite so
+		// translucent/additive parts (e.g. holographic sight glass & reticle) do not corrupt the
+		// G-buffer behind the lens.
 
 		// (the weapon's own effects - ViewModelDrawn - belong to the composite, see c_baseviewmodel.cpp)
 		extern bool g_bViewModelGBufferPass;
 		g_bViewModelGBufferPass = bGBuffer;
-		DrawRenderablesInList( opaqueViewModelList );
+		DrawRenderablesInList( opaqueViewModelList, STUDIO_TWOPASS );
 		g_bViewModelGBufferPass = false;
 		if (!bGBuffer)
 		{
+			for ( int i = 0; i < opaqueViewModelList.Count(); ++i )
+			{
+				IClientRenderable *pRenderable = opaqueViewModelList[ i ];
+				const model_t *pModel = pRenderable ? pRenderable->GetModel() : NULL;
+				if ( pModel && ( modelinfo->IsTranslucent( pModel ) || modelinfo->IsTranslucentTwoPass( pModel ) )
+					&& pRenderable->ShouldDraw() )
+				{
+					pRenderable->DrawModel( STUDIO_RENDER | STUDIO_TWOPASS | STUDIO_TRANSPARENCY );
+				}
+			}
 			DrawRenderablesInList( translucentViewModelList, STUDIO_TRANSPARENCY );
-			DeferredTAA_MarkCameraAttached( false );
 		}
 		else
 			pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_RENDER_STAGE,
@@ -4423,7 +4423,7 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	const bool bProfFrame = ( s_nRenderViewDepth++ == 0 );
 
 	// HL2RPM: render scale - the 3D view is drawn into the smaller frame _rt_hl2rpm_scene (all the
-	// deferred targets have its size), the TAA brings it up to the screen (DeferredTAA_DrawUpscale);
+	// deferred targets have its size), then stretched up to the screen;
 	// the post-processing, the fades and the HUD after it are drawn at the size of the screen
 	ITexture *pSceneRT = NULL;
 	if ( bProfFrame && DeferredRenderScale_IsActive() && !building_cubemaps.GetBool() && view.m_eStereoEye == STEREO_EYE_MONO )
@@ -4446,10 +4446,6 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 		pLightEditor->GetEditorView( &worldView.origin, &worldView.angles );
 	else
 		pLightEditor->SetEditorView( &worldView.origin, &worldView.angles );
-
-	// HL2RPM: TAA - this frame's sub-pixel shift of the projection (every view copied from
-	// this one, the 3D skybox and the weapon included, gets it; deferred_taa.cpp)
-	DeferredTAA_JitterView( worldView, worldView.m_bDoBloomAndToneMapping && !building_cubemaps.GetBool() );
 
 	m_CurrentView = worldView;
 
@@ -4579,8 +4575,8 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 
 	// HL2RPM: the screen fade and the screen overlay go on top of the finished frame, after the
 	// post-processing below (as the stock tone mapping of LDR, which changed nothing, left them):
-	// put under the eye adaptation, bloom and TAA, the gravity gun's 12 % white flash at night was
-	// a grey veil over half the screen, and fades and overlays trailed with the TAA history.
+	// put under the eye adaptation and bloom, the gravity gun's 12 % white flash at night was
+	// a grey veil over half the screen.
 
 	// Prevent sound stutter if going slow
 	engine->Sound_ExtraUpdate();
@@ -4607,29 +4603,32 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	g_ShaderEditorSystem->CustomPostRender();
 	#endif
 
-	// HL2RPM: anti-aliasing of the final frame (the viewmodel included, the HUD not):
-	// TAA when this frame was drawn jittered for it, else FXAA if asked for
+	// HL2RPM: anti-aliasing of the final frame (the viewmodel included, the HUD not): FXAA
+	bool bUpscalePushed = false;
 	if ( !building_cubemaps.GetBool() )
 	{
-		// (the depth of field first: TAA evens out the noise of its gather)
 		{
 			GPUPROF_SCOPE( "dof" );
 			DeferredPostFX_DrawDoF( worldView );
 		}
 
 		GPUPROF_SCOPE( "aa" );
+		if ( r_deferred_aa.GetInt() >= 1 )
+			DrawDeferredFXAA( worldView );
+
 		if ( pSceneRT )
 		{
-			// (FXAA, if asked for, at the size of the frame first; then up to the screen - the back
-			// buffer stays the render target until the end of the post-processing below)
-			if ( !DeferredTAA_IsFrameActive() && DeferredAA_GetMode() == 1 )
-				DrawDeferredFXAA( worldView );
-			DeferredTAA_DrawUpscale( worldView, view, pSceneRT );
+			// Stretch the scaled 3D frame up to the screen; the back buffer stays the render
+			// target until the end of the post-processing below.
+			const int sw = Max( 2, worldView.width ), sh = Max( 2, worldView.height );
+			const int W = Max( 2, view.width ), H = Max( 2, view.height );
+			CMatRenderContextPtr pRC( materials );
+			pRC->PushRenderTargetAndViewport( NULL, view.x, view.y, W, H );
+			Rect_t src = { 0, 0, sw, sh };
+			Rect_t dst = { view.x, view.y, W, H };
+			pRC->CopyTextureToRenderTargetEx( 0, pSceneRT, &src, &dst );
+			bUpscalePushed = true;
 		}
-		else if ( DeferredTAA_IsFrameActive() )
-			DeferredTAA_Draw( worldView );
-		else if ( DeferredAA_GetMode() >= 1 )
-			DrawDeferredFXAA( worldView );
 	}
 
 	// (from here on the screen: the frame was brought up to it)
@@ -4678,8 +4677,11 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	PerformScreenSpaceEffects( 0, 0, postView.width, postView.height );
 
 	// (the back buffer pushed for the frame brought up to it)
-	if ( pSceneRT )
-		DeferredTAA_EndUpscale();
+	if ( bUpscalePushed )
+	{
+		CMatRenderContextPtr pRC( materials );
+		pRC->PopRenderTargetAndViewport();
+	}
 
 	if ( g_pMaterialSystemHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER )
 	{

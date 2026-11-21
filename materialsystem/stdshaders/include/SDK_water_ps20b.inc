@@ -1,5 +1,9 @@
 // ALL SKIP STATEMENTS THAT AFFECT THIS SHADER!!!
 // $MULTITEXTURE && $BASETEXTURE
+// $FLOWMAP && $MULTITEXTURE
+// $FLOWMAP && $BASETEXTURE
+// $FLOWMAP && $BLURRY_REFRACT
+// $FLOWMAP && $CONVERT_TO_SRGB
 // defined $HDRTYPE && defined $HDRENABLED && !$HDRTYPE && $HDRENABLED
 // defined $PIXELFOGTYPE && defined $WRITEWATERFOGTODESTALPHA && ( $PIXELFOGTYPE != 1 ) && $WRITEWATERFOGTODESTALPHA
 // defined $LIGHTING_PREVIEW && defined $HDRTYPE && $LIGHTING_PREVIEW && $HDRTYPE != 0
@@ -19,6 +23,7 @@ class SDK_water_ps20b_Static_Index
 	unsigned int m_nREFRACT : 2;
 	unsigned int m_nABOVEWATER : 2;
 	unsigned int m_nBLURRY_REFRACT : 2;
+	unsigned int m_nFLOWMAP : 2;
 	unsigned int m_nNORMAL_DECODE_MODE : 1;
 #ifdef _DEBUG
 	bool m_bBASETEXTURE : 1;
@@ -27,6 +32,7 @@ class SDK_water_ps20b_Static_Index
 	bool m_bREFRACT : 1;
 	bool m_bABOVEWATER : 1;
 	bool m_bBLURRY_REFRACT : 1;
+	bool m_bFLOWMAP : 1;
 	bool m_bNORMAL_DECODE_MODE : 1;
 #endif	// _DEBUG
 public:
@@ -90,6 +96,15 @@ public:
 #endif	// _DEBUG
 	}
 
+	void SetFLOWMAP( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nFLOWMAP = i;
+#ifdef _DEBUG
+		m_bFLOWMAP = true;
+#endif	// _DEBUG
+	}
+
 	void SetNORMAL_DECODE_MODE( int i )
 	{
 		Assert( i >= 0 && i <= 0 );
@@ -108,6 +123,7 @@ public:
 		m_nREFRACT = 0;
 		m_nABOVEWATER = 0;
 		m_nBLURRY_REFRACT = 0;
+		m_nFLOWMAP = 0;
 		m_nNORMAL_DECODE_MODE = 0;
 #ifdef _DEBUG
 		m_bBASETEXTURE = false;
@@ -116,19 +132,24 @@ public:
 		m_bREFRACT = false;
 		m_bABOVEWATER = false;
 		m_bBLURRY_REFRACT = false;
+		m_bFLOWMAP = false;
 		m_bNORMAL_DECODE_MODE = false;
 #endif	// _DEBUG
 	}
 
 	int GetIndex() const
 	{
-		Assert( m_bBASETEXTURE && m_bMULTITEXTURE && m_bREFLECT && m_bREFRACT && m_bABOVEWATER && m_bBLURRY_REFRACT && m_bNORMAL_DECODE_MODE );
+		Assert( m_bBASETEXTURE && m_bMULTITEXTURE && m_bREFLECT && m_bREFRACT && m_bABOVEWATER && m_bBLURRY_REFRACT && m_bFLOWMAP && m_bNORMAL_DECODE_MODE );
 		AssertMsg( !( m_nMULTITEXTURE && m_nBASETEXTURE ), "Invalid combo combination ( MULTITEXTURE && BASETEXTURE )" );
-		return ( 4 * m_nCONVERT_TO_SRGB ) + ( 8 * m_nBASETEXTURE ) + ( 16 * m_nMULTITEXTURE ) + ( 32 * m_nREFLECT ) + ( 64 * m_nREFRACT ) + ( 128 * m_nABOVEWATER ) + ( 256 * m_nBLURRY_REFRACT ) + ( 512 * m_nNORMAL_DECODE_MODE ) + 0;
+		AssertMsg( !( m_nFLOWMAP && m_nMULTITEXTURE ), "Invalid combo combination ( FLOWMAP && MULTITEXTURE )" );
+		AssertMsg( !( m_nFLOWMAP && m_nBASETEXTURE ), "Invalid combo combination ( FLOWMAP && BASETEXTURE )" );
+		AssertMsg( !( m_nFLOWMAP && m_nBLURRY_REFRACT ), "Invalid combo combination ( FLOWMAP && BLURRY_REFRACT )" );
+		AssertMsg( !( m_nFLOWMAP && m_nCONVERT_TO_SRGB ), "Invalid combo combination ( FLOWMAP && CONVERT_TO_SRGB )" );
+		return ( 4 * m_nCONVERT_TO_SRGB ) + ( 8 * m_nBASETEXTURE ) + ( 16 * m_nMULTITEXTURE ) + ( 32 * m_nREFLECT ) + ( 64 * m_nREFRACT ) + ( 128 * m_nABOVEWATER ) + ( 256 * m_nBLURRY_REFRACT ) + ( 512 * m_nFLOWMAP ) + ( 1024 * m_nNORMAL_DECODE_MODE ) + 0;
 	}
 };
 
-#define shaderStaticTest_SDK_water_ps20b psh_forgot_to_set_static_BASETEXTURE + psh_forgot_to_set_static_MULTITEXTURE + psh_forgot_to_set_static_REFLECT + psh_forgot_to_set_static_REFRACT + psh_forgot_to_set_static_ABOVEWATER + psh_forgot_to_set_static_BLURRY_REFRACT + psh_forgot_to_set_static_NORMAL_DECODE_MODE
+#define shaderStaticTest_SDK_water_ps20b psh_forgot_to_set_static_BASETEXTURE + psh_forgot_to_set_static_MULTITEXTURE + psh_forgot_to_set_static_REFLECT + psh_forgot_to_set_static_REFRACT + psh_forgot_to_set_static_ABOVEWATER + psh_forgot_to_set_static_BLURRY_REFRACT + psh_forgot_to_set_static_FLOWMAP + psh_forgot_to_set_static_NORMAL_DECODE_MODE
 
 
 class SDK_water_ps20b_Dynamic_Index

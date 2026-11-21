@@ -52,7 +52,10 @@ float4 main( const PS_INPUT In ) : COLOR
 	const float radius = g_vecParams.z;
 
 	// the lowest top of this texel (the deepest of 4x4 samples over it; nothing = void)
+	// and the highest top (dTop: tells an edge texel straddling a roof and the ground from
+	// the middle of a flat roof where dLow == dTop)
 	float dSelf = 0.0;
+	float dTop = 1.0;
 	[unroll]
 	for ( int y = 0; y < 4; y++ )
 	{
@@ -60,7 +63,11 @@ float4 main( const PS_INPUT In ) : COLOR
 		for ( int x = 0; x < 4; x++ )
 		{
 			const float d = tex2Dlod( sRaw, float4( uv + ( float2( x, y ) - 1.5 ) * texel, 0, 0 ) ).x;
-			dSelf = max( dSelf, ( d < VOID_DEPTH ) ? d : 0.0 );
+			if ( d < VOID_DEPTH )
+			{
+				dSelf = max( dSelf, d );
+				dTop = min( dTop, d );
+			}
 		}
 	}
 	if ( dSelf <= 0.0 )
@@ -85,6 +92,7 @@ float4 main( const PS_INPUT In ) : COLOR
 	// its top is higher than the level by more than g_vecLevels.y (soft over .x)
 	float openTop = 0.0;
 	float openLow = 0.0;
+	float openVoid = 0.0;
 	float wsum = 0.0;
 	[loop]
 	for ( int j = 0; j < NUM_TAPS; j++ )
@@ -98,7 +106,7 @@ float4 main( const PS_INPUT In ) : COLOR
 		if ( d >= VOID_DEPTH )
 		{
 			openTop += w;
-			openLow += w;
+			openVoid += w;
 		}
 		else
 		{
@@ -109,5 +117,9 @@ float4 main( const PS_INPUT In ) : COLOR
 		wsum += w;
 	}
 
-	return float4( openTop / wsum, openLow / wsum, dSelf, dLow );
+	// openLow is used under covers: if no ground significantly below dTop exists anywhere in
+	// the disk (in the middle of a roof wider than the disk, dLow collapses to the roof top
+	// itself and openLow jumped to 1.0 - lighting up the middle of ceilings under thin roofs)
+	const float hasLower = saturate( ( ( dLow - dTop ) * range - 24.0 ) / 24.0 );
+	return float4( openTop / wsum, ( openVoid + openLow * hasLower ) / wsum, dSelf, dLow );
 }

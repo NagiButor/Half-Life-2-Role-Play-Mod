@@ -1,0 +1,41 @@
+"SDK_Water"
+{
+	// HL2RPM Portal 2 water port (orig: nature/water_glados_01)
+	"%compilewater" 1
+	"%tooltexture" "hl2rpm/water/p2_tex/p2_tool_water"
+	"$abovewater" 1
+	"$forceexpensive" 1
+	"$envmap" "env_cubemap"
+	"$normalmap" "hl2rpm/water/p2_tex/p2_river_normal_sharp"
+	"$flowmap" "hl2rpm/water/p2_tex/p2_swamp_flowmap"
+	"$flow_worlduvscale" "0.5"
+	"$flow_normaluvscale" "155.0"
+	"$flow_timeintervalinseconds" "0.25"
+	"$flow_uvscrolldistance" "0.11"
+	"$flow_bumpstrength" "0.42"
+	"$flow_timescale" "0.4"
+	"$flow_noise_texture" "hl2rpm/water/p2_tex/p2_water_noise"
+	"$flow_noise_scale" "0.0005"
+	"$reflecttexture" "_rt_WaterReflection"
+	"$reflectentities" 1
+	"$reflectamount" "0.4"
+	"$reflecttint" "{198 206 208}"
+	"$refracttexture" "_rt_WaterRefraction"
+	"$refractamount" "0.52"
+	"$refracttint" "{188 182 130}"
+	"$bottommaterial" "hl2rpm/water/p2_swamp_beneath"
+	"$surfaceprop" "water"
+	"$fogenable" 1
+	"$fogstart" "0"
+	"$fogend" "42"
+	"$fogcolor" "{68 78 58}"
+	"$water_absorb" "[1.05 1.0 1.25 1.10]"
+	"$water_glow" "0.0"
+	"$scale" "[1 1]"
+	"Proxies"
+	{
+		"WaterLOD"
+		{
+		}
+	}
+}

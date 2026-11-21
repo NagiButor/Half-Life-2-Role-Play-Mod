@@ -17,7 +17,6 @@
 #include "deferred/deferred_shared_common.h"
 #include "deferred/deferred_gi.h"
 #include "deferred/deferred_lightreach.h"
-#include "deferred/deferred_taa.h"
 #include "deferred/deferred_postfx.h"
 #include "deferred/deferred_pom.h"
 
@@ -1056,11 +1055,9 @@ static void DeferredMaterials_OnRestore( int nChangeFlags )
 	s_bReplaceSweepPending = true;
 
 	// HL2RPM: the render targets come back empty - what is kept in them between frames
-	// starts over: the GI probe atlas is uploaded again, TAA drops its history, the eye
-	// adapts anew
+	// starts over: the eye adapts anew
 	DeferredGI_OnRTContentLost();
 	DeferredLightReach_OnRTContentLost();
-	DeferredTAA_Reset();
 	DeferredPostFX_Reset();
 	DeferredSkyLUT_ForceRebuild();
 	DeferredShadowCache_InvalidateAll();

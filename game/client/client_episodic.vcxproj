@@ -1165,6 +1165,7 @@ if ERRORLEVEL 1 exit /b 1
     <ClCompile Include="hl2rpm_keys.cpp" />
     <ClCompile Include="hl2rpm_language.cpp" />
     <ClCompile Include="hl2rpm_suithud.cpp" />
+    <ClCompile Include="hl2rpm_fps.cpp" />
     <ClCompile Include="hl2rpm_vmhands.cpp" />
     <ClCompile Include="hl2rpm_mainmenu.cpp" />
     <ClCompile Include="hl2rpm_lootwin.cpp" />

@@ -1,6 +1,7 @@
 //========= HL2RPM ============================================================//
 //
-// Purpose: "Graphics" and "Effects" pages inside the standard Options dialog (GameUI).
+// Purpose: "Graphics", "Effects" and "Sound and interface" pages inside the
+// standard Options dialog (GameUI).
 //
 // GameUI.dll is closed source, so the pages are injected at runtime: a hidden
 // ticking panel watches for the "OptionsDialog" panel and calls its (virtual)
@@ -10,10 +11,9 @@
 // with the dialog (ResetData / ApplyChanges / ApplyButtonEnable) goes through
 // VGUI messages.
 //
-// The pages drive the renderer settings added by the deferred renderer, the
-// weather system and the post-processing. Engine settings (resolution, AA,
-// texture detail...) stay on the Video tab. Both pages are the same class,
-// filled from a table (GfxPageDesc_t): the settings, their choices and presets.
+// The pages drive the renderer, weather, post-processing and engine video
+// settings (with Video -> Advanced removed). Every setting in Graphics and
+// Effects displays a concise explanation of what it does.
 //
 //=============================================================================//
 
@@ -45,6 +45,10 @@ struct GfxChoice_t
 	float flValue;
 };
 
+static const GfxChoice_t s_RendererChoices[] =
+{
+	{ "#HL2RPM_Gfx_Rend_Deferred", 1 }, { "#HL2RPM_Gfx_Rend_Forward", 0 },
+};
 static const GfxChoice_t s_ShadowChoices[] =
 {
 	{ "#HL2RPM_Gfx_Q_VeryLow", 0 }, { "#HL2RPM_Gfx_Q_Low", 1 }, { "#HL2RPM_Gfx_Q_Medium", 2 },
@@ -68,13 +72,13 @@ static const GfxChoice_t s_SSRChoices[] =
 };
 static const GfxChoice_t s_AAChoices[] =
 {
-	{ "#HL2RPM_Gfx_Off", 0 }, { "#HL2RPM_Gfx_AA_FXAA", 1 }, { "#HL2RPM_Gfx_AA_TAA", 2 },
+	{ "#HL2RPM_Gfx_Off", 0 }, { "#HL2RPM_Gfx_AA_FXAA", 1 },
 };
 static const GfxChoice_t s_DoFChoices[] =
 {
 	{ "#HL2RPM_Gfx_Off", 0 }, { "#HL2RPM_Gfx_DoF_Zoom", 1 }, { "#HL2RPM_Gfx_DoF_Always", 2 },
 };
-// HL2RPM: the 3D view drawn smaller and brought up to the screen by the TAA (r_hl2rpm_renderscale)
+// HL2RPM: the 3D view drawn smaller and stretched to the screen (r_hl2rpm_renderscale)
 static const GfxChoice_t s_RenderScaleChoices[] =
 {
 	{ "100%", 1.0f }, { "85%", 0.85f }, { "75%", 0.75f }, { "67%", 0.667f }, { "50%", 0.5f },
@@ -82,6 +86,24 @@ static const GfxChoice_t s_RenderScaleChoices[] =
 static const GfxChoice_t s_SharpenChoices[] =
 {
 	{ "#HL2RPM_Gfx_Off", 0 }, { "#HL2RPM_Gfx_Q_Low", 0.2f }, { "#HL2RPM_Gfx_Q_Medium", 0.4f }, { "#HL2RPM_Gfx_Q_High", 0.65f },
+};
+static const GfxChoice_t s_TextureChoices[] =
+{
+	{ "#HL2RPM_Gfx_Q_Low", 2 }, { "#HL2RPM_Gfx_Q_Medium", 1 }, { "#HL2RPM_Gfx_Q_High", 0 }, { "#HL2RPM_Gfx_Q_VeryHigh", -1 },
+};
+static const GfxChoice_t s_ModelChoices[] =
+{
+	{ "#HL2RPM_Gfx_Q_Low", 2 }, { "#HL2RPM_Gfx_Q_Medium", 1 }, { "#HL2RPM_Gfx_Q_High", 0 },
+};
+static const GfxChoice_t s_FilteringChoices[] =
+{
+	{ "#HL2RPM_Gfx_Filt_Bilinear", 0 }, { "#HL2RPM_Gfx_Filt_Trilinear", 1 },
+	{ "#HL2RPM_Gfx_Filt_Aniso2", 2 }, { "#HL2RPM_Gfx_Filt_Aniso4", 4 },
+	{ "#HL2RPM_Gfx_Filt_Aniso8", 8 }, { "#HL2RPM_Gfx_Filt_Aniso16", 16 },
+};
+static const GfxChoice_t s_MulticoreChoices[] =
+{
+	{ "#HL2RPM_Gfx_Multi_Auto", -1 }, { "#HL2RPM_Gfx_Off", 0 }, { "#HL2RPM_Gfx_On", 2 },
 };
 
 struct GfxChoiceList_t
@@ -101,14 +123,17 @@ static const char *s_pszPresetLabels[] =
 };
 #define GFX_PRESET_COUNT ARRAYSIZE( s_pszPresetLabels )
 #define GFX_PRESET_CUSTOM GFX_PRESET_COUNT
-#define GFX_MAX_SETTINGS 16
+#define GFX_MAX_SETTINGS 24
 
 // ---------------------------------------------------------------------------
-// Page "Graphics": shadows, weather, lighting quality
+// Page "Graphics": shadows, weather, lighting, textures, filtering, display
 // ---------------------------------------------------------------------------
 enum GfxSetting_e
 {
-	GFX_SUN_SHADOWS = 0,	// r_csm_quality 0..5
+	// Non-preset renderer mode at the top
+	GFX_RENDERER = 0,		// r_deferred 1 Deferred / 0 Forward
+	// Preset settings
+	GFX_SUN_SHADOWS,		// r_csm_quality 0..5
 	GFX_LAMP_SHADOWS,		// r_deferred_shadow_quality_pointspot 0..5
 	GFX_CLOUDS,				// r_weather_clouds 0..3
 	GFX_SHAFTS,				// r_weather_sunshafts 0..3
@@ -118,15 +143,23 @@ enum GfxSetting_e
 	GFX_SOFT_SHADOWS,		// r_csm_pcss 0/1
 	GFX_BOUNCE,				// r_deferred_bounce 0/1
 	GFX_WATER,				// r_deferred_water_views 0/1
-	GFX_AA,					// r_deferred_aa 0 none / 1 FXAA / 2 TAA
+	GFX_AA,					// r_deferred_aa 0 none / 1 FXAA
 	GFX_PBR,				// r_deferred_pbr 0/1
 	GFX_RENDERSCALE,		// r_hl2rpm_renderscale 1 / 0.85 / 0.75 / 0.667 / 0.5
+	GFX_TEXTURES,			// mat_picmip 2 / 1 / 0 / -1
+	GFX_MODELS,				// r_rootlod 2 / 1 / 0
+	GFX_FILTERING,			// mat_trilinear / mat_forceaniso (0..16)
+	// Non-preset settings below (do not affect overall preset detection)
+	GFX_VSYNC,				// mat_vsync 0/1
+	GFX_MULTICORE,			// mat_queue_mode -1 / 0 / 2
 
 	GFX_SETTING_COUNT
 };
+#define GFX_PRESET_SETTINGS ( GFX_VSYNC - GFX_SUN_SHADOWS )
 
 static const char *s_pszGfxConVars[GFX_SETTING_COUNT] =
 {
+	"r_deferred",
 	"r_csm_quality",
 	"r_deferred_shadow_quality_pointspot",
 	"r_weather_clouds",
@@ -140,10 +173,16 @@ static const char *s_pszGfxConVars[GFX_SETTING_COUNT] =
 	"r_deferred_aa",
 	"r_deferred_pbr",
 	"r_hl2rpm_renderscale",
+	"mat_picmip",
+	"r_rootlod",
+	"mat_forceaniso",
+	"mat_vsync",
+	"mat_queue_mode",
 };
 
 static const char *s_pszGfxLabels[GFX_SETTING_COUNT] =
 {
+	"#HL2RPM_Gfx_Renderer",
 	"#HL2RPM_Gfx_SunShadows",
 	"#HL2RPM_Gfx_LampShadows",
 	"#HL2RPM_Gfx_Clouds",
@@ -157,10 +196,39 @@ static const char *s_pszGfxLabels[GFX_SETTING_COUNT] =
 	"#HL2RPM_Gfx_AA",
 	"#HL2RPM_Gfx_PBR",
 	"#HL2RPM_Gfx_RenderScale",
+	"#HL2RPM_Gfx_Textures",
+	"#HL2RPM_Gfx_Models",
+	"#HL2RPM_Gfx_Filtering",
+	"#HL2RPM_Gfx_VSync",
+	"#HL2RPM_Gfx_Multicore",
+};
+
+static const char *s_pszGfxDescs[GFX_SETTING_COUNT] =
+{
+	"#HL2RPM_Gfx_Desc_Renderer",
+	"#HL2RPM_Gfx_Desc_SunShadows",
+	"#HL2RPM_Gfx_Desc_LampShadows",
+	"#HL2RPM_Gfx_Desc_Clouds",
+	"#HL2RPM_Gfx_Desc_SunShafts",
+	"#HL2RPM_Gfx_Desc_Rain",
+	"#HL2RPM_Gfx_Desc_Wetness",
+	"#HL2RPM_Gfx_Desc_SSAO",
+	"#HL2RPM_Gfx_Desc_SoftShadows",
+	"#HL2RPM_Gfx_Desc_Bounce",
+	"#HL2RPM_Gfx_Desc_WaterReflect",
+	"#HL2RPM_Gfx_Desc_AA",
+	"#HL2RPM_Gfx_Desc_PBR",
+	"#HL2RPM_Gfx_Desc_RenderScale",
+	"#HL2RPM_Gfx_Desc_Textures",
+	"#HL2RPM_Gfx_Desc_Models",
+	"#HL2RPM_Gfx_Desc_Filtering",
+	"#HL2RPM_Gfx_Desc_VSync",
+	"#HL2RPM_Gfx_Desc_Multicore",
 };
 
 static const GfxChoiceList_t s_GfxChoices[GFX_SETTING_COUNT] =
 {
+	CHOICES( s_RendererChoices ),
 	CHOICES( s_ShadowChoices ),
 	CHOICES( s_ShadowChoices ),
 	CHOICES( s_EffectChoices ),
@@ -174,28 +242,32 @@ static const GfxChoiceList_t s_GfxChoices[GFX_SETTING_COUNT] =
 	CHOICES( s_AAChoices ),
 	CHOICES( s_OnOffChoices ),
 	CHOICES( s_RenderScaleChoices ),
+	CHOICES( s_TextureChoices ),
+	CHOICES( s_ModelChoices ),
+	CHOICES( s_FilteringChoices ),
+	CHOICES( s_OnOffChoices ),
+	CHOICES( s_MulticoreChoices ),
 };
 
 // Overall presets. The costs that matter most on the GPU are the sun shadow
 // cascades (re-rendering the scene up to 4 times), the lamp shadow map size,
 // and the cloud raymarch resolution.
-static const float s_flGfxPresets[GFX_PRESET_COUNT][GFX_SETTING_COUNT] =
+static const float s_flGfxPresets[GFX_PRESET_COUNT][GFX_PRESET_SETTINGS] =
 {
-	//	sun	lamp clouds shafts rain wet	ssao soft bounce water aa	pbr	scale
-	{	0,	1,	1,	0,	0.5f,	0,	0,	0,	0,	0,	0,	0,	0.5f	},	// very low
-	{	1,	2,	1,	1,	0.5f,	1,	0,	0,	1,	0,	2,	1,	0.667f	},	// low
-	{	2,	3,	2,	1,	1.0f,	1,	1,	1,	1,	1,	2,	1,	0.75f	},	// medium
-	{	3,	4,	2,	2,	1.0f,	1,	1,	1,	1,	1,	2,	1,	0.75f	},	// high
-	{	5,	5,	3,	3,	1.5f,	1,	1,	1,	1,	1,	2,	1,	0.75f	},	// ultra
+	//	sun	lamp clouds shafts rain wet	ssao soft bounce water aa	pbr	scale	tex	mdl	filt
+	{	0,	1,	1,	0,	0.5f,	0,	0,	0,	0,	0,	0,	0,	0.5f,	2,	2,	0	},	// very low
+	{	1,	2,	1,	1,	0.5f,	1,	0,	0,	1,	0,	1,	1,	0.667f,	1,	1,	1	},	// low
+	{	2,	3,	2,	1,	1.0f,	1,	1,	1,	1,	1,	1,	1,	0.75f,	0,	0,	4	},	// medium
+	{	3,	4,	2,	2,	1.0f,	1,	1,	1,	1,	1,	1,	1,	0.75f,	0,	0,	8	},	// high
+	{	5,	5,	3,	3,	1.5f,	1,	1,	1,	1,	1,	1,	1,	0.75f,	-1,	0,	16	},	// ultra
 };
 
 // ---------------------------------------------------------------------------
-// Page "Effects": indirect light and the post-processing of the frame
+// Page "Effects": lighting effects, post-processing and FPS counter
 // ---------------------------------------------------------------------------
 enum FxSetting_e
 {
-	FX_GI = 0,				// r_deferred_gi 0/1
-	FX_CONTACT,				// r_deferred_contact_shadows 0/1
+	FX_CONTACT = 0,			// r_deferred_contact_shadows 0/1
 	FX_SSR,					// r_weather_ssr 0..2
 	FX_SOFTPARTICLES,		// r_deferred_soft_particles 0/1
 	FX_MOTES,				// r_weather_motes 0/1
@@ -206,13 +278,16 @@ enum FxSetting_e
 	FX_LENS,				// r_hl2rpm_lens 0/1
 	FX_DOF,					// r_hl2rpm_dof 0 off / 1 zoom and dialogs / 2 always
 	FX_SHARPEN,				// r_hl2rpm_sharpen 0 .. 0.65
+	// Non-preset settings below
+	FX_MOTIONBLUR,			// mat_motion_blur_enabled 0/1
+	FX_FPS,					// cl_rpm_fps 0/1
 
 	FX_SETTING_COUNT
 };
+#define FX_PRESET_SETTINGS FX_MOTIONBLUR
 
 static const char *s_pszFxConVars[FX_SETTING_COUNT] =
 {
-	"r_deferred_gi",
 	"r_deferred_contact_shadows",
 	"r_weather_ssr",
 	"r_deferred_soft_particles",
@@ -224,11 +299,12 @@ static const char *s_pszFxConVars[FX_SETTING_COUNT] =
 	"r_hl2rpm_lens",
 	"r_hl2rpm_dof",
 	"r_hl2rpm_sharpen",
+	"mat_motion_blur_enabled",
+	"cl_rpm_fps",
 };
 
 static const char *s_pszFxLabels[FX_SETTING_COUNT] =
 {
-	"#HL2RPM_Gfx_GI",
 	"#HL2RPM_Gfx_Contact",
 	"#HL2RPM_Gfx_SSR",
 	"#HL2RPM_Gfx_SoftParticles",
@@ -240,11 +316,29 @@ static const char *s_pszFxLabels[FX_SETTING_COUNT] =
 	"#HL2RPM_Gfx_Lens",
 	"#HL2RPM_Gfx_DoF",
 	"#HL2RPM_Gfx_Sharpen",
+	"#HL2RPM_Gfx_MotionBlur",
+	"#HL2RPM_Gfx_FPS",
+};
+
+static const char *s_pszFxDescs[FX_SETTING_COUNT] =
+{
+	"#HL2RPM_Gfx_Desc_Contact",
+	"#HL2RPM_Gfx_Desc_SSR",
+	"#HL2RPM_Gfx_Desc_SoftParticles",
+	"#HL2RPM_Gfx_Desc_Motes",
+	"#HL2RPM_Gfx_Desc_Post",
+	"#HL2RPM_Gfx_Desc_Exposure",
+	"#HL2RPM_Gfx_Desc_Bloom",
+	"#HL2RPM_Gfx_Desc_Grade",
+	"#HL2RPM_Gfx_Desc_Lens",
+	"#HL2RPM_Gfx_Desc_DoF",
+	"#HL2RPM_Gfx_Desc_Sharpen",
+	"#HL2RPM_Gfx_Desc_MotionBlur",
+	"#HL2RPM_Gfx_Desc_FPS",
 };
 
 static const GfxChoiceList_t s_FxChoices[FX_SETTING_COUNT] =
 {
-	CHOICES( s_OnOffChoices ),
 	CHOICES( s_OnOffChoices ),
 	CHOICES( s_SSRChoices ),
 	CHOICES( s_OnOffChoices ),
@@ -256,17 +350,19 @@ static const GfxChoiceList_t s_FxChoices[FX_SETTING_COUNT] =
 	CHOICES( s_OnOffChoices ),
 	CHOICES( s_DoFChoices ),
 	CHOICES( s_SharpenChoices ),
+	CHOICES( s_OnOffChoices ),
+	CHOICES( s_OnOffChoices ),
 };
 
-// (the GI costs CPU time for its traces and ~0.5 ms on the GPU; the post-processing ~1 ms)
-static const float s_flFxPresets[GFX_PRESET_COUNT][FX_SETTING_COUNT] =
+// (the post-processing costs ~1 ms on the GPU)
+static const float s_flFxPresets[GFX_PRESET_COUNT][FX_PRESET_SETTINGS] =
 {
-	//	gi	contact ssr soft motes post exp bloom grade lens dof sharpen
-	{	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0		},	// very low
-	{	1,	0,	0,	1,	0,	1,	1,	0,	1,	0,	0,	0.2f	},	// low
-	{	1,	0,	1,	1,	1,	1,	1,	1,	1,	0,	1,	0.4f	},	// medium
-	{	1,	1,	1,	1,	1,	1,	1,	1,	1,	1,	1,	0.4f	},	// high
-	{	1,	1,	2,	1,	1,	1,	1,	1,	1,	1,	1,	0.4f	},	// ultra
+	//	contact ssr soft motes post exp bloom grade lens dof sharpen
+	{	0,	0,	0,	0,	0,	0,	0,	0,	0,	0,	0		},	// very low
+	{	0,	0,	1,	0,	1,	1,	0,	1,	0,	0,	0.2f	},	// low
+	{	0,	1,	1,	1,	1,	1,	1,	1,	0,	1,	0.4f	},	// medium
+	{	1,	1,	1,	1,	1,	1,	1,	1,	1,	1,	0.4f	},	// high
+	{	1,	2,	1,	1,	1,	1,	1,	1,	1,	1,	0.4f	},	// ultra
 };
 
 struct GfxPageDesc_t
@@ -275,31 +371,34 @@ struct GfxPageDesc_t
 	const char *pszTitle;
 	const char *pszPresetLabel;
 	int nSettings;
+	int iPresetStart;				// first setting included in presets
+	int nPresetSettings;			// number of settings included in presets (0 if none)
 	const char * const *ppszConVars;
 	const char * const *ppszLabels;
+	const char * const *ppszDescs;	// optional per-setting descriptions (NULL if none)
 	const GfxChoiceList_t *pChoices;
-	const float *pflPresets;		// [ GFX_PRESET_COUNT ][ nSettings ]
-	int iRestartSetting;			// a change of this one needs a restart (-1: none)
+	const float *pflPresets;		// [ GFX_PRESET_COUNT ][ nPresetSettings ]
+	uint32 nRestartMask;			// bitmask of settings whose change needs a restart
 	const char *pszHint;
 };
 
 static const GfxPageDesc_t s_GraphicsPage =
 {
 	"HL2RPMGraphicsPage", "#HL2RPM_Options_Graphics", "#HL2RPM_Gfx_Preset",
-	GFX_SETTING_COUNT, s_pszGfxConVars, s_pszGfxLabels, s_GfxChoices, &s_flGfxPresets[0][0],
-	GFX_LAMP_SHADOWS, "#HL2RPM_Gfx_Hint",
+	GFX_SETTING_COUNT, GFX_SUN_SHADOWS, GFX_PRESET_SETTINGS, s_pszGfxConVars, s_pszGfxLabels, s_pszGfxDescs, s_GfxChoices, &s_flGfxPresets[0][0],
+	( 1u << GFX_RENDERER ) | ( 1u << GFX_LAMP_SHADOWS ), "#HL2RPM_Gfx_Hint",
 };
 
 static const GfxPageDesc_t s_EffectsPage =
 {
 	"HL2RPMEffectsPage", "#HL2RPM_Options_Effects", "#HL2RPM_Fx_Preset",
-	FX_SETTING_COUNT, s_pszFxConVars, s_pszFxLabels, s_FxChoices, &s_flFxPresets[0][0],
-	-1, "#HL2RPM_Fx_Hint",
+	FX_SETTING_COUNT, 0, FX_PRESET_SETTINGS, s_pszFxConVars, s_pszFxLabels, s_pszFxDescs, s_FxChoices, &s_flFxPresets[0][0],
+	0, "#HL2RPM_Fx_Hint",
 };
 
 // ---------------------------------------------------------------------------
 // Sound and interface page (no presets): the language, the music of the mod, subtitles, the heart
-// and breath of a wounded man, the HUD helpers, the pause of the character windows
+// and breath of a wounded man, the HUD helpers, the pause of the character windows, FOV
 // ---------------------------------------------------------------------------
 static const GfxChoice_t s_VolumeChoices[] =
 {
@@ -313,31 +412,38 @@ static const GfxChoice_t s_LanguageChoices[] =
 {
 	{ "#HL2RPM_Lang_Auto", 0 }, { "#HL2RPM_Lang_Russian", 1 }, { "English", 2 },
 };
+static const GfxChoice_t s_FOVChoices[] =
+{
+	{ "75\xC2\xB0", 75.0f }, { "80\xC2\xB0", 80.0f }, { "85\xC2\xB0", 85.0f }, { "90\xC2\xB0", 90.0f },
+};
 
 static const char *s_pszSndConVars[] =
 {
 	"cl_rpm_language", "snd_rpm_music", "cl_rpm_subtitles", "cl_vitals_breath_volume", "cl_vitals_heartbeat_volume",
 	"cl_vitals_screen", "cl_vitals_sway", "cl_rpm_prompt", "cl_rpm_markers", "cl_rpm_suitboot", "cl_rpm_char_pause", "cl_rpm_menu",
+	"fov_desired",
 };
 static const char *s_pszSndLabels[] =
 {
 	"#HL2RPM_Snd_Language", "#HL2RPM_Snd_Music", "#HL2RPM_Snd_Subtitles", "#HL2RPM_Snd_Breath", "#HL2RPM_Snd_Heart",
 	"#HL2RPM_Snd_HurtScreen", "#HL2RPM_Snd_HurtSway", "#HL2RPM_Snd_Prompt", "#HL2RPM_Snd_Markers", "#HL2RPM_Snd_SuitBoot",
 	"#HL2RPM_Snd_CharPause", "#HL2RPM_Snd_NewWindows",
+	"#HL2RPM_Snd_FOV",
 };
 static const GfxChoiceList_t s_SndChoices[] =
 {
 	CHOICES( s_LanguageChoices ), CHOICES( s_VolumeChoices ), CHOICES( s_OnOffChoices ), CHOICES( s_VolumeChoices ),
 	CHOICES( s_VolumeChoices ), CHOICES( s_OnOffChoices ), CHOICES( s_SwayChoices ), CHOICES( s_OnOffChoices ),
 	CHOICES( s_OnOffChoices ), CHOICES( s_OnOffChoices ), CHOICES( s_OnOffChoices ), CHOICES( s_OnOffChoices ),
+	CHOICES( s_FOVChoices ),
 };
 COMPILE_TIME_ASSERT( ARRAYSIZE( s_pszSndConVars ) == ARRAYSIZE( s_pszSndLabels ) && ARRAYSIZE( s_pszSndConVars ) == ARRAYSIZE( s_SndChoices ) );
 
 static const GfxPageDesc_t s_SoundPage =
 {
 	"HL2RPMSoundPage", "#HL2RPM_Options_Sound", NULL,
-	ARRAYSIZE( s_pszSndConVars ), s_pszSndConVars, s_pszSndLabels, s_SndChoices, NULL,
-	-1, "#HL2RPM_Snd_Hint",
+	ARRAYSIZE( s_pszSndConVars ), 0, 0, s_pszSndConVars, s_pszSndLabels, NULL, s_SndChoices, NULL,
+	0, "#HL2RPM_Snd_Hint",
 };
 
 // ---------------------------------------------------------------------------
@@ -371,6 +477,48 @@ public:
 typedef CGameUIVisible< Label > CGfxLabel;
 typedef CGameUIVisible< ComboBox > CGfxComboBox;
 
+class CGfxStyledLabel : public CGfxLabel
+{
+public:
+	CGfxStyledLabel( Panel *pParent, const char *pszName, const char *pszText, const char *pszFont, Color col )
+		: CGfxLabel( pParent, pszName, pszText ), m_pszFont( pszFont ), m_Color( col ) {}
+
+	virtual void ApplySchemeSettings( IScheme *pScheme )
+	{
+		CGfxLabel::ApplySchemeSettings( pScheme );
+		if ( m_pszFont )
+		{
+			HFont hFont = pScheme->GetFont( m_pszFont, false );
+			if ( hFont != INVALID_FONT )
+				SetFont( hFont );
+		}
+		SetFgColor( m_Color );
+	}
+
+private:
+	const char *m_pszFont;
+	Color m_Color;
+};
+
+static bool IsEngineVideoConVar( const char *pszName )
+{
+	return !Q_stricmp( pszName, "mat_picmip" )
+		|| !Q_stricmp( pszName, "r_rootlod" )
+		|| !Q_stricmp( pszName, "mat_forceaniso" )
+		|| !Q_stricmp( pszName, "mat_vsync" )
+		|| !Q_stricmp( pszName, "mat_queue_mode" )
+		|| !Q_stricmp( pszName, "mat_motion_blur_enabled" );
+}
+
+static float ReadFilteringValue()
+{
+	ConVarRef aniso( "mat_forceaniso" );
+	if ( aniso.IsValid() && aniso.GetInt() >= 2 )
+		return (float)aniso.GetInt();
+	ConVarRef tri( "mat_trilinear" );
+	return ( tri.IsValid() && tri.GetBool() ) ? 1.0f : 0.0f;
+}
+
 // ---------------------------------------------------------------------------
 // The page
 // ---------------------------------------------------------------------------
@@ -400,11 +548,12 @@ public:
 
 private:
 	int FindChoice( int iSetting, float flValue ) const;
-	float GetPreset( int iPreset, int iSetting ) const { return m_Desc.pflPresets[ iPreset * m_Desc.nSettings + iSetting ]; }
+	float GetPreset( int iPreset, int iSetting ) const { return m_Desc.pflPresets[ iPreset * m_Desc.nPresetSettings + ( iSetting - m_Desc.iPresetStart ) ]; }
 	void LoadFromConVars();
 	void SelectPreset( int iPreset );
 	int DetectPreset() const;
 	float GetChoiceValue( int iSetting ) const;
+	bool HasRestartChange() const;
 	void SetDirty();
 
 	const GfxPageDesc_t &m_Desc;
@@ -413,18 +562,19 @@ private:
 	Label *m_pPresetLabel;
 	ComboBox *m_pCombos[GFX_MAX_SETTINGS];
 	Label *m_pLabels[GFX_MAX_SETTINGS];
+	Label *m_pDescLabels[GFX_MAX_SETTINGS];
 	Label *m_pGPULabel;
 	Label *m_pNoteLabel;
 	Label *m_pHintLabel;
 
 	bool m_bLoading;
-	float m_flLoadedRestartValue;
+	float m_flLoadedValues[GFX_MAX_SETTINGS];
 };
 
 CHL2RPMGraphicsPage::CHL2RPMGraphicsPage( Panel *pParent, const GfxPageDesc_t &desc ) : BaseClass( pParent, desc.pszPanelName ), m_Desc( desc )
 {
 	m_bLoading = true;
-	m_flLoadedRestartValue = -1.0f;
+	Q_memset( m_flLoadedValues, 0, sizeof( m_flLoadedValues ) );
 
 	m_pPresetLabel = new CGfxLabel( this, "PresetLabel", m_Desc.pszPresetLabel ? m_Desc.pszPresetLabel : "" );
 	m_pPreset = new CGfxComboBox( this, "PresetCombo", GFX_PRESET_COUNT + 1, false );
@@ -441,6 +591,11 @@ CHL2RPMGraphicsPage::CHL2RPMGraphicsPage( Panel *pParent, const GfxPageDesc_t &d
 		m_pCombos[s]->AddActionSignalTarget( this );
 		for ( int c = 0; c < list.nChoices; c++ )
 			m_pCombos[s]->AddItem( list.pChoices[c].pszLabel, new KeyValues( "choice", "index", c ) );
+
+		if ( m_Desc.ppszDescs && m_Desc.ppszDescs[s] )
+			m_pDescLabels[s] = new CGfxStyledLabel( this, VarArgs( "Desc%d", s ), m_Desc.ppszDescs[s], "DefaultSmall", Color( 175, 175, 175, 255 ) );
+		else
+			m_pDescLabels[s] = NULL;
 	}
 
 	// which graphics card renders the game (laptops with two GPUs often start on the slow one)
@@ -457,11 +612,12 @@ CHL2RPMGraphicsPage::CHL2RPMGraphicsPage( Panel *pParent, const GfxPageDesc_t &d
 	wchar_t wszText[512];
 	const wchar_t *pwszPrefix = g_pVGuiLocalize->Find( "#HL2RPM_Gfx_GPU" );
 	V_snwprintf( wszText, ARRAYSIZE( wszText ), L"%ls %ls", pwszPrefix ? pwszPrefix : L"GPU:", wszGPU );
-	m_pGPULabel = new CGfxLabel( this, "GPULabel", wszText );
+	m_pGPULabel = new CGfxStyledLabel( this, "GPULabel", "", "DefaultSmall", Color( 180, 180, 180, 255 ) );
+	m_pGPULabel->SetText( wszText );
 
-	m_pNoteLabel = new CGfxLabel( this, "NoteLabel", "#HL2RPM_Gfx_RestartNote" );
+	m_pNoteLabel = new CGfxStyledLabel( this, "NoteLabel", "#HL2RPM_Gfx_RestartNote", "DefaultSmall", Color( 255, 195, 90, 255 ) );
 	m_pNoteLabel->SetVisible( false );
-	m_pHintLabel = new CGfxLabel( this, "HintLabel", m_Desc.pszHint );
+	m_pHintLabel = new CGfxStyledLabel( this, "HintLabel", m_Desc.pszHint, "DefaultSmall", Color( 195, 195, 175, 255 ) );
 	if ( !m_Desc.pflPresets )
 	{
 		m_pPresetLabel->SetVisible( false );
@@ -494,35 +650,45 @@ void CHL2RPMGraphicsPage::PerformLayout()
 {
 	BaseClass::PerformLayout();
 
-	const int x0 = 20;
-	const int iLabelWide = 230;
-	const int iComboWide = Min( 190, GetWide() - x0 * 2 - iLabelWide );
+	const bool bHasDescs = ( m_Desc.ppszDescs != NULL );
+	const int x0 = 16;
+	const int iLabelWide = bHasDescs ? 235 : 260;
+	const int iComboWide = bHasDescs ? 175 : Min( 190, GetWide() - x0 * 2 - iLabelWide );
 	const int x1 = x0 + iLabelWide;
-	// the page is only ~300 px tall: fit all rows plus the three info lines
-	const int iFooter = 3 * 20 + 8;
-	const int iRow = clamp( ( GetTall() - 12 - 34 - iFooter ) / Max( 1, m_Desc.nSettings ), 22, 30 );
-	int y = 12;
+	const int x2 = x1 + iComboWide + 12;
+	const int iDescWide = Max( 100, GetWide() - x2 - 12 );
+
+	const int iHeader = m_Desc.pflPresets ? 30 : 0;
+	const int iFooter = ( m_Desc.pflPresets ? 42 : 24 ) + 6;
+	const int iRow = clamp( ( GetTall() - 10 - iHeader - iFooter ) / Max( 1, m_Desc.nSettings ), 20, 30 );
+	const int iCtrlH = Min( 21, iRow - 1 );
+	int y = 10;
 
 	if ( m_Desc.pflPresets )
 	{
-		m_pPresetLabel->SetBounds( x0, y, iLabelWide, 22 );
-		m_pPreset->SetBounds( x1, y, iComboWide, 22 );
-		y += 34;
+		m_pPresetLabel->SetBounds( x0, y, iLabelWide, 21 );
+		m_pPreset->SetBounds( x1, y, iComboWide, 21 );
+		y += iHeader;
 	}
 
 	for ( int s = 0; s < m_Desc.nSettings; s++ )
 	{
-		m_pLabels[s]->SetBounds( x0 + 12, y, iLabelWide - 12, 22 );
-		m_pCombos[s]->SetBounds( x1, y, iComboWide, 22 );
+		m_pLabels[s]->SetBounds( x0 + 8, y, iLabelWide - 8, iCtrlH );
+		m_pCombos[s]->SetBounds( x1, y, iComboWide, iCtrlH );
+		if ( m_pDescLabels[s] )
+			m_pDescLabels[s]->SetBounds( x2, y, iDescWide, iCtrlH );
 		y += iRow;
 	}
 
 	y += 6;
-	m_pNoteLabel->SetBounds( x0, y, GetWide() - x0 * 2, 20 );
-	y += 20;
-	m_pGPULabel->SetBounds( x0, y, GetWide() - x0 * 2, 20 );
-	y += 20;
-	m_pHintLabel->SetBounds( x0, y, GetWide() - x0 * 2, 20 );
+	if ( m_Desc.pflPresets )
+	{
+		const int iHalf = ( GetWide() - x0 * 2 ) / 2;
+		m_pGPULabel->SetBounds( x0, y, iHalf, 18 );
+		m_pNoteLabel->SetBounds( x0 + iHalf + 8, y, GetWide() - x0 * 2 - iHalf - 8, 18 );
+		y += 20;
+	}
+	m_pHintLabel->SetBounds( x0, y, GetWide() - x0 * 2, 18 );
 }
 
 void CHL2RPMGraphicsPage::OnPageShow()
@@ -544,12 +710,21 @@ void CHL2RPMGraphicsPage::LoadFromConVars()
 	m_bLoading = true;
 	for ( int s = 0; s < m_Desc.nSettings; s++ )
 	{
-		ConVarRef var( m_Desc.ppszConVars[s] );
-		const float flValue = var.IsValid() ? var.GetFloat() : 0.0f;
+		float flValue = 0.0f;
+		if ( !Q_stricmp( m_Desc.ppszConVars[s], "mat_forceaniso" ) )
+		{
+			flValue = ReadFilteringValue();
+		}
+		else
+		{
+			ConVarRef var( m_Desc.ppszConVars[s] );
+			flValue = var.IsValid() ? var.GetFloat() : 0.0f;
+		}
 		m_pCombos[s]->SilentActivateItemByRow( FindChoice( s, flValue ) );
+		m_flLoadedValues[s] = GetChoiceValue( s );
 	}
-	m_flLoadedRestartValue = ( m_Desc.iRestartSetting >= 0 ) ? GetChoiceValue( m_Desc.iRestartSetting ) : -1.0f;
-	m_pPreset->SilentActivateItemByRow( DetectPreset() );
+	if ( m_Desc.pflPresets )
+		m_pPreset->SilentActivateItemByRow( DetectPreset() );
 	m_pNoteLabel->SetVisible( false );
 	m_bLoading = false;
 }
@@ -568,7 +743,7 @@ int CHL2RPMGraphicsPage::DetectPreset() const
 	for ( int p = 0; m_Desc.pflPresets && p < GFX_PRESET_COUNT; p++ )
 	{
 		bool bMatch = true;
-		for ( int s = 0; s < m_Desc.nSettings && bMatch; s++ )
+		for ( int s = m_Desc.iPresetStart; s < m_Desc.iPresetStart + m_Desc.nPresetSettings && bMatch; s++ )
 			bMatch = fabsf( GetChoiceValue( s ) - GetPreset( p, s ) ) < 0.01f;
 		if ( bMatch )
 			return p;
@@ -582,14 +757,26 @@ void CHL2RPMGraphicsPage::SelectPreset( int iPreset )
 		return;
 
 	m_bLoading = true;
-	for ( int s = 0; s < m_Desc.nSettings; s++ )
+	for ( int s = m_Desc.iPresetStart; s < m_Desc.iPresetStart + m_Desc.nPresetSettings; s++ )
 		m_pCombos[s]->SilentActivateItemByRow( FindChoice( s, GetPreset( iPreset, s ) ) );
 	m_bLoading = false;
 }
 
+bool CHL2RPMGraphicsPage::HasRestartChange() const
+{
+	if ( !m_Desc.nRestartMask )
+		return false;
+	for ( int s = 0; s < m_Desc.nSettings; s++ )
+	{
+		if ( ( m_Desc.nRestartMask & ( 1u << s ) ) && fabsf( GetChoiceValue( s ) - m_flLoadedValues[s] ) > 0.001f )
+			return true;
+	}
+	return false;
+}
+
 void CHL2RPMGraphicsPage::SetDirty()
 {
-	m_pNoteLabel->SetVisible( m_Desc.iRestartSetting >= 0 && fabsf( GetChoiceValue( m_Desc.iRestartSetting ) - m_flLoadedRestartValue ) > 0.001f );
+	m_pNoteLabel->SetVisible( HasRestartChange() );
 	PostActionSignal( new KeyValues( "ApplyButtonEnable" ) );
 }
 
@@ -612,8 +799,8 @@ void CHL2RPMGraphicsPage::OnTextChanged( Panel *panel )
 	{
 		if ( panel == m_pCombos[s] )
 		{
-			// a single setting was changed by hand: that's a custom preset now
-			m_pPreset->SilentActivateItemByRow( DetectPreset() );
+			if ( m_Desc.pflPresets && s >= m_Desc.iPresetStart && s < m_Desc.iPresetStart + m_Desc.nPresetSettings )
+				m_pPreset->SilentActivateItemByRow( DetectPreset() );
 			SetDirty();
 			return;
 		}
@@ -627,18 +814,51 @@ void CHL2RPMGraphicsPage::OnResetData()
 
 void CHL2RPMGraphicsPage::OnApplyChanges()
 {
+	bool bVideoChanged = false;
 	for ( int s = 0; s < m_Desc.nSettings; s++ )
 	{
-		ConVarRef var( m_Desc.ppszConVars[s] );
+		const char *pszName = m_Desc.ppszConVars[s];
+		const float flValue = GetChoiceValue( s );
+
+		if ( !Q_stricmp( pszName, "mat_forceaniso" ) )
+		{
+			const float flCur = ReadFilteringValue();
+			if ( fabsf( flCur - flValue ) > 0.01f )
+			{
+				const int iVal = (int)( flValue + 0.5f );
+				engine->ClientCmd_Unrestricted( VarArgs( "mat_trilinear %d\n", iVal == 1 ? 1 : 0 ) );
+				engine->ClientCmd_Unrestricted( VarArgs( "mat_forceaniso %d\n", Max( 1, iVal ) ) );
+				bVideoChanged = true;
+			}
+			continue;
+		}
+
+		ConVarRef var( pszName );
 		if ( !var.IsValid() )
 			continue;
 
-		const float flValue = GetChoiceValue( s );
 		if ( fabsf( var.GetFloat() - flValue ) > 0.001f )
-			var.SetValue( flValue );
+		{
+			if ( IsEngineVideoConVar( pszName ) )
+			{
+				const int iVal = (int)( flValue >= 0.0f ? ( flValue + 0.5f ) : ( flValue - 0.5f ) );
+				engine->ClientCmd_Unrestricted( VarArgs( "%s %d\n", pszName, iVal ) );
+				bVideoChanged = true;
+			}
+			else if ( var.IsFlagSet( FCVAR_REPLICATED ) )
+			{
+				const int iVal = (int)( flValue >= 0.0f ? ( flValue + 0.5f ) : ( flValue - 0.5f ) );
+				engine->ClientCmd_Unrestricted( VarArgs( "%s %d\n", pszName, iVal ) );
+			}
+			else
+			{
+				var.SetValue( flValue );
+			}
+		}
 	}
-	if ( m_Desc.iRestartSetting >= 0 )
-		m_flLoadedRestartValue = GetChoiceValue( m_Desc.iRestartSetting );
+	m_pNoteLabel->SetVisible( HasRestartChange() );
+	if ( bVideoChanged )
+		engine->ClientCmd_Unrestricted( "mat_savechanges\n" );
 	engine->ClientCmd_Unrestricted( "host_writeconfig\n" );
 }
 
@@ -698,17 +918,16 @@ public:
 		pSound->AddActionSignalTarget( hDialog );
 		pDialog->AddPage( pSound, s_SoundPage.pszTitle );
 
-		// the tabs are laid out in one row without scrolling: two more tabs don't fit into the
-		// dialog's width (the last one was cut off - unreachable). Wider, still centered.
+		// Wider for inline setting descriptions, taller for the 19 Graphics rows;
+		// clamp to the screen and center so it never clips at 720p or from console.
 		{
-			int dx, dy, dw, dh;
-			ipanel()->GetPos( hDialog, dx, dy );
+			int sw, sh, dw, dh;
+			surface()->GetScreenSize( sw, sh );
 			ipanel()->GetSize( hDialog, dw, dh );
-			const int iExtra = 260;
-			// (and taller: the Graphics page has 13 rows since the render scale)
-			const int iExtraTall = 64;
-			ipanel()->SetSize( hDialog, dw + iExtra, dh + iExtraTall );
-			ipanel()->SetPos( hDialog, Max( 0, dx - iExtra / 2 ), Max( 0, dy - iExtraTall / 2 ) );
+			const int iNewW = Min( sw - 32, dw + 500 );
+			const int iNewH = Min( sh - 32, dh + 185 );
+			ipanel()->SetSize( hDialog, iNewW, iNewH );
+			ipanel()->SetPos( hDialog, Max( 0, ( sw - iNewW ) / 2 ), Max( 0, ( sh - iNewH ) / 2 ) );
 			pPanel->InvalidateLayout( true );
 		}
 
@@ -716,12 +935,6 @@ public:
 		{
 			const int iSel = cl_options_graphics_select.GetInt();
 			pDialog->GetPropertySheet()->SetActivePage( iSel == 3 ? pSound : iSel == 2 ? pEffects : pPage );
-
-			// the dialog opened from a console command starts off screen: center it
-			int sw, sh, dw, dh;
-			surface()->GetScreenSize( sw, sh );
-			ipanel()->GetSize( hDialog, dw, dh );
-			ipanel()->SetPos( hDialog, ( sw - dw ) / 2, ( sh - dh ) / 2 );
 		}
 	}
 

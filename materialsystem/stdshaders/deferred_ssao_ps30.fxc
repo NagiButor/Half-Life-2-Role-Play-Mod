@@ -47,8 +47,9 @@ static const float NUM_TURNS = 7.0;
 float SkyVisibility( float3 worldPos, float3 normal )
 {
 	// (off the surface along its normal: a point on a wall looks at the ground in front
-	// of it, not at the top of the wall)
-	float4 wp = float4( worldPos + normal * 6.0, 1.0 );
+	// of it, not at the top of the wall; at least 1.5 raw rainmap texels so vertical walls
+	// clear their own texel even at larger rainmap sizes)
+	float4 wp = float4( worldPos + normal * max( 6.0, g_vecRainMap.z * 1.5 ), 1.0 );
 	float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
 
 	// outside the map: no information, treat as outdoors
@@ -60,9 +61,11 @@ float SkyVisibility( float3 worldPos, float3 normal )
 	const float dColumn = tex2Dlod( sRainRaw, float4( uvz.xy, 0, 0 ) ).x;
 
 	// under the top of its own column (a roof, a canopy, a bridge over it - more than 24
-	// units over it, so curbs and steps next to it don't count)
+	// units over it, so curbs and steps next to it don't count; downward-facing ceilings
+	// are always under their own slab even when the roof is thin)
 	const float below = ( uvz.z - dColumn ) * g_vecSky.y;
-	const float cover = saturate( ( below - 24.0 ) / 24.0 );
+	const float ceilingCover = saturate( -normal.z * 2.0 ) * saturate( ( below - 2.0 ) / 8.0 );
+	const float cover = max( saturate( ( below - 24.0 ) / 24.0 ), ceilingCover );
 
 	// in the open only nearly enclosed spots lose sky light (g_vecRainMap.x, a large open
 	// scale): at the foot of a wall or a curb the shade must look like the rest of the shade
@@ -72,12 +75,14 @@ float SkyVisibility( float3 worldPos, float3 normal )
 	vTop = lerp( vTop, 1.0, saturate( ( vis.z - uvz.z ) * g_vecSky.y * g_vecSky.z ) );
 
 	// under a cover: the open part around at the lowest ground the map sees there - none,
-	// if that ground is well above the point (deep inside a building nothing around is open
-	// at its level; judged at the roof the middle of a big roof read as open). High covers
-	// (a floating block, a high hall) let the sky in through the gaps around them: the wide
-	// disk, more of it the higher the cover is
-	const float vLow = vis.y * saturate( 1.0 - ( ( uvz.z - vis.w ) * g_vecSky.y - 24.0 ) / 24.0 );
-	const float vLowWide = visWide.y * saturate( 1.0 - ( ( uvz.z - visWide.w ) * g_vecSky.y - 24.0 ) / 24.0 );
+	// if that ground is well above the point OR if no ground below the cover was found at all
+	// (vis.w <= dColumn: prevents a thin roof or chimney from lighting up its own interior).
+	const float vLow = vis.y
+		* saturate( 1.0 - ( ( uvz.z - vis.w ) * g_vecSky.y - 24.0 ) / 24.0 )
+		* saturate( ( ( vis.w - dColumn ) * g_vecSky.y - 24.0 ) / 24.0 );
+	const float vLowWide = visWide.y
+		* saturate( 1.0 - ( ( uvz.z - visWide.w ) * g_vecSky.y - 24.0 ) / 24.0 )
+		* saturate( ( ( visWide.w - dColumn ) * g_vecSky.y - 24.0 ) / 24.0 );
 	const float vCover = lerp( vLow, vLowWide, saturate( ( below - 128.0 ) / 384.0 ) );
 
 	const float v = lerp( vTop, saturate( vCover * g_vecSky.w ), cover );

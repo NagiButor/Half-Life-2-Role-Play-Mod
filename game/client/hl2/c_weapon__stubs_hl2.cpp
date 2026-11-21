@@ -51,7 +51,6 @@ STUB_WEAPON_CLASS( weapon_rpm_pot, WeaponRPMPot, C_BaseHLBludgeonWeapon );
 // HL2RPM: the Beretta 92 (server: hl2rpm_beretta.cpp)
 STUB_WEAPON_CLASS( weapon_rpm_beretta, WeaponRPMBeretta, C_BaseHLCombatWeapon );
 STUB_WEAPON_CLASS( weapon_rpm_shovel, WeaponRPMShovel, C_BaseHLBludgeonWeapon );
-STUB_WEAPON_CLASS( weapon_rpm_fists, WeaponRPMFists, C_BaseHLBludgeonWeapon );
 #ifdef HL2_EPISODIC
 STUB_WEAPON_CLASS( weapon_hopwire, WeaponHopwire, C_BaseHLCombatWeapon );
 //STUB_WEAPON_CLASS( weapon_proto1, WeaponProto1, C_BaseHLCombatWeapon );

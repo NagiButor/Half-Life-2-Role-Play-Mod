@@ -122,7 +122,7 @@ BEGIN_VS_SHADER( VOLUME_SUN, "" )
 			// from the GI probes: 1 in the open, 0 in a closed room). "Under something" alone made
 			// dust under every tree and overhang outdoors: lit by the sun it was a glowing shape
 			// with sharp borders around the tree, a whiteout in a gap between walls.
-			const float flCameraSky = GetDeferredExt()->GetGIData().bEnabled ? GetDeferredExt()->GetGIData().vecParams2.x : 1.0f;
+			const float flCameraSky = GetDeferredExt()->GetGIData().vecParams2.x;
 			const float flIndoors = clamp( ( 0.4f - flCameraSky ) / 0.3f, 0.0f, 1.0f );
 			// (covered = something more than 24 units above the point, in the map's depth units)
 			float flDust[4] = { 24.0f / GetRainMapDepthRangeSun( w ) + w.vecRainMapParams.x, r_weather_sunshafts_dust.GetFloat() * 0.5f * flIndoors,

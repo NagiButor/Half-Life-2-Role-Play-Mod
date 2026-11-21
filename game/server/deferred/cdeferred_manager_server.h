@@ -24,8 +24,13 @@ public:
 
 	virtual void LevelInitPreEntity();
 
+	bool IsDeferredRenderingEnabled() const { return m_bDefRenderingEnabled; }
+
 	int AddCookieTexture( const char *pszCookie );
 	void AddWorldLight( CDeferredLight *l );
+
+private:
+	bool m_bDefRenderingEnabled;
 };
 
 extern CDeferredManagerServer *GetDeferredManager();

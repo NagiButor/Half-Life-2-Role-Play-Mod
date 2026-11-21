@@ -128,7 +128,7 @@ CITIZEN_TYPES = [("", "Как задано моделью"), ("1", "Запуга
                  ("4", "Своя модель")]
 RELATIONS = [("", "По фракции / по классу"), ("friend", "Друг"), ("neutral", "Нейтрален"), ("enemy", "Враг")]
 RELATION_NAMES = dict(RELATIONS)
-WEAPONS = ["", "weapon_rpm_fists", "weapon_crowbar", "weapon_stunstick", "weapon_rpm_axe", "weapon_rpm_bottle", "weapon_rpm_brokenbottle", "weapon_rpm_hook", "weapon_rpm_pan", "weapon_rpm_pickaxe", "weapon_rpm_pipe", "weapon_rpm_pot", "weapon_rpm_shovel",
+WEAPONS = ["", "weapon_crowbar", "weapon_stunstick", "weapon_rpm_axe", "weapon_rpm_bottle", "weapon_rpm_brokenbottle", "weapon_rpm_hook", "weapon_rpm_pan", "weapon_rpm_pickaxe", "weapon_rpm_pipe", "weapon_rpm_pot", "weapon_rpm_shovel",
            "weapon_pistol", "weapon_rpm_beretta", "weapon_357", "weapon_smg1", "weapon_ar2",
            "weapon_shotgun", "weapon_crossbow", "weapon_rpg", "weapon_annabelle", "weapon_alyxgun"]
 

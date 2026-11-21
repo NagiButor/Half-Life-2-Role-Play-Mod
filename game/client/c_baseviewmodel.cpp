@@ -330,8 +330,9 @@ int C_BaseViewModel::DrawModel( int flags )
 		}
 		// Tell the weapon itself that we've rendered, in case it wants to do something
 		// HL2RPM: not while the deferred renderer draws the view model into the G-buffer - what
-		// the weapon draws then (the glow sprites of the stunstick) went into the normals
-		if ( pWeapon && !g_bViewModelGBufferPass )
+		// the weapon draws then (the glow sprites of the stunstick) went into the normals;
+		// nor on the second (translucent) pass of a two-pass viewmodel
+		if ( pWeapon && !g_bViewModelGBufferPass && !( flags & STUDIO_TRANSPARENCY ) )
 		{
 			pWeapon->ViewModelDrawn( this );
 		}

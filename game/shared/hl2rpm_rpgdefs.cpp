@@ -61,7 +61,7 @@ namespace RPMRPG
 		{ "xp_lockpick", 10 }, { "xp_hack", 10 }, { "xp_check", 10 }, { "xp_kill", 10 },
 		{ "rep_kill", 25 }, { "rep_hostile", -50 }, { "rep_theft", 5 },
 		// behaviour of NPCs (hl2rpm_world.cpp, hl2rpm_weaponlaw.cpp)
-		{ "npc_yield", 0 }, { "npc_pickup_weapons", 0 }, { "npc_fists", 1 }, { "npc_talk_gestures", 1 },
+		{ "npc_yield", 0 }, { "npc_pickup_weapons", 0 }, { "npc_talk_gestures", 1 },
 		{ "weapon_law", 1 }, { "weapon_law_grace", 5 }, { "weapon_law_melee", 0 }, { "weapon_law_dist", 1000 }, { "weapon_law_disguise", 1 },
 	};
 

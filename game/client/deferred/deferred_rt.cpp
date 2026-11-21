@@ -10,7 +10,6 @@
 #include "deferred/deferred_shadowcache.h"
 #include "tier0/icommandline.h"
 #include "deferred/deferred_postfx.h"
-#include "deferred/deferred_taa.h"
 #include "hl2rpm_itempreview.h"
 
 #include "tier0/memdbgon.h"
@@ -85,15 +84,14 @@ static void OnRenderScaleChanged( IConVar *var, const char *pOldValue, float flO
 	RequestDeferredRTRefresh();
 }
 static ConVar r_hl2rpm_renderscale( "r_hl2rpm_renderscale", "0.75", FCVAR_ARCHIVE,
-	"HL2RPM: the 3D view is drawn at this part of the screen resolution and brought up to it by the TAA "
-	"(temporal upscale; 1 = native). Takes effect with the render targets (outside a map / the next start)",
+	"HL2RPM: the 3D view is drawn at this part of the screen resolution and stretched to the screen "
+	"(1 = native). Takes effect with the render targets (outside a map / the next start)",
 	true, 0.5f, true, 1.0f, OnRenderScaleChanged );
 static bool g_bRenderScaled = false;
 static int g_iFrameW = 0, g_iFrameH = 0;
 static int g_iScreenRTsW = -2, g_iScreenRTsH = -2;	// the frame the screen-sized targets were made for (-1 = full size)
 static CTextureReference g_tex_Scene;
 static CTextureReference g_tex_SceneCopy;
-static CTextureReference g_tex_UpscaleMask;
 
 bool DeferredRenderScale_IsActive()
 {
@@ -128,11 +126,6 @@ ITexture *GetDefRT_Scene()
 ITexture *GetDefRT_SceneCopy()
 {
 	return DeferredRenderScale_IsActive() ? (ITexture *)g_tex_SceneCopy : NULL;
-}
-
-ITexture *GetDefRT_UpscaleMask()
-{
-	return DeferredRenderScale_IsActive() ? (ITexture *)g_tex_UpscaleMask : NULL;
 }
 
 ITexture *CreateFrameSizedRT( const char *pszName, int iDivisor, int iFormat, int iDepth, unsigned int nFlags )
@@ -338,20 +331,18 @@ const ImageFormat fmt_gbuffer0 =
 		g_iScreenRTsH = iWantH;
 
 		// HL2RPM: the 3D frame itself when scaled (the depth-stencil of the screen is shared: it is
-		// bigger, the frame uses its top left), a copy of it for the passes that look at the frame
-		// (SSR, mirrors) and the mask of what moves with the camera for the upscale
+		// bigger, the frame uses its top left) and a copy of it for the passes that look at the frame
+		// (SSR, mirrors)
 		if ( g_bRenderScaled )
 		{
 			const unsigned int sceneFlags = TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_RENDERTARGET;
 			g_tex_Scene.Init( CreateFrameSizedRT( "_rt_hl2rpm_scene", 1, materials->GetBackBufferFormat(), MATERIAL_RT_DEPTH_SHARED, sceneFlags ) );
 			g_tex_SceneCopy.Init( CreateFrameSizedRT( "_rt_hl2rpm_scenecopy", 1, materials->GetBackBufferFormat(), MATERIAL_RT_DEPTH_NONE, sceneFlags ) );
-			g_tex_UpscaleMask.Init( CreateFrameSizedRT( "_rt_hl2rpm_upscalemask", 1, IMAGE_FORMAT_RGBA8888, MATERIAL_RT_DEPTH_SHARED, sceneFlags | TEXTUREFLAGS_POINTSAMPLE ) );
 		}
 		else
 		{
 			g_tex_Scene.Shutdown();
 			g_tex_SceneCopy.Shutdown();
-			g_tex_UpscaleMask.Shutdown();
 		}
 
 		g_tex_Normals.Init( CreateFrameSizedRT( DEFRTNAME_GBUFFER0, 1,
@@ -525,7 +516,6 @@ const ImageFormat fmt_gbuffer0 =
 		InitGIRTs();
 		InitLightReachRTs();
 		InitPostFXRTs();
-		InitTAARTs();
 		InitItemPreviewRT();
 
 #if DEFCFG_ENABLE_RADIOSITY

@@ -1,6 +1,8 @@
 //========= HL2RPM ============================================================//
 //
-// Purpose: World-space indirect light of the global light (GI probes).
+// Purpose: Camera sky visibility (0 closed room .. 1 open sky) for indoor
+//          volumetric sunshaft dust and dust motes.
+//          (All GI passes and targets have been removed.)
 //
 //=============================================================================//
 
@@ -8,23 +10,16 @@
 #define DEFERRED_GI_H
 #pragma once
 
-class CViewSetup;
-struct lightData_Global_t;
+class Vector;
 
-void InitGIRTs();			// from InitDeferredRTs
+void InitGIRTs();			// no-op (GI removed)
 void ShutdownGI();
 
-// new map: every probe is traced again
 void DeferredGI_Reset();
-// the render targets lost their content: upload the probes again
 void DeferredGI_OnRTContentLost();
 
-// before the lighting passes, after the G-buffer: traces probes (CPU budget), uploads
-// the changed ones, renders the half resolution indirect light
-void DeferredGI_Render( const CViewSetup &view, const lightData_Global_t &globalLight );
-
-// how much of the sky is in sight where the camera is: 1 in the open, 0 in a closed room
-// (smoothed; 1 without GI)
+// Updates camera sky visibility (1 trace/frame) and commits vecParams2.x for volumetrics/motes.
+void DeferredGI_UpdateCameraSky( const Vector &origin );
 float DeferredGI_GetCameraSky();
 
 #endif // DEFERRED_GI_H

@@ -76,6 +76,11 @@ float Covered( float3 p )
 	return 1.0 - tex2Dlod( sRainDepth, float4( uvz.xy, uvz.z - g_vecDust.x, 0 ) ).x;
 }
 
+float PhaseHG( float g, float cosTheta )
+{
+	return ( 1.0 - g * g ) / pow( max( 1.0 + g * g - 2.0 * g * cosTheta, 1e-3 ), 1.5 ) * ( 1.0 / ( 4.0 * 3.14159265 ) );
+}
+
 float Hash12( float2 p )
 {
 	float3 p3 = frac( float3( p.xyx ) * 0.1031 );
@@ -139,20 +144,17 @@ float4 main( const PS_INPUT In ) : COLOR
 	}
 
 	float cosTheta = dot( rd, g_vecLightDir );
-	float g = 0.58;
-	float phase = ( 1.0 - g * g ) / pow( max( 1.0 + g * g - 2.0 * g * cosTheta, 1e-3 ), 1.5 ) * ( 1.0 / ( 4.0 * 3.14159265 ) );
 	// HL2RPM: haze scatters most of the light it takes within a few degrees of where it was
 	// going (the bright aureole around a sun in haze): a quarter of it goes into a second, narrow
 	// lobe. Looking toward the sun - past the edge of a roof, through a tree's crown - the shafts
-	// are twice as bright; from 30 degrees on they are as they were.
-	const float g2 = 0.82;
-	const float phase2 = ( 1.0 - g2 * g2 ) / pow( max( 1.0 + g2 * g2 - 2.0 * g2 * cosTheta, 1e-3 ), 1.5 ) * ( 1.0 / ( 4.0 * 3.14159265 ) );
-	phase = 0.75 * phase + 0.25 * phase2;
-	// HL2RPM: the dust of a room scatters almost evenly: with the haze's forward lobe a beam seen
-	// from the side was faint and the same dust looked at against the sun - through a doorway,
-	// under an overhang - whited out the view (20 x brighter)
+	// on open sky are twice as bright; when a solid surface (a ceiling, a roof, a wall) blocks
+	// the view (depth >= 0.1), the narrow aureole is dropped and a gentle lobe like indoor dust is
+	// used so the sun's halo does not glow on top of ceilings and walls in sunlit foreground haze.
 	const float gDust = 0.25;
-	const float phaseDust = ( 1.0 - gDust * gDust ) / pow( max( 1.0 + gDust * gDust - 2.0 * gDust * cosTheta, 1e-3 ), 1.5 ) * ( 1.0 / ( 4.0 * 3.14159265 ) );
+	const float phaseDust = PhaseHG( gDust, cosTheta );
+	const float phase = ( depth < 0.1 )
+		? ( 0.75 * PhaseHG( 0.58, cosTheta ) + 0.25 * PhaseHG( 0.82, cosTheta ) )
+		: phaseDust;
 
 	float3 light = g_vecLightColor.rgb * ( phase * inscatter + phaseDust * inscatterDust ) * 6.5;
 

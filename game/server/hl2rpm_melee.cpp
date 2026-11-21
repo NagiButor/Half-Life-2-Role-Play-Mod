@@ -54,7 +54,6 @@ static const RPMMeleeDef_t s_Melee[] =
 	{ "weapon_rpm_pipe",			20, 27, 1.10f, 64, 0.20f, 400, false, 1.6f },
 	{ "weapon_rpm_pot",				10, 15, 0.90f, 56, 0.20f, 200, false, 1.2f },
 	{ "weapon_rpm_shovel",			24, 32, 1.25f, 76, 0.40f, 600, false, 2.0f },
-	{ "weapon_rpm_fists",			10, 16, 0.60f, 44, 0.00f, 150, false, 1.0f },
 };
 
 static const RPMMeleeDef_t *FindMelee( const char *cls )
@@ -205,116 +204,6 @@ RPM_MELEE( weapon_rpm_pickaxe, WeaponRPMPickaxe )
 RPM_MELEE( weapon_rpm_pipe, WeaponRPMPipe )
 RPM_MELEE( weapon_rpm_pot, WeaponRPMPot )
 RPM_MELEE( weapon_rpm_shovel, WeaponRPMShovel )
-
-//-----------------------------------------------------------------------------
-// Fists (NPCs): an invisible "weapon" of the animation library - a boxing guard
-// (ACT_RPM_FIST_STANCE) while there is an enemy, punches (ACT_RPM_FIST_PUNCH: jab,
-// cross, hook, uppercut) with the blow event 3001 on the frame the fist lands. Unarmed
-// NPCs that fight raise their fists themselves (rule npc_fists, CRPMFistsSystem) and lower
-// them when the fight is over. Bare fists don't break the weapon ban; they never drop.
-//-----------------------------------------------------------------------------
-static Activity RPMActivity( const char *pszName )
-{
-	int i = ActivityList_IndexForName( pszName );
-	return i > 0 ? (Activity)i : ACT_INVALID;
-}
-
-class CWeaponRPMFists : public CWeaponRPMMelee
-{
-	DECLARE_CLASS( CWeaponRPMFists, CWeaponRPMMelee );
-public:
-	DECLARE_SERVERCLASS();
-
-	virtual void Spawn()
-	{
-		BaseClass::Spawn();
-		AddEffects( EF_NODRAW );
-	}
-	virtual void Equip( CBaseCombatCharacter *pOwner )
-	{
-		BaseClass::Equip( pOwner );
-		AddEffects( EF_NODRAW );
-	}
-	virtual bool IsWeaponVisible() { return false; }
-	virtual bool CanBePickedUpByNPCs() { return false; }
-	virtual void Drop( const Vector &vecVelocity ) { UTIL_Remove( this ); }
-
-	virtual Activity ActivityOverride( Activity baseAct, bool *pRequired )
-	{
-		CBaseCombatCharacter *pOwner = GetOwner();
-		CAI_BaseNPC *pNPC = pOwner ? pOwner->MyNPCPointer() : NULL;
-		if ( pNPC )
-		{
-			Activity punch = RPMActivity( "ACT_RPM_FIST_PUNCH" );
-			Activity stance = RPMActivity( "ACT_RPM_FIST_STANCE" );
-			if ( baseAct == ACT_MELEE_ATTACK1 && punch != ACT_INVALID && pNPC->HaveSequenceForActivity( punch ) )
-			{
-				if ( pRequired )
-					*pRequired = true;
-				return punch;
-			}
-			if ( ( baseAct == ACT_IDLE_ANGRY || baseAct == ACT_IDLE || baseAct == ACT_IDLE_ANGRY_MELEE ) && stance != ACT_INVALID &&
-				 pNPC->GetEnemy() && pNPC->HaveSequenceForActivity( stance ) )
-				return stance;
-			// otherwise as an unarmed character (no melee walk / idle of a club)
-			if ( baseAct == ACT_IDLE || baseAct == ACT_RUN || baseAct == ACT_WALK || baseAct == ACT_IDLE_ANGRY )
-				return baseAct;
-		}
-		return BaseClass::ActivityOverride( baseAct, pRequired );
-	}
-};
-
-IMPLEMENT_SERVERCLASS_ST( CWeaponRPMFists, DT_WeaponRPMFists )
-END_SEND_TABLE()
-LINK_ENTITY_TO_CLASS( weapon_rpm_fists, CWeaponRPMFists );
-PRECACHE_WEAPON_REGISTER( weapon_rpm_fists );
-
-class CRPMFistsSystem : public CAutoGameSystemPerFrame
-{
-public:
-	CRPMFistsSystem() : CAutoGameSystemPerFrame( "CRPMFistsSystem" ), m_flNext( 0 ) {}
-	virtual void LevelInitPostEntity() { m_flNext = 0; }
-	virtual void FrameUpdatePostEntityThink()
-	{
-		if ( gpGlobals->curtime < m_flNext )
-			return;
-		m_flNext = gpGlobals->curtime + 0.5f;
-		if ( RPMRPG::Rule( "npc_fists" ) == 0.0f )
-			return;
-		CAI_BaseNPC **ppAIs = g_AI_Manager.AccessAIs();
-		for ( int i = 0; i < g_AI_Manager.NumAIs(); i++ )
-		{
-			CAI_BaseNPC *p = ppAIs[i];
-			if ( !p || !p->IsAlive() || p->IsInAScript() || !( p->CapabilitiesGet() & bits_CAP_USE_WEAPONS ) )
-				continue;
-			if ( !p->HaveSequenceForActivity( ACT_IDLE ) || RPMActivity( "ACT_RPM_FIST_PUNCH" ) == ACT_INVALID ||
-				 !p->HaveSequenceForActivity( RPMActivity( "ACT_RPM_FIST_PUNCH" ) ) )
-				continue;
-			CBaseCombatWeapon *pW = p->GetActiveWeapon();
-			const bool bFists = pW && FClassnameIs( pW, "weapon_rpm_fists" );
-			CBaseEntity *pEnemy = p->GetEnemy();
-			const bool bFight = pEnemy && pEnemy->IsAlive() && p->IRelationType( pEnemy ) == D_HT &&
-				( p->GetAbsOrigin() - pEnemy->GetAbsOrigin() ).Length() < 900.0f;
-			if ( !pW && bFight )
-			{
-				CBaseCombatWeapon *pFists = (CBaseCombatWeapon *)CBaseEntity::Create( "weapon_rpm_fists", p->GetAbsOrigin(), p->GetAbsAngles(), p );
-				if ( pFists )
-				{
-					p->Weapon_Equip( pFists );
-					if ( rpm_melee_debug.GetBool() )
-						Msg( "[melee] %s raises its fists against %s\n", p->GetDebugName(), pEnemy->GetDebugName() );
-				}
-			}
-			else if ( bFists && !pEnemy && gpGlobals->curtime - p->GetLastEnemyTime() > 8.0f )
-			{
-				p->Weapon_Drop( pW );		// removes itself
-			}
-		}
-	}
-private:
-	float m_flNext;
-};
-static CRPMFistsSystem g_RPMFists;
 
 acttable_t CWeaponRPMMelee::m_acttable[] =
 {

@@ -74,7 +74,7 @@ its content in `testmaps/scripts/world/ck_test*.txt`, `testmaps/scripts/npcs/ck_
   ("Подогнать к мебели / к кровати", "Прислонить к стене", "Поставить на пол"); test with
   `rpm_marker_use <npc> <marker>` / `rpm_marker_leave <npc>`, the player with `rpm_seat_at <marker>`.
 - NPC behaviour keys in `scripts/npcs`: `yield` (step aside from the player), `pickup_weapons` (0/1/2 = squad only),
-  `weapon_law` (0 off, 1 civilian, 2 warn, 3 fire); rules `npc_yield`, `npc_pickup_weapons`, `npc_fists`,
+  `weapon_law` (0 off, 1 civilian, 2 warn, 3 fire); rules `npc_yield`, `npc_pickup_weapons`,
   `npc_talk_gestures`, `weapon_law*` in `scripts/rpg/rpg.txt`. Bark event `weapon_law` (warn/final/attack/comply).
 - More ref types: `spawner` (`keyvalues { npcs "def:3;npc_headcrab" count_min count_max radius activate_dist
   from_hour to_hour respawn_hours require_flag }` -> `rpm_spawner`), `transition` (`name`, `target_map`, `target` =

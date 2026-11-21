@@ -27,6 +27,7 @@ CDeferredManagerServer *GetDeferredManager()
 
 CDeferredManagerServer::CDeferredManagerServer()
 {
+	m_bDefRenderingEnabled = true;
 }
 
 CDeferredManagerServer::~CDeferredManagerServer()
@@ -35,6 +36,7 @@ CDeferredManagerServer::~CDeferredManagerServer()
 
 bool CDeferredManagerServer::Init()
 {
+	m_bDefRenderingEnabled = Deferred_ReadInitialEnabled();
 	return true;
 }
 
@@ -487,21 +489,61 @@ static void ConvertWorldLights( const dworldlight_t *lights, int lightCount, con
 		nPoint + nSpot + nSurface, nPoint, nSpot, nSurface, nPatches, all.Count() - nPointSpot, candidates.Count() );
 }
 
+#define FORWARD_FALLBACK_SKY "sky_day01_01"
+
+static bool IsValidTextureSkybox( const char *pszSky )
+{
+	if ( !pszSky || !pszSky[0] )
+		return false;
+	if ( !Q_strnicmp( pszSky, "sky_proc_", 9 ) )
+		return false;
+	if ( !Q_stricmp( pszSky, "sky_urb01" ) )
+		return false;
+
+	char szPath[MAX_PATH];
+	Q_snprintf( szPath, sizeof( szPath ), "materials/skybox/%srt.vmt", pszSky );
+	if ( g_pFullFileSystem->FileExists( szPath, "GAME" ) )
+		return true;
+	Q_snprintf( szPath, sizeof( szPath ), "materials/skybox/%s_hdrrt.vmt", pszSky );
+	return g_pFullFileSystem->FileExists( szPath, "GAME" );
+}
+
+static void EnsureForwardSkybox()
+{
+	static ConVarRef sv_skyname( "sv_skyname", false );
+	if ( !sv_skyname.IsValid() )
+		return;
+
+	const char *pszCur = sv_skyname.GetString();
+	if ( IsValidTextureSkybox( pszCur ) )
+		return;
+
+	static const char *s_pszFaces[6] = { "rt", "bk", "lf", "ft", "up", "dn" };
+	for ( int i = 0; i < 6; i++ )
+	{
+		PrecacheMaterial( UTIL_VarArgs( "skybox/%s%s", FORWARD_FALLBACK_SKY, s_pszFaces[i] ) );
+		PrecacheMaterial( UTIL_VarArgs( "skybox/%s_hdr%s", FORWARD_FALLBACK_SKY, s_pszFaces[i] ) );
+	}
+
+	DevMsg( "CDeferredManagerServer: forward fallback skybox '%s' -> '%s'\n", pszCur, FORWARD_FALLBACK_SKY );
+	sv_skyname.SetValue( FORWARD_FALLBACK_SKY );
+}
+
 extern bool g_bHL2RPMRestoringLevel;
 
 void CDeferredManagerServer::LevelInitPreEntity()
 {
+	if ( !IsDeferredRenderingEnabled() )
+	{
+		EnsureForwardSkybox();
+		return;
+	}
+
 	if ( gpGlobals->eLoadType == MapLoad_LoadGame )
 		return;
 
 	// a revisited map (changelevel back) restores its converted lights from the save
 	if ( g_bHL2RPMRestoringLevel )
-		return;
-
-	if ( !r_deferred.GetBool() )
-		return;
-
-	if (CommandLine() && CommandLine()->FindParm( "-nodeferred" ) != 0)
 		return;
 
 	const char* entStr = engine->GetMapEntitiesString();

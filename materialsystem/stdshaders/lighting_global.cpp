@@ -58,7 +58,7 @@ static ConVar r_deferred_contact_shadows_distance( "r_deferred_contact_shadows_d
 static ConVar r_deferred_contact_shadows_strength( "r_deferred_contact_shadows_strength", "0.85", 0, "Contact shadows: strength (0..1)", true, 0.0f, true, 1.0f );
 static ConVar r_deferred_contact_shadows_debug( "r_deferred_contact_shadows_debug", "0", FCVAR_CHEAT, "Contact shadows debug: red = occlusion, green = strength, blue = lit (march skipped)" );
 static ConVar r_deferred_contact_shadows_dither( "r_deferred_contact_shadows_dither", "1", 0,
-	"Contact shadows: per pixel offset of the march - 0 none, 1 moving with the frame while TAA accumulates (smooth), 2 the same every frame (the old stipple, for comparison)" );
+	"Contact shadows: per pixel offset of the march - 0/1 none, 2 fixed per-pixel stipple (debug)" );
 
 static ConVar r_csm_body_bias( "r_csm_body_bias", "36", 0,
 	"Sun shadows on the local player's first person body ignore casters closer than this (units) - the body's own", true, 0.0f, true, 128.0f );
@@ -99,7 +99,6 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 			pShaderShadow->EnableTexture( SHADER_SAMPLER4, true );	// HL2RPM weather map
 			pShaderShadow->EnableTexture( SHADER_SAMPLER5, true );	// HL2RPM cloud noise
 			pShaderShadow->EnableTexture( SHADER_SAMPLER6, true );	// HL2RPM ambient occlusion + sky visibility
-			pShaderShadow->EnableTexture( SHADER_SAMPLER7, true );	// HL2RPM GI probes' indirect light
 			pShaderShadow->EnableTexture( SHADER_SAMPLER8, true );	// HL2RPM sun caster depth (PCSS)
 
 			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION, 1, NULL, 0 );
@@ -159,15 +158,9 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 				float flPCSS[4] = { flSunRadius, flMax, flMaxWorld, bPCSS ? (float)r_csm_pcss.GetInt() : 0.0f };
 				pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 13, flPCSS, 1, true );
 
-				// (w: the per pixel dither of the contact shadow march moves every frame while TAA
-				// accumulates the frames - and is off without it, see lightingpass_global_ps30)
-				const taaData_t &taa = GetDeferredExt()->GetTAAData();
+				// (w: contact shadow march dither phase; < 0 disables per-pixel offset, 2 = fixed stipple)
 				const int iDither = r_deferred_contact_shadows_dither.GetInt();
-				float flDitherPhase = -1.0f;
-				if ( iDither == 2 )
-					flDitherPhase = 0.0f;
-				else if ( iDither == 1 && taa.vecParams3.z > 0.5f && !GetDeferredExt()->IsReflectionView() )
-					flDitherPhase = taa.vecParams3.w;
+				const float flDitherPhase = ( iDither == 2 ) ? 0.0f : -1.0f;
 				float flShadowExtra[4] = { r_csm_body_bias.GetFloat(), (float)r_csm_shadow_normal.GetInt(), r_csm_footprint.GetFloat(), flDitherPhase };
 				pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 8, flShadowExtra, 1, true );
 			}
@@ -223,15 +216,8 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 			float flAmbientCtrl[4] = { r_csm_bias_normal.GetFloat(), ao.vecApply.y, r_csm_bias_slope.GetFloat(), bAO ? ao.vecApply.w : 0.0f };
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 12, flAmbientCtrl, 1, true );
 
-			// HL2RPM: indirect light of the GI probes (half resolution, blurred) - see deferred_gi_ps30
-			const giData_t &gi = GetDeferredExt()->GetGIData();
-			ITexture *pGI = GetDeferredExt()->GetTexture_GI();
-			const bool bGI = gi.bEnabled && pGI != NULL && gi.vecApply.w > 0.0f;
-			if ( bGI )
-				BindTexture( SHADER_SAMPLER7, pGI );
-			else
-				pShaderAPI->BindStandardTexture( SHADER_SAMPLER7, TEXTURE_BLACK );
-			float flGIApply[4] = { bGI ? 1.0f : 0.0f, gi.vecApply.y, r_deferred_contact_shadows_debug.GetBool() ? 1.0f : 0.0f, bGI ? gi.vecApply.w : 0.0f };
+			// HL2RPM: contact shadows debug flag (c72.z; old probe GI removed, replaced by Zenteon TurboGI)
+			float flGIApply[4] = { 0.0f, 0.0f, r_deferred_contact_shadows_debug.GetBool() ? 1.0f : 0.0f, 0.0f };
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 14, flGIApply, 1, true );
 
 			// HL2RPM: contact shadows - this view's world -> screen texture coords (c73 - c76)

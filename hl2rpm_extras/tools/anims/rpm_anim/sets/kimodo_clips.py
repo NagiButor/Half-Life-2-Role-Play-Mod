@@ -1,7 +1,6 @@
 """Library sequences made of Kimodo motions (rpm_anim/kimodo.py; the clips are generated offline by
 kimodo.cpp into E:\\SourceModding\\HL2RPMSOURCE\\kimodo.cpp\\hl2rpm_out - see HL2RPM_NOTES.md there):
 
-  rpm_idle_bored      a standing idle: looks around, scratches the back of the head (ACT_IDLE variant)
   rpm_talk_idle       talking with the hands, palms up and out (an actbusy for "work" / "idle" markers:
                       two people chatting at two markers that face each other)
   rpm_search_*        squat down, look over something in the hands, get up (enter / loop / exit)
@@ -37,11 +36,6 @@ def _finish(c, loop):
     else:
         c.loop = False
     return c
-
-
-def idle_bored(rig, skel, name="rpm_idle_bored"):
-    c = _clip(rig, "idle_bored_s1", name)
-    return _finish(c, True)
 
 
 def talk_idle(rig, skel, name="rpm_talk_idle"):

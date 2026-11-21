@@ -110,7 +110,7 @@ BEGIN_VS_SHADER( WEATHER_MOTES, "" )
 				bRainMap ? 1.0f : 0.0f, r_weather_motes_outdoor.GetFloat() };
 			pShaderAPI->SetPixelShaderConstant( 68, flLight, 1, true );
 			// (the sky in sight at the camera, from the GI probes: 1 in the open, 0 in a closed room)
-			const float flCameraSky = GetDeferredExt()->GetGIData().bEnabled ? GetDeferredExt()->GetGIData().vecParams2.x : 1.0f;
+			const float flCameraSky = GetDeferredExt()->GetGIData().vecParams2.x;
 			const float flIndoors = clamp( ( 0.4f - flCameraSky ) / 0.3f, 0.0f, 1.0f );
 			const float flParams[4] = { r_weather_motes_g.GetFloat(), (float)r_weather_motes_debug.GetInt(), flIndoors, 0.0f };
 			pShaderAPI->SetPixelShaderConstant( 69, flParams, 1, true );

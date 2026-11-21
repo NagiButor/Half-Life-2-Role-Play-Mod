@@ -1,0 +1,41 @@
+"SDK_Water"
+{
+	// HL2RPM Portal 2 water port (orig: nature/water_bottomless_pit_01)
+	"%compilewater" 1
+	"%tooltexture" "hl2rpm/water/p2_tex/p2_tool_water"
+	"$abovewater" 1
+	"$forceexpensive" 1
+	"$envmap" "env_cubemap"
+	"$normalmap" "hl2rpm/water/p2_tex/p2_river_normal_sharp"
+	"$flowmap" "hl2rpm/water/p2_tex/p2_toxic_flowmap"
+	"$flow_worlduvscale" "8.0"
+	"$flow_normaluvscale" "160.0"
+	"$flow_timeintervalinseconds" "0.22"
+	"$flow_uvscrolldistance" "0.1"
+	"$flow_bumpstrength" "1.0"
+	"$flow_timescale" "0.42"
+	"$flow_noise_texture" "hl2rpm/water/p2_tex/p2_water_noise2"
+	"$flow_noise_scale" "0.0005"
+	"$reflecttexture" "_rt_WaterReflection"
+	"$reflectentities" 1
+	"$reflectamount" "0.44"
+	"$reflecttint" "{195 202 208}"
+	"$refracttexture" "_rt_WaterRefraction"
+	"$refractamount" "0.28"
+	"$refracttint" "{148 158 152}"
+	"$bottommaterial" "hl2rpm/water/p2_swamp_beneath"
+	"$surfaceprop" "water"
+	"$fogenable" 1
+	"$fogstart" "0"
+	"$fogend" "65"
+	"$fogcolor" "{36 46 50}"
+	"$water_absorb" "[1.25 1.05 0.95 1.40]"
+	"$water_glow" "0.0"
+	"$scale" "[1 1]"
+	"Proxies"
+	{
+		"WaterLOD"
+		{
+		}
+	}
+}
