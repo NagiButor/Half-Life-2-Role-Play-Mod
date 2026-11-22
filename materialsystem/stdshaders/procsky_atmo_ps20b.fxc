@@ -27,14 +27,24 @@ const float4 g_wSkyHorizon					: register( c14 );	// rgb horizon sky light
 const float4 g_wFlags						: register( c15 );	// x weather enabled, y clouds valid
 
 const float3 g_light_diffuse				: register( c16 );
-const float3 g_light_ambient_high			: register( c17 );
-const float3 g_light_ambient_low_half		: register( c18 );
 // HL2RPM: x 1 = the main view (the G-buffer has this screen's pixels): a pixel the G-buffer holds
 // geometry in is drawn over by it - nothing to compute (the sky goes first, without a depth test,
 // and used to run this whole shader for every pixel of the screen). zw 1 / G-buffer size
 const float4 g_wSkipCovered					: register( c19 );
 
-sampler2D sSkyLut : register( s0 );
+// HL2RPM: per-frame sky values moved from PS to CPU (ambient*factor, twilight colors/scales,
+// sun transmittance U & ground hit, wind basis, moon basis/fade, cloud UV rect)
+const float4 g_skyPre0						: register( c20 );	// rgb ambientLow*factor, w starsScale
+const float4 g_skyPre1						: register( c21 );	// rgb ambientHigh*factor, w twilightGlowActive
+const float4 g_skyPre2						: register( c22 );	// rgb goldenBase+civilWide, w sunH.x
+const float4 g_skyPre3						: register( c23 );	// rgb goldenSun, w sunH.y
+const float4 g_skyPre4						: register( c24 );	// rgb civilBase+venusBase, w sunTransU
+const float4 g_skyPre5						: register( c25 );	// rgb civilSun, w sunTransVisible
+const float4 g_skyPre6						: register( c26 );	// rgb venusAnti, w windDir.x
+const float4 g_skyPre7						: register( c27 );	// rgb skyColorScale, w windDir.y
+const float4 g_skyPre8						: register( c17 );	// rgb moonRight, w moonFade
+const float4 g_skyCloudUVRect				: register( c18 );	// xy uvScale, zw maxUV
+
 sampler2D sTransmittanceLut : register( s1 );
 sampler2D sSkyViewLut : register( s2 );
 sampler2D sClouds : register( s3 );
@@ -49,33 +59,6 @@ struct PS_INPUT
 
 static const float PI = 3.14159265358;
 
-static const float groundRadiusMM = 6.360;
-static const float atmosphereRadiusMM = 6.460;
-static const float3 viewPos = float3( 0.0, 0.0, groundRadiusMM + 0.0002 );
-
-static const float3 rayleighScatteringBase = float3( 5.802, 13.558, 33.1 );
-static const float rayleighAbsorptionBase = 0.0;
-
-static const float mieScatteringBase = 3.996;
-static const float mieAbsorptionBase = 4.4;
-
-static const float3 ozoneAbsorptionBase = float3( 0.650, 1.881, 0.085 );
-
-float rayIntersectSphere( float3 ro, float3 rd, float rad )
-{
-	float b = dot( ro, rd );
-	float c = dot( ro, ro ) - rad * rad;
-	if ( c > 0.0 && b > 0.0 )
-		return -1.0;
-	float discr = b * b - c;
-	if ( discr < 0.0 )
-		return -1.0;
-	float s = sqrt( discr );
-	if ( discr > b * b )
-		return ( -b + s );
-	return ( -b - s );
-}
-
 float getMiePhase( float cosTheta )
 {
 	const float g = 0.8;
@@ -85,43 +68,6 @@ float getMiePhase( float cosTheta )
 	float denom = ( 2.0 + g * g ) * pow( max( 1.0 + g * g - 2.0 * g * cosTheta, 1e-4 ), 1.5 );
 
 	return scale * num / max( denom, 1e-4 );
-}
-
-float getRayleighPhase( float cosTheta )
-{
-	const float k = 3.0 / ( 16.0 * PI );
-	return k * ( 1.0 + cosTheta * cosTheta );
-}
-
-void getScatteringValues( float3 pos, out float3 rayleighScattering, out float mieScattering, out float3 extinction )
-{
-	float altitudeKM = ( length( pos ) - groundRadiusMM ) * 1000.0;
-	float rayleighDensity = exp( -altitudeKM / 8.0 );
-	float mieDensity = exp( -altitudeKM / 1.2 );
-
-	rayleighScattering = rayleighScatteringBase * rayleighDensity;
-	float rayleighAbsorption = rayleighAbsorptionBase * rayleighDensity;
-
-	mieScattering = mieScatteringBase * mieDensity;
-	float mieAbsorption = mieAbsorptionBase * mieDensity;
-
-	float3 ozoneAbsorption = ozoneAbsorptionBase * max( 0.0, 1.0 - abs( altitudeKM - 25.0 ) / 15.0 );
-
-	extinction = rayleighScattering + rayleighAbsorption + mieScattering + mieAbsorption + ozoneAbsorption;
-}
-
-float3 getSunTransmittance( float3 pos, float3 sunDir )
-{
-	if ( rayIntersectSphere( pos, sunDir, groundRadiusMM ) > 0.0 )
-		return 0.0.xxx;
-
-	float r = clamp( length( pos ), groundRadiusMM, atmosphereRadiusMM );
-	float mu = dot( normalize( pos ), sunDir );
-	mu = clamp( mu, -1.0, 1.0 );
-
-	float u = ( mu * 0.5 + 0.5 );
-	float v = ( r - groundRadiusMM ) / ( atmosphereRadiusMM - groundRadiusMM );
-	return tex2Dlod( sTransmittanceLut, float4( u, v, 0, 0 ) ).rgb;
 }
 
 // HL2RPM: must match DirFromSkyViewUV in sky_atmo_skyview_lutgen_ps30
@@ -150,12 +96,11 @@ float3 jodieReinhardTonemap( float3 c )
 	return saturate( lerp( lc, tc, saturate( tc ) ) );
 }
 
-float3 sunWithBloom( float3 rayDir, float3 sunDir )
+float3 sunWithBloomCos( float cosTheta )
 {
 	const float sunSolidAngle = 0.53 * PI / 180.0;
 	const float minSunCosTheta = cos( sunSolidAngle );
 
-	float cosTheta = dot( rayDir, sunDir );
 	if ( cosTheta >= minSunCosTheta )
 		return 1.0.xxx;
 
@@ -176,6 +121,18 @@ float2 hash22( float2 p )
 	return frac( sin( q ) * 43758.5453 );
 }
 
+float smoothValue2D( float2 p )
+{
+	float2 i = floor( p );
+	float2 f = frac( p );
+	f = f * f * ( 3.0 - 2.0 * f );
+	float a = hash12( i );
+	float b = hash12( i + float2( 1.0, 0.0 ) );
+	float c = hash12( i + float2( 0.0, 1.0 ) );
+	float d = hash12( i + float2( 1.0, 1.0 ) );
+	return lerp( lerp( a, b, f.x ), lerp( c, d, f.x ), f.y );
+}
+
 float remap01_clamped( float x, float a, float b )
 {
 	return saturate( ( x - a ) / ( b - a ) );
@@ -187,17 +144,16 @@ float smooth01( float x )
 	return x * x * ( 3.0 - 2.0 * x );
 }
 
-// Moon: a lit disk with a phase terminator and darker "maria"
+// Moon: a lit disk with a phase terminator and smooth crater maria
 float3 MoonDisk( float3 rayDir, float3 moonDir, float3 sunDir )
 {
 	const float moonRadius = 0.0105;	// a bit bigger than real for readability
-	float3 fwd = moonDir;
-	float3 right = normalize( cross( float3( 0, 0, 1 ), fwd ) + float3( 1e-5, 0, 0 ) );
-	float3 up = cross( fwd, right );
-
-	float cosAng = dot( rayDir, fwd );
+	float cosAng = dot( rayDir, moonDir );
 	if ( cosAng < 0.99 )
 		return 0.0;
+
+	float3 right = g_skyPre8.xyz;
+	float3 up = cross( moonDir, right );
 
 	float2 local = float2( dot( rayDir, right ), dot( rayDir, up ) ) / moonRadius;
 	float r2 = dot( local, local );
@@ -206,15 +162,16 @@ float3 MoonDisk( float3 rayDir, float3 moonDir, float3 sunDir )
 		return glow.xxx;
 
 	// sphere normal on the moon's visible face, lit from the sun
-	float3 n = normalize( local.x * right + local.y * up - sqrt( 1.0 - r2 ) * fwd );
+	float3 n = normalize( local.x * right + local.y * up - sqrt( 1.0 - r2 ) * moonDir );
 	float lit = saturate( dot( n, sunDir ) * 0.9 + 0.12 );
 
-	float maria = hash12( floor( local * 3.5 + 7.0 ) ) * 0.25 + hash12( floor( local * 9.0 + 3.0 ) ) * 0.12;
+	float maria = smoothValue2D( local * 2.8 + float2( 7.3, 4.1 ) ) * 0.28
+	            + smoothValue2D( local * 6.5 + float2( 3.1, 9.7 ) ) * 0.12;
 	float limb = 0.75 + 0.25 * sqrt( 1.0 - r2 );
 	return float3( 0.92, 0.94, 1.0 ) * ( lit * ( 1.0 - maria ) * limb + glow );
 }
 
-// High thin cirrus sheet at ~9 km, stretched along the wind
+// High thin cirrus sheet at ~9 km, stretched and domain-warped along the wind
 float4 Cirrus( float3 rayDir )
 {
 	float amount = g_wCloud1.z;
@@ -223,14 +180,17 @@ float4 Cirrus( float3 rayDir )
 
 	float t = 9000.0 / rayDir.z;
 	float2 p = rayDir.xy * t + g_wWind.xy * 0.6;
-	float2 windDir = normalize( g_wWind.xy + float2( 1e-3, 0 ) );
+	float2 windDir = float2( g_skyPre6.w, g_skyPre7.w );
 	float2 windPerp = float2( -windDir.y, windDir.x );
-	float2 uv = float2( dot( p, windDir ) / 70000.0, dot( p, windPerp ) / 35000.0 );
+	float2 uv = float2( dot( p, windDir ) / 65000.0, dot( p, windPerp ) / 28000.0 );
 
-	float n = tex2Dlod( sWeatherMap, float4( uv, 0, 0 ) ).b * 0.65 + tex2Dlod( sWeatherMap, float4( uv * 3.1 + 0.37, 0, 0 ) ).b * 0.35;
+	float warp = tex2Dlod( sWeatherMap, float4( uv * 0.75 + 0.13, 0, 0 ) ).b;
+	float2 uvWarped = uv + float2( warp * 0.18, ( warp - 0.5 ) * 0.35 );
+	float n = tex2Dlod( sWeatherMap, float4( uvWarped, 0, 0 ) ).b * 0.65
+	        + tex2Dlod( sWeatherMap, float4( uvWarped * float2( 1.9, 4.3 ) + 0.37, 0, 0 ) ).b * 0.35;
 	float d = saturate( ( n - ( 1.0 - amount * 0.6 ) ) / 0.3 );
 	d *= saturate( rayDir.z * 5.0 ) * saturate( ( 0.97 - rayDir.z ) * 4.0 );	// thin toward the horizon and the zenith
-	return float4( 1.0, 1.0, 1.0, d * 0.4 );
+	return float4( 1.0, 1.0, 1.0, d * 0.42 );
 }
 
 float4 main( const PS_INPUT In ) : COLOR
@@ -243,7 +203,6 @@ float4 main( const PS_INPUT In ) : COLOR
 	}
 
 	float exposure = max( g_procParams0.y, 0.0 );
-	float starsIntensity = max( g_procParams0.z, 0.0 );
 	float sunDiskIntensity = max( g_procParams0.w, 0.0 );
 
 	const bool bWeather = g_wFlags.x > 0.5;
@@ -252,85 +211,57 @@ float4 main( const PS_INPUT In ) : COLOR
 	float3 sunDir = bWeather ? normalize( g_wSun.xyz ) : lightDir;
 	float3 rayDir = normalize( In.dir );
 
-	float3 ambientLow = max( 2.0 * g_light_ambient_low_half - g_light_ambient_high, 0.0.xxx );
 	float hemi = saturate( rayDir.z * 0.5 + 0.5 );
-	float3 ambientHemi = lerp( ambientLow, g_light_ambient_high, hemi );
+	float3 ambientTerm = lerp( g_skyPre0.rgb, g_skyPre1.rgb, hemi );
 
-	float groundDist = rayIntersectSphere( viewPos, rayDir, groundRadiusMM );
+	bool bHitsGround = ( rayDir.z <= -0.00793033 );
 
 	// ---- clear-sky atmosphere (lit by the global light: the sun, or the moon at night)
 	float3 lum = tex2Dlod( sSkyViewLut, float4( SkyViewUV( rayDir, lightDir ), 0, 0 ) ).rgb;
 
-	float sunAltDeg = asin( clamp( sunDir.z, -1.0, 1.0 ) ) * 57.2957795;
-
 	// ---- sun disk (at night the global light is the moon, handled below)
 	float3 sunLum = 0.0;
-	if ( !bWeather || g_wMoon.w < 0.5 )
+	if ( ( !bWeather || g_wMoon.w < 0.5 ) && !bHitsGround && g_skyPre5.w > 0.5 )
 	{
-		sunLum = sunWithBloom( rayDir, lightDir );
-		sunLum = smoothstep( 0.002, 1.0, sunLum );
-		if ( groundDist >= 0.0 )
-			sunLum = 0.0.xxx;
-		else
-			sunLum *= getSunTransmittance( viewPos, lightDir );
-		sunLum *= g_light_diffuse * sunDiskIntensity;
+		float cosSun = dot( rayDir, lightDir );
+		if ( cosSun > 0.980 )
+		{
+			sunLum = sunWithBloomCos( cosSun );
+			sunLum = smoothstep( 0.002, 1.0, sunLum );
+			sunLum *= tex2Dlod( sTransmittanceLut, float4( g_skyPre4.w, 0.002, 0, 0 ) ).rgb;
+			sunLum *= g_light_diffuse * sunDiskIntensity;
+		}
 	}
 
-	float nightVis = smooth01( remap01_clamped( -sunAltDeg, 2.0, 18.0 ) );
-	float ambientFactor = lerp( 0.012, 0.00035, nightVis );
-	lum += ambientHemi * ambientFactor;
+	lum += ambientTerm;
 
-	// HL2RPM: twilight effects are windows around their sun altitude range. They used to be
-	// "sun above X" ramps, so the red civil glow and the pink belt of Venus were added all
-	// day long (purple/pink midday sky). The timecycle's sun never sinks below -12 degrees,
-	// so "night" starts there.
-	float golden = smooth01( 1.0 - remap01_clamped( sunAltDeg, 1.0, 10.0 ) ) * smooth01( remap01_clamped( sunAltDeg, -2.0, 1.0 ) );
-	float civil = smooth01( remap01_clamped( sunAltDeg, -7.0, -2.0 ) ) * ( 1.0 - smooth01( remap01_clamped( sunAltDeg, 0.0, 4.0 ) ) );
-	float nautical = smooth01( remap01_clamped( sunAltDeg, -8.0, -3.0 ) ) * ( 1.0 - smooth01( remap01_clamped( sunAltDeg, -2.0, 1.0 ) ) );
-	float blueHourAmt = smooth01( remap01_clamped( -sunAltDeg, 2.0, 7.0 ) );
-	float night = smooth01( remap01_clamped( -sunAltDeg, 8.0, 12.0 ) );
-
+	// HL2RPM: twilight horizon/glow (weights & colors precomputed on CPU; skipped outside twilight)
+	[branch]
+	if ( g_skyPre1.w > 0.5 )
 	{
-		float horizonWide = pow( saturate( 1.0 - rayDir.z ), 2.2 );
-		float horizonTight = pow( saturate( 1.0 - rayDir.z ), 5.0 );
-		float2 rayH = normalize( float2( rayDir.x, rayDir.y ) + float2( 0.0001, 0.0 ) );
-		float2 sunH = normalize( float2( sunDir.x, sunDir.y ) + float2( 0.0001, 0.0 ) );
-		float sunSide = pow( saturate( dot( rayH, sunH ) ), 7.0 );
-		float antiSunSide = pow( saturate( dot( rayH, -sunH ) ), 7.0 );
+		float hz = saturate( 1.0 - rayDir.z );
+		float horizonWide = pow( hz, 2.2 );
+		float hz2 = hz * hz;
+		float horizonTight = hz2 * hz2 * hz;
 
-		float3 lightCol = max( g_light_diffuse, 0.0.xxx );
+		float2 rayH = normalize( rayDir.xy + float2( 0.0001, 0.0 ) );
+		float dSun = dot( rayH, float2( g_skyPre2.w, g_skyPre3.w ) );
+		float rs = saturate( dSun );
+		float rs2 = rs * rs;
+		float sunSide = rs2 * rs2 * rs2 * rs;
+		float as = saturate( -dSun );
+		float as2 = as * as;
+		float antiSunSide = as2 * as2 * as2 * as;
 
-		float sunriseBias = g_procParams1.x;
-		sunriseBias = ( sunriseBias < 0.0 ) ? step( 0.0, sunDir.y ) : saturate( sunriseBias );
-		float aerosol = max( g_procParams1.y, 0.0 );
-
-		float3 goldenTintSunset = float3( 1.00, 0.76, 0.40 );
-		float3 goldenTintSunrise = float3( 1.00, 0.88, 0.58 );
-		float3 goldenTint = lerp( goldenTintSunset, goldenTintSunrise, sunriseBias );
-		lum += golden * aerosol * ( 0.025 + 0.100 * sunSide ) * horizonWide * goldenTint * lightCol;
-
-		float3 civilTintSunset = float3( 1.00, 0.42, 0.18 );
-		float3 civilTintSunrise = float3( 1.00, 0.65, 0.40 );
-		float3 civilTint = lerp( civilTintSunset, civilTintSunrise, sunriseBias );
-		lum += civil * aerosol * ( 0.020 + 0.250 * sunSide ) * horizonTight * civilTint * lightCol;
-		lum += civil * aerosol * 0.020 * horizonWide * civilTint;
-
-		float3 venusTint = float3( 0.95, 0.52, 0.92 );
-		lum += nautical * ( 0.002 + 0.030 * antiSunSide ) * horizonTight * venusTint;
-
-		float blueHour = blueHourAmt;
-		float3 blueTint = lerp( float3( 0.60, 0.78, 1.35 ), float3( 0.52, 0.72, 1.28 ), sunriseBias );
-		lum = lerp( lum, lum * blueTint, saturate( blueHour * 0.65 ) );
-
-		// HL2's night sky is a dark teal, not black
-		lum = lerp( lum, lum * float3( 0.25, 0.34, 0.42 ), saturate( night * 0.45 ) );
+		lum += horizonWide * ( g_skyPre2.rgb + sunSide * g_skyPre3.rgb )
+		     + horizonTight * ( g_skyPre4.rgb + sunSide * g_skyPre5.rgb + antiSunSide * g_skyPre6.rgb );
 	}
+	lum *= g_skyPre7.rgb;
 
 	// ---- stars (HL2RPM: the skies of the mod have $starsintensity 0 - not computed at all then)
 	float3 stars = 0.0;
-	const float starsVis = smooth01( remap01_clamped( -sunAltDeg, 6.0, 18.0 ) );
 	[branch]
-	if ( starsIntensity * starsVis > 0.0 )
+	if ( g_skyPre0.w > 0.0 )
 	{
 		float starU = atan2( rayDir.y, rayDir.x ) * ( 1.0 / ( 2.0 * PI ) ) + 0.5;
 		float starV = asin( clamp( rayDir.z, -1.0, 1.0 ) ) * ( 1.0 / PI ) + 0.5;
@@ -365,7 +296,7 @@ float4 main( const PS_INPUT In ) : COLOR
 			starSum += bright * exp2( -dot( f, f ) / max( size * size, 1e-4 ) ) * 0.65;
 		}
 
-		stars = ( starSum * starsIntensity * starsVis * pow( starMask, 0.92 ) * 3.0 ).xxx;
+		stars = ( starSum * g_skyPre0.w * pow( starMask, 0.92 ) ).xxx;
 	}
 
 	float3 moon = 0.0;
@@ -383,14 +314,14 @@ float4 main( const PS_INPUT In ) : COLOR
 		lum = lerp( lum, max( lum, skyLum * 1.15 ), hazeK * horizon );
 
 		// ---- moon
-		if ( g_wMoon.z > -0.05 && groundDist < 0.0 )
-			moon = MoonDisk( rayDir, normalize( g_wMoon.xyz ), sunDir ) * 0.35 * smooth01( g_wMoon.w * 1.5 );
+		if ( g_wMoon.z > -0.05 && !bHitsGround )
+			moon = MoonDisk( rayDir, normalize( g_wMoon.xyz ), sunDir ) * g_skyPre8.w;
 
 		// ---- cirrus (behind the volumetric clouds)
 		float4 cirrus = Cirrus( rayDir );
 		if ( cirrus.a > 0.0 )
 		{
-			float3 cirrusCol = g_light_diffuse * 0.035 * ( 0.6 + 0.8 * getMiePhase( dot( rayDir, lightDir ) ) ) + skyLum * 1.4;
+			float3 cirrusCol = g_light_diffuse * 0.035 * ( 0.6 + 0.9 * getMiePhase( dot( rayDir, lightDir ) ) ) + skyLum * 1.35;
 			lum = lerp( lum, cirrusCol, cirrus.a );
 			stars *= 1.0 - cirrus.a;
 		}
@@ -398,7 +329,7 @@ float4 main( const PS_INPUT In ) : COLOR
 		// ---- volumetric clouds (screen space, only valid for the main view)
 		if ( g_wFlags.y > 0.5 )
 		{
-			float2 cuv = ( In.vScreenPos + 0.5 ) * g_wScreen.xy * g_wScreen.z;
+			float2 cuv = min( ( In.vScreenPos + 0.5 ) * g_wScreen.xy * g_skyCloudUVRect.xy, g_skyCloudUVRect.zw );
 			float4 clouds = tex2Dlod( sClouds, float4( cuv, 0, 0 ) );
 			if ( clouds.a >= 0.0 )
 			{

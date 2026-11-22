@@ -16,6 +16,7 @@ sampler sClouds			: register( s1 );	// resolved clouds: rgb scatter, a transmitt
 const float4 g_vecSun		: register( c0 );	// xy sun position (screen uv), z strength (0 = off), w aspect (w / h)
 const float4 g_vecColor		: register( c1 );	// rgb light color, w decay per step
 const float4 g_vecCloudUV	: register( c2 );	// x cloud RT uv scale, y clouds valid, z frame
+const float4 g_vecCloudUVRect	: register( c3 );	// xy active cloud RT uv scale, zw max sample uv clamp
 
 struct PS_INPUT
 {
@@ -36,7 +37,7 @@ float OpenSky( float2 uv )
 	float T = 1.0;
 	if ( g_vecCloudUV.y > 0.5 )
 	{
-		float a = tex2Dlod( sClouds, float4( uv * g_vecCloudUV.x, 0, 0 ) ).a;
+		float a = tex2Dlod( sClouds, float4( min( uv * g_vecCloudUVRect.xy, g_vecCloudUVRect.zw ), 0, 0 ) ).a;
 		if ( a >= 0.0 )
 			T = saturate( a );
 	}

@@ -10,6 +10,7 @@
 #pragma once
 
 class CViewSetup;
+class ITexture;
 
 void InitPostFXRTs();		// from InitDeferredRTs
 void DeferredPostFX_Shutdown();	// the client goes away: the procedural texture must not keep its regenerator
@@ -20,8 +21,11 @@ void DeferredPostFX_Reset();
 // depth of field, before the anti-aliasing (TAA evens out its noise)
 void DeferredPostFX_DrawDoF( const CViewSetup &view );
 
-// after the anti-aliasing, before the HUD
-void DeferredPostFX_Draw( const CViewSetup &view );
+// true when Draw() will run (r_hl2rpm_post + materials ready)
+bool DeferredPostFX_IsActive();
+
+// after the anti-aliasing, before the HUD (pSourceScene != NULL skips copying backbuffer)
+void DeferredPostFX_Draw( const CViewSetup &view, ITexture *pSourceScene = NULL, int nSrcW = 0, int nSrcH = 0 );
 
 // the engine's own HDR exposure / bloom (HDR maps) stay out of the way
 bool DeferredPostFX_OwnsExposure();

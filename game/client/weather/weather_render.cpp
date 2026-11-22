@@ -92,11 +92,11 @@ void InitWeatherRTs()
 
 	for ( int i = 0; i < 2; i++ )
 	{
-		g_tex_Clouds[i].Init( CreateFrameSizedRT( VarArgs( "_rt_hl2rpm_clouds%d", i ), 1,
+		g_tex_Clouds[i].Init( CreateFrameSizedRT( VarArgs( "_rt_hl2rpm_clouds%d", i ), 2,
 			IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE, cloudFlags ) );
 	}
 
-	g_tex_CloudRaw.Init( CreateFrameSizedRT( "_rt_hl2rpm_clouds_raw", 1,
+	g_tex_CloudRaw.Init( CreateFrameSizedRT( "_rt_hl2rpm_clouds_raw", 2,
 		IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE, cloudFlags | TEXTUREFLAGS_POINTSAMPLE ) );
 
 	g_tex_RainDepth.Init( materials->CreateNamedRenderTargetTextureEx2(
@@ -380,43 +380,28 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 		}
 	}
 
-	// --- crepuscular rays: where the sun (or the moon) is on screen
+	// --- crepuscular rays: where the sun (or the moon) is on screen (reuses projection above)
 	data.vecGodRays0.Init();
 	data.vecGodRays1.Init();
 	s_bGodRaysVisible = false;
-	if ( r_weather_godrays.GetBool() && r_weather_sunshafts.GetInt() > 0 )
+	if ( s_bSunScreenValid && r_weather_godrays.GetBool() && r_weather_sunshafts.GetInt() > 0 && s_vecSunScreenDir.z > -0.03f )
 	{
-		const Vector vecLightDir = s_vecSkyLightDir.AsVector3D().Normalized();
-		Vector vecForward;
-		AngleVectors( view.angles, &vecForward );
-		const float flFacing = DotProduct( vecForward, vecLightDir );
-		if ( flFacing > 0.05f && vecLightDir.z > -0.03f )
-		{
-			VMatrix matWorldToView, matViewToProj, matWorldToProj, matWorldToPixels;
-			render->GetMatricesForView( view, &matWorldToView, &matViewToProj, &matWorldToProj, &matWorldToPixels );
-			Vector4D vecClip;
-			matWorldToProj.V4Mul( Vector4D( view.origin.x + vecLightDir.x * 1000.0f, view.origin.y + vecLightDir.y * 1000.0f,
-				view.origin.z + vecLightDir.z * 1000.0f, 1.0f ), vecClip );
-			if ( vecClip.w > 0.001f )
-			{
-				const float flX = vecClip.x / vecClip.w * 0.5f + 0.5f;
-				const float flY = -vecClip.y / vecClip.w * 0.5f + 0.5f;
-				// fade out as the sun leaves the screen and near the horizon
-				const float flOff = Max( fabsf( flX - 0.5f ), fabsf( flY - 0.5f ) );
-				const float flOnScreen = clamp( ( 1.1f - flOff ) / 0.5f, 0.0f, 1.0f );
-				const float flHorizon = clamp( ( vecLightDir.z + 0.03f ) / 0.08f, 0.0f, 1.0f );
-				const float flNight = pSys->GetNightFactor();
-				// (0.15 in clear air before: with the rays coming from around the sun now - see
-				// weather_godrays_ps30 - a clear day shows them where the sun stands behind something)
-				float flStrength = ( 0.22f + p.flVolumetricDensity * 0.78f ) * flOnScreen * flHorizon * r_weather_godrays_strength.GetFloat();
-				flStrength *= Lerp( flNight, 1.0f, 0.25f );
-				// light: the direct light above the clouds, dimmed like the sky it shines through
-				Vector vecColor = vecDirect * 0.18f;
-				data.vecGodRays0.Init( flX, flY, flStrength, (float)view.width / Max( view.height, 1 ) );
-				data.vecGodRays1.Init( vecColor.x, vecColor.y, vecColor.z, 0.965f );
-				s_bGodRaysVisible = flStrength > 0.0f;
-			}
-		}
+		const float flX = s_vecSunScreen.x;
+		const float flY = s_vecSunScreen.y;
+		// fade out as the sun leaves the screen and near the horizon
+		const float flOff = Max( fabsf( flX - 0.5f ), fabsf( flY - 0.5f ) );
+		const float flOnScreen = clamp( ( 1.1f - flOff ) / 0.5f, 0.0f, 1.0f );
+		const float flHorizon = clamp( ( s_vecSunScreenDir.z + 0.03f ) / 0.08f, 0.0f, 1.0f );
+		const float flNight = pSys->GetNightFactor();
+		// (0.15 in clear air before: with the rays coming from around the sun now - see
+		// weather_godrays_ps30 - a clear day shows them where the sun stands behind something)
+		float flStrength = ( 0.22f + p.flVolumetricDensity * 0.78f ) * flOnScreen * flHorizon * r_weather_godrays_strength.GetFloat();
+		flStrength *= Lerp( flNight, 1.0f, 0.25f );
+		// light: the direct light above the clouds, dimmed like the sky it shines through
+		Vector vecColor = vecDirect * 0.18f;
+		data.vecGodRays0.Init( flX, flY, flStrength, (float)view.width / Max( view.height, 1 ) );
+		data.vecGodRays1.Init( vecColor.x, vecColor.y, vecColor.z, 0.965f );
+		s_bGodRaysVisible = flStrength > 0.0f;
 	}
 
 	// --- sky light, used for cloud ambient, fog and wet reflections
@@ -468,14 +453,22 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 	const bool bHistory = r_weather_cloud_temporal.GetBool() && g_bCloudHistoryValid && bConsecutive
 		&& g_iLastCloudDivisor == g_iCloudDivisor && bMainSized && g_bHavePrevViewProj;
 
-	static const float s_flSteps[4] = { 0.0f, 28.0f, 36.0f, 52.0f };
+	static const float s_flSteps[4] = { 0.0f, 24.0f, 32.0f, 44.0f };
 	data.vecCloudParams2.Init( r_weather_cloud_brightness.GetFloat(),
 		clamp( ( p.flCloudCoverage - 0.08f ) * 1.4f, 0.0f, 0.85f ),
 		s_flSteps[ clamp( iQuality, 0, 3 ) ],
-		bHistory ? 0.9f : 0.0f );
+		bHistory ? 0.88f : 0.0f );
 
 	data.vecScreenParams.Init( 1.0f / Max( view.width, 1 ), 1.0f / Max( view.height, 1 ),
 		1.0f / g_iCloudDivisor, (float)( gpGlobals->framecount & 1023 ) );
+
+	{
+		const int cw = Max( 1, view.width / g_iCloudDivisor );
+		const int ch = Max( 1, view.height / g_iCloudDivisor );
+		const int texW = ( g_tex_CloudRaw.IsValid() && g_tex_CloudRaw->GetActualWidth() > 0 ) ? g_tex_CloudRaw->GetActualWidth() : cw;
+		const int texH = ( g_tex_CloudRaw.IsValid() && g_tex_CloudRaw->GetActualHeight() > 0 ) ? g_tex_CloudRaw->GetActualHeight() : ch;
+		data.vecCloudUVRect.Init( (float)cw / texW, (float)ch / texH, ( cw - 0.5f ) / texW, ( ch - 0.5f ) / texH );
+	}
 
 	// last frame's main view (updated by WeatherRender_Clouds only, other views
 	// such as reflections must not overwrite it)
@@ -1348,6 +1341,7 @@ public:
 		DestroyMotesMesh();
 		if ( g_pMatMotes ) { g_pMatMotes->DecrementReferenceCount(); g_pMatMotes = NULL; }
 		if ( g_pMatClouds ) { g_pMatClouds->DecrementReferenceCount(); g_pMatClouds = NULL; }
+		if ( g_pMatCloudResolve ) { g_pMatCloudResolve->DecrementReferenceCount(); g_pMatCloudResolve = NULL; }
 		if ( g_pMatPost ) { g_pMatPost->DecrementReferenceCount(); g_pMatPost = NULL; }
 		if ( g_pMatMirror ) { g_pMatMirror->DecrementReferenceCount(); g_pMatMirror = NULL; }
 		if ( g_pMatRain ) { g_pMatRain->DecrementReferenceCount(); g_pMatRain = NULL; }

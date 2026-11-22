@@ -16,8 +16,9 @@
 sampler sRaw					: register( s0 );	// this frame's raymarch
 sampler sHistory				: register( s1 );	// last frame's resolved clouds
 
-const float4 g_vecResolve		: register( c0 );	// xy texel size of the RTs, z uv scale (1/divisor), w history weight
+const float4 g_vecResolve		: register( c0 );	// xy texel size of the RTs, z legacy, w history weight
 const float4 g_matPrevVP[4]		: register( c1 );	// rows, rotation-only previous view projection
+const float4 g_vecCloudUVRect	: register( c5 );	// xy active cloud RT uv scale, zw max sample uv clamp
 
 struct PS_INPUT
 {
@@ -28,20 +29,45 @@ struct PS_INPUT
 float4 main( const PS_INPUT In ) : COLOR
 {
 	const float2 texel = g_vecResolve.xy;
-	const float2 uvRaw = In.vTexCoord * g_vecResolve.z;
+	const float2 uvMax = g_vecCloudUVRect.zw;
+	const float2 uvRaw = min( In.vTexCoord * g_vecCloudUVRect.xy, uvMax );
 
-	float4 cur = tex2D( sRaw, uvRaw );
+	float4 cur = tex2Dlod( sRaw, float4( uvRaw, 0, 0 ) );
 	if ( cur.a < 0.0 )
-		return cur;
+	{
+		// HL2RPM: dilate valid sky/cloud values 1 texel into covered geometry borders so bilinear
+		// filtering in procsky_atmo_ps20b never blends with (0,0,0,-1) to cause black halos.
+		float4 dilSum = 0.0;
+		float dilCount = 0.0;
+		[unroll]
+		for ( int dy = -1; dy <= 1; dy++ )
+		{
+			[unroll]
+			for ( int dx = -1; dx <= 1; dx++ )
+			{
+				if ( dx == 0 && dy == 0 )
+					continue;
+				float4 ns = tex2Dlod( sRaw, float4( clamp( uvRaw + float2( dx, dy ) * texel, 0.0, uvMax ), 0, 0 ) );
+				if ( ns.a >= 0.0 )
+				{
+					dilSum += ns;
+					dilCount += 1.0;
+				}
+			}
+		}
+		if ( dilCount > 0.0 )
+			return dilSum / dilCount;
+		return float4( 0, 0, 0, -1 );
+	}
 
-	// neighbourhood of the current frame (ignoring texels covered by geometry). The frame
-	// itself is used filtered (3x3 tent): the jittered raymarch is noisy where a ray only
-	// grazes a cloud, and blending in 10 % of the raw sample every frame made the thin edges
-	// of the clouds sparkle like sand.
+	// 3x3 neighbourhood statistics (valid sky texels only, clamped inside active RT rect)
 	float4 mn = cur;
 	float4 mx = cur;
-	float4 sum = cur * 4.0;
-	float wsum = 4.0;
+	float4 m1 = cur;
+	float4 m2 = cur * cur;
+	float cnt = 1.0;
+	float4 sumTent = cur * 4.0;
+	float wTent = 4.0;
 	[unroll]
 	for ( int y = -1; y <= 1; y++ )
 	{
@@ -50,39 +76,48 @@ float4 main( const PS_INPUT In ) : COLOR
 		{
 			if ( x == 0 && y == 0 )
 				continue;
-			float4 s = tex2D( sRaw, uvRaw + float2( x, y ) * texel );
+			float4 s = tex2Dlod( sRaw, float4( clamp( uvRaw + float2( x, y ) * texel, 0.0, uvMax ), 0, 0 ) );
 			if ( s.a >= 0.0 )
 			{
 				mn = min( mn, s );
 				mx = max( mx, s );
+				m1 += s;
+				m2 += s * s;
+				cnt += 1.0;
 				const float w = ( x == 0 || y == 0 ) ? 2.0 : 1.0;
-				sum += s * w;
-				wsum += w;
+				sumTent += s * w;
+				wTent += w;
 			}
 		}
 	}
-	cur = sum / wsum;
+	float4 curFiltered = sumTent / wTent;
 
 	if ( g_vecResolve.w <= 0.0 )
-		return cur;
+		return curFiltered;
 
 	float3 rd = normalize( In.vecWorldRay );
 	float4 p = float4( rd * 1000.0, 1.0 );
 	float4 clip = float4( dot( g_matPrevVP[0], p ), dot( g_matPrevVP[1], p ), dot( g_matPrevVP[2], p ), dot( g_matPrevVP[3], p ) );
 	if ( clip.w <= 0.001 )
-		return cur;
+		return curFiltered;
 
 	float2 prevUV = ( clip.xy / clip.w ) * float2( 0.5, -0.5 ) + 0.5;
 	if ( any( prevUV < 0.0 ) || any( prevUV > 1.0 ) )
-		return cur;
+		return curFiltered;
 
-	float4 hist = tex2D( sHistory, prevUV * g_vecResolve.z );
+	float4 hist = tex2Dlod( sHistory, float4( min( prevUV * g_vecCloudUVRect.xy, uvMax ), 0, 0 ) );
 	if ( hist.a < 0.0 )
-		return cur;
+		return curFiltered;
 
-	// a little slack around the box keeps the accumulation effective on the jitter noise
-	float4 slack = ( mx - mn ) * 0.15;
-	hist = clamp( hist, mn - slack, mx + slack );
+	// Variance-clipped AABB keeps edges crisp while suppressing IGN shimmer
+	m1 /= cnt;
+	float4 sigma = sqrt( max( m2 / cnt - m1 * m1, 0.0 ) );
+	float4 slack = ( mx - mn ) * 0.12;
+	float4 cMin = max( mn - slack, m1 - 1.35 * sigma );
+	float4 cMax = min( mx + slack, m1 + 1.35 * sigma );
+	hist = clamp( hist, cMin, cMax );
 
-	return lerp( cur, hist, g_vecResolve.w );
+	// Preserve 85% of the sharp center texel when temporal history is valid
+	float4 sharpCur = lerp( cur, curFiltered, 0.15 );
+	return lerp( sharpCur, hist, g_vecResolve.w );
 }

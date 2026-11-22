@@ -49,23 +49,25 @@ float3 TraceSSR( float3 P, float3 R, float3 rayP, float2 uvP, float3 dRdu, float
 	float tPrev = 0.0;
 	float t = 3.0;
 	const int steps = (int)g_vecSSR.x;
+	const float4 P4 = float4( P, 1.0 );
+	const float3 clipP = float3( dot( g_matWorldToScreen[0], P4 ), dot( g_matWorldToScreen[1], P4 ), dot( g_matWorldToScreen[3], P4 ) );
+	const float3 clipR = float3( dot( g_matWorldToScreen[0].xyz, R ), dot( g_matWorldToScreen[1].xyz, R ), dot( g_matWorldToScreen[3].xyz, R ) );
 	[loop]
 	for ( int i = 0; i < 24; i++ )
 	{
 		if ( i >= steps )
 			break;
-		const float4 q = float4( P + R * t, 1.0 );
-		const float w = dot( g_matWorldToScreen[3], q );
-		if ( w < 1.0 )
+		const float3 clip = clipP + clipR * t;
+		if ( clip.z < 1.0 )
 			break;
-		const float2 uv = float2( dot( g_matWorldToScreen[0], q ), dot( g_matWorldToScreen[1], q ) ) / w;
+		const float2 uv = clip.xy / clip.z;
 		if ( any( uv < 0.0 ) || any( uv > 1.0 ) )
 			break;
 		const float d = tex2Dlod( sDepth, float4( uv, 0, 0 ) ).x;
 		if ( d > 0.1 )
 		{
 			const float3 rayQ = rayP + dRdu * ( uv.x - uvP.x ) + dRdv * ( uv.y - uvP.y );
-			const float behind = length( q.xyz - g_vecViewOrigin ) - d * length( rayQ );
+			const float behind = length( P + R * t - g_vecViewOrigin ) - d * length( rayQ );
 			// (behind the visible surface by less than the last step: the ray went through it here,
 			// not behind a thing far in front of it - the steps grow, so must the tolerance)
 			if ( behind > 0.0 && behind < ( 6.0 + ( t - tPrev ) * 1.5 ) * g_vecSSR.w )
@@ -77,12 +79,11 @@ float3 TraceSSR( float3 P, float3 R, float3 rayP, float2 uvP, float3 dRdu, float
 				for ( int k = 0; k < 4; k++ )
 				{
 					const float m = ( a + b ) * 0.5;
-					const float4 qm = float4( P + R * m, 1.0 );
-					const float wm = dot( g_matWorldToScreen[3], qm );
-					const float2 uvm = float2( dot( g_matWorldToScreen[0], qm ), dot( g_matWorldToScreen[1], qm ) ) / max( wm, 1.0 );
+					const float3 cm = clipP + clipR * m;
+					const float2 uvm = cm.xy / max( cm.z, 1.0 );
 					const float dm = tex2Dlod( sDepth, float4( uvm, 0, 0 ) ).x;
 					const float3 rayM = rayP + dRdu * ( uvm.x - uvP.x ) + dRdv * ( uvm.y - uvP.y );
-					const float bm = length( qm.xyz - g_vecViewOrigin ) - dm * length( rayM );
+					const float bm = length( P + R * m - g_vecViewOrigin ) - dm * length( rayM );
 					if ( bm > 0.0 )
 					{
 						b = m;

@@ -38,7 +38,6 @@ BEGIN_VS_SHADER( WEATHER_CLOUDS, "" )
 			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
 			pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
 			pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
-			pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
 
 			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION, 1, NULL, 0 );
 
@@ -66,7 +65,6 @@ BEGIN_VS_SHADER( WEATHER_CLOUDS, "" )
 			BindTexture( SHADER_SAMPLER0, GetDeferredExt()->GetTexture_Depth() );
 			BindTexture( SHADER_SAMPLER1, GetDeferredExt()->GetTexture_CloudNoise() );
 			BindTexture( SHADER_SAMPLER2, GetDeferredExt()->GetTexture_WeatherMap() );
-			BindTexture( SHADER_SAMPLER3, GetDeferredExt()->GetTexture_CloudHistory() );
 
 			CommitBaseDeferredConstants_Frustum( pShaderAPI, VERTEX_SHADER_SHADER_SPECIFIC_CONST_0 );
 

@@ -144,6 +144,7 @@ struct weatherData_t
 		vecSkyLightDiff.Init();
 		vecGodRays0.Init();
 		vecGodRays1.Init();
+		vecCloudUVRect.Init( 0.5f, 0.5f, 0.5f, 0.5f );
 	}
 
 	bool bEnabled;
@@ -176,6 +177,7 @@ struct weatherData_t
 	Vector4D vecSkyLightDiff;	// rgb its diffuse color (global light without the flash)
 	Vector4D vecGodRays0;		// xy sun position (screen uv), z strength (0 = off), w aspect
 	Vector4D vecGodRays1;		// rgb light color, w decay per step
+	Vector4D vecCloudUVRect;	// xy active cloud RT uv scale (w/texW, h/texH), zw max sample uv ((w-0.5)/texW, (h-0.5)/texH)
 };
 
 // HL2RPM: screen-space ambient occlusion + sky visibility of the ambient light
@@ -366,6 +368,7 @@ public:
 	// composite of such a view reprojects into the main view's light buffer
 	virtual void CommitMainViewToScreenTex( const VMatrix &matWorldToScreenTex ) = 0;
 	virtual void CommitReflectionView( const bool &bReflection ) = 0;
+	virtual void CommitMainViewSkySkip( const bool &bSkip ) = 0;
 
 	// HL2RPM: the sun shadow atlas' caster depth as a readable R32F texture (PCSS blocker search)
 	virtual void CommitTexture_CascadedDepthRaw( const int &index, ITexture *pTexDepthRaw ) = 0;
@@ -381,7 +384,7 @@ public:
 	virtual void CommitTexture_LightReach( ITexture *pReach ) = 0;
 };
 
-#define DEFERRED_EXTENSION_VERSION "DeferredExtensionVersion015"
+#define DEFERRED_EXTENSION_VERSION "DeferredExtensionVersion016"
 
 #ifdef STDSHADER_DX9_DLL_EXPORT
 
@@ -445,8 +448,10 @@ public:
 
 	virtual void CommitMainViewToScreenTex( const VMatrix &matWorldToScreenTex );
 	virtual void CommitReflectionView( const bool &bReflection );
+	virtual void CommitMainViewSkySkip( const bool &bSkip );
 	inline float *GetMainViewToScreenTexBase() { return m_matMainViewToScreenTex.Base(); }
 	inline bool IsReflectionView() const { return m_bReflectionView; }
+	inline bool IsMainViewSkySkip() const { return m_bMainViewSkySkip; }
 
 	virtual void CommitTexture_CascadedDepthRaw( const int &index, ITexture *pTexDepthRaw );
 
@@ -526,6 +531,7 @@ private:
 	VMatrix m_matTFrustumD;
 	VMatrix m_matMainViewToScreenTex;
 	bool m_bReflectionView;
+	bool m_bMainViewSkySkip;
 #if DEFCFG_BILATERAL_DEPTH_TEST
 	VMatrix m_matWorldCameraDepthTex;
 #endif

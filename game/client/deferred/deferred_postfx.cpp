@@ -24,6 +24,7 @@
 #include "cbase.h"
 #include "deferred/deferred_shared_common.h"
 #include "deferred/deferred_postfx.h"
+#include "deferred/deferred_rt.h"
 
 #include "materialsystem/itexture.h"
 #include "materialsystem/imaterial.h"
@@ -455,7 +456,9 @@ void DeferredPostFX_DrawDoF( const CViewSetup &view )
 	if ( flFactor <= 0.001f && !bDebug )
 		return;
 
-	ITexture *pFrame = materials->FindTexture( "_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET );
+	ITexture *pFrame = GetDefRT_SceneCopy();
+	if ( !pFrame || pFrame->IsError() )
+		pFrame = materials->FindTexture( "_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET );
 	if ( !pFrame || pFrame->IsError() )
 		return;
 
@@ -514,20 +517,28 @@ void DeferredPostFX_DrawDoF( const CViewSetup &view )
 		vx, vy, vx + vw - 1, vy + vh - 1, fbw, fbh );
 }
 
+bool DeferredPostFX_IsActive()
+{
+	return IsPostFXActive() && EnsureMaterials();
+}
+
 //-----------------------------------------------------------------------------
 // Frame
 //-----------------------------------------------------------------------------
-void DeferredPostFX_Draw( const CViewSetup &view )
+void DeferredPostFX_Draw( const CViewSetup &view, ITexture *pSourceScene, int nSrcW, int nSrcH )
 {
 	if ( !IsPostFXActive() || !EnsureMaterials() )
 		return;
 
-	ITexture *pFrame = materials->FindTexture( "_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET );
+	const bool bUseSource = ( pSourceScene != NULL && !pSourceScene->IsError() && nSrcW >= 2 && nSrcH >= 2 );
+	ITexture *pFrame = bUseSource ? pSourceScene : materials->FindTexture( "_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET );
 	if ( !pFrame || pFrame->IsError() )
 		return;
 
 	const int vx = view.x, vy = view.y;
 	const int vw = Max( 2, view.width ), vh = Max( 2, view.height );
+	const int sx = bUseSource ? 0 : vx, sy = bUseSource ? 0 : vy;
+	const int sw = bUseSource ? nSrcW : vw, sh = bUseSource ? nSrcH : vh;
 	const int fbw = pFrame->GetActualWidth(), fbh = pFrame->GetActualHeight();
 	const int aw = g_tex_BloomA->GetActualWidth(), ah = g_tex_BloomA->GetActualHeight();
 
@@ -650,13 +661,13 @@ void DeferredPostFX_Draw( const CViewSetup &view )
 		}
 	}
 
-	data.vecLumBlocks.Init( ( (float)vw / LUM_BLOCKS_X ) / fbw, ( (float)vh / LUM_BLOCKS_Y ) / fbh, LUM_BLOCKS_X, LUM_BLOCKS_Y );
-	data.vecFrameTexel.Init( 1.0f / fbw, 1.0f / fbh, (float)fbw, (float)fbh );
-	const float flBx = (float)lw[1] / vw / aw, flBy = (float)lh[1] / vh / ah;
-	data.vecFrameToBloom.Init( fbw * flBx, fbh * flBy, -vx * flBx, -vy * flBy );
+	data.vecLumBlocks.Init( ( (float)sw / LUM_BLOCKS_X ) / fbw, ( (float)sh / LUM_BLOCKS_Y ) / fbh, LUM_BLOCKS_X, LUM_BLOCKS_Y );
+	data.vecFrameTexel.Init( 1.0f / fbw, 1.0f / fbh, (float)vw, (float)vh );
+	const float flBx = (float)lw[1] / sw / aw, flBy = (float)lh[1] / sh / ah;
+	data.vecFrameToBloom.Init( fbw * flBx, fbh * flBy, -sx * flBx, -sy * flBy );
 
 	data.vecLevelTexel[0].Init( 1.0f / fbw, 1.0f / fbh, 1.0f, 1.0f );
-	data.vecLevelRect[0].Init( ( vx + 0.5f ) / fbw, ( vy + 0.5f ) / fbh, ( vx + vw - 0.5f ) / fbw, ( vy + vh - 0.5f ) / fbh );
+	data.vecLevelRect[0].Init( ( sx + 0.5f ) / fbw, ( sy + 0.5f ) / fbh, ( sx + sw - 0.5f ) / fbw, ( sy + sh - 0.5f ) / fbh );
 	for ( int k = 1; k < POSTFX_LEVELS; k++ )
 	{
 		data.vecLevelTexel[k].Init( 1.0f / aw, 1.0f / ah, 1.0f, 1.0f );
@@ -667,13 +678,17 @@ void DeferredPostFX_Draw( const CViewSetup &view )
 
 	CMatRenderContextPtr pRenderContext( materials );
 
-	// the frame as it is now (after FXAA)
-	Rect_t rect;
-	rect.x = vx;
-	rect.y = vy;
-	rect.width = vw;
-	rect.height = vh;
-	pRenderContext->CopyRenderTargetToTextureEx( pFrame, 0, &rect, &rect );
+	ITexture *pSavedCopy = pRenderContext->GetFrameBufferCopyTexture( 0 );
+	if ( !bUseSource )
+	{
+		// the frame as it is now (after FXAA)
+		Rect_t rect;
+		rect.x = vx;
+		rect.y = vy;
+		rect.width = vw;
+		rect.height = vh;
+		pRenderContext->CopyRenderTargetToTextureEx( pFrame, 0, &rect, &rect );
+	}
 	// (the shader binds "the frame buffer copy": make it this copy - whatever refracted last
 	// (a weapon, a particle) may have left the slot pointing at _rt_PowerOfTwoFB)
 	pRenderContext->SetFrameBufferCopyTexture( pFrame, 0 );
@@ -681,7 +696,7 @@ void DeferredPostFX_Draw( const CViewSetup &view )
 	// metering: blocks -> average -> adapted (into a temporary, then copied back)
 	pRenderContext->PushRenderTargetAndViewport( g_tex_LumBlocks, 0, 0, LUM_BLOCKS_X, LUM_BLOCKS_Y );
 	pRenderContext->DrawScreenSpaceRectangle( g_pMatLum[0], 0, 0, LUM_BLOCKS_X, LUM_BLOCKS_Y,
-		vx, vy, vx + vw - 1, vy + vh - 1, fbw, fbh );
+		sx, sy, sx + sw - 1, sy + sh - 1, fbw, fbh );
 	pRenderContext->PopRenderTargetAndViewport();
 
 	pRenderContext->PushRenderTargetAndViewport( g_tex_LumAvg, 0, 0, 1, 1 );
@@ -698,7 +713,7 @@ void DeferredPostFX_Draw( const CViewSetup &view )
 	{
 		pRenderContext->PushRenderTargetAndViewport( g_tex_BloomA, lx[1], ly[1], lw[1], lh[1] );
 		pRenderContext->DrawScreenSpaceRectangle( g_pMatBloomPre, 0, 0, lw[1], lh[1],
-			vx, vy, vx + vw - 1, vy + vh - 1, fbw, fbh );
+			sx, sy, sx + sw - 1, sy + sh - 1, fbw, fbh );
 		pRenderContext->PopRenderTargetAndViewport();
 
 		for ( int k = 2; k < POSTFX_LEVELS; k++ )
@@ -720,7 +735,10 @@ void DeferredPostFX_Draw( const CViewSetup &view )
 
 	// the combine, over the frame
 	pRenderContext->DrawScreenSpaceRectangle( g_pMatFinal, vx, vy, vw, vh,
-		vx, vy, vx + vw - 1, vy + vh - 1, fbw, fbh );
+		sx, sy, sx + sw - 1, sy + sh - 1, fbw, fbh );
+
+	if ( bUseSource )
+		pRenderContext->SetFrameBufferCopyTexture( pSavedCopy, 0 );
 
 	if ( r_hl2rpm_exposure_debug.GetBool() )
 		PrintAdaptation( data );

@@ -62,23 +62,25 @@ float3 TraceScene( float3 P, float3 R, float3 rayP, float2 uvP, float3 dRdu, flo
 	float tPrev = 0.0;
 	float t = 3.0;
 	const int steps = (int)g_vecSSR.x;
+	const float4 P4 = float4( P, 1.0 );
+	const float3 clipP = float3( dot( g_matWorldToScreen[0], P4 ), dot( g_matWorldToScreen[1], P4 ), dot( g_matWorldToScreen[3], P4 ) );
+	const float3 clipR = float3( dot( g_matWorldToScreen[0].xyz, R ), dot( g_matWorldToScreen[1].xyz, R ), dot( g_matWorldToScreen[3].xyz, R ) );
 	[loop]
 	for ( int i = 0; i < 20; i++ )
 	{
 		if ( i >= steps )
 			break;
-		const float4 q = float4( P + R * t, 1.0 );
-		const float w = dot( g_matWorldToScreen[3], q );
-		if ( w < 1.0 )
+		const float3 clip = clipP + clipR * t;
+		if ( clip.z < 1.0 )
 			break;
-		const float2 uv = float2( dot( g_matWorldToScreen[0], q ), dot( g_matWorldToScreen[1], q ) ) / w;
+		const float2 uv = clip.xy / clip.z;
 		if ( any( uv < 0.0 ) || any( uv > 1.0 ) )
 			break;
 		const float d = tex2Dlod( sDepth, float4( uv, 0, 0 ) ).x;
 		if ( d > 0.1 )
 		{
 			const float3 rayQ = rayP + dRdu * ( uv.x - uvP.x ) + dRdv * ( uv.y - uvP.y );
-			const float behind = length( q.xyz - g_vecViewOrigin ) - d * length( rayQ );
+			const float behind = length( P + R * t - g_vecViewOrigin ) - d * length( rayQ );
 			if ( behind > 0.0 && behind < ( 6.0 + ( t - tPrev ) * 1.5 ) * g_vecSSR.w )
 			{
 				float a = tPrev, b = t;
@@ -87,12 +89,11 @@ float3 TraceScene( float3 P, float3 R, float3 rayP, float2 uvP, float3 dRdu, flo
 				for ( int k = 0; k < 4; k++ )
 				{
 					const float m = ( a + b ) * 0.5;
-					const float4 qm = float4( P + R * m, 1.0 );
-					const float wm = dot( g_matWorldToScreen[3], qm );
-					const float2 uvm = float2( dot( g_matWorldToScreen[0], qm ), dot( g_matWorldToScreen[1], qm ) ) / max( wm, 1.0 );
+					const float3 cm = clipP + clipR * m;
+					const float2 uvm = cm.xy / max( cm.z, 1.0 );
 					const float dm = tex2Dlod( sDepth, float4( uvm, 0, 0 ) ).x;
 					const float3 rayM = rayP + dRdu * ( uvm.x - uvP.x ) + dRdv * ( uvm.y - uvP.y );
-					if ( length( qm.xyz - g_vecViewOrigin ) - dm * length( rayM ) > 0.0 )
+					if ( length( P + R * m - g_vecViewOrigin ) - dm * length( rayM ) > 0.0 )
 					{
 						b = m;
 						uvHit = uvm;
@@ -120,9 +121,11 @@ float4 main( const PS_INPUT In ) : COLOR
 	const float4 vecNormalCtrl = tex2D( sNormals, In.vTexCoord );
 	const float flRough = UnpackRoughness( vecNormalCtrl.a );
 	const float flMirror = saturate( ( g_vecMirror.y - flRough ) * g_vecMirror.z + 1.0 );
+	// (the 3D skybox (lighting controls 1.0) and what is not smooth: skip sDepth too)
+	if ( flMirror < 0.001 || vecNormalCtrl.a > ( 254.5 / 255.0 ) )
+		return float4( 0, 0, 0, 1 );
 	const float depth = tex2D( sDepth, In.vTexCoord ).x;
-	// (the sky, the 3D skybox (lighting controls 1.0) and what is not smooth: nothing to do)
-	if ( flMirror < 0.001 || depth < 0.1 || vecNormalCtrl.a > ( 254.5 / 255.0 ) )
+	if ( depth < 0.1 )
 		return float4( 0, 0, 0, 1 );
 
 	const float3 worldPos = g_vecViewOrigin + In.vecWorldRay * depth;

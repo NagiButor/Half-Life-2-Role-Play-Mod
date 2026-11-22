@@ -293,11 +293,18 @@ PS_OUTPUT main( const PS_INPUT In )
 #endif
 
 #if ALPHATEST
-	// (the coverage exactly as the G-buffer pass tests it: the base texture, no mip bias)
+	// (the coverage exactly as the G-buffer pass tests it: the base texture, no mip bias;
+	// reuse flAlbedoSample directly when mip bias is 0 and single layer)
+#if !BASETEXTURE2 && !MULTIBLEND
+	clip( ( ( g_vecCaustics.w == 0.0f ) ? flAlbedoSample.a : SAMPLE_UV( sAlbedo ).a ) - g_flAlphaRef );
+#else
 	clip( SAMPLE_UV( sAlbedo ).a - g_flAlphaRef );
+#endif
 #endif
 
 	// HL2RPM: the detail texture ($detail "mod2x", see c37), on the coordinate the relief shifted
+	[branch]
+	if ( g_vecDetail.y > 0.0f )
 	{
 		const float3 vecDetail = tex2Dgrad( sDetail, vecUV * g_vecDetail.x, vecAlbedoDx * g_vecDetail.x, vecAlbedoDy * g_vecDetail.x ).rgb;
 		flAlbedoSample.rgb *= lerp( 1.0f, vecDetail * 2.0f, g_vecDetail.y );
@@ -552,6 +559,8 @@ PS_OUTPUT main( const PS_INPUT In )
 	// Two lobes: a wide one (the crown lit from behind) and a narrow, bright one right around the
 	// sun - the leaves in front of it glow. (The sun light that reaches a leaf in the shade of the
 	// rest of its crown - it comes through - the sun pass gives: lightingpass_global_ps30 c80.)
+	[branch]
+	if ( g_vecTransmit.x > 0.0f )
 	{
 		const float3 vecRay = normalize( In.vWorldPos - g_vecOrigin );
 		const float flCos = saturate( dot( vecRay, g_vecTransmitSun.xyz ) );

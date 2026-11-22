@@ -78,28 +78,30 @@ float CloudShadow( float3 worldPos, float3 lightDir )
 	float tMid = ( midH - pm.z ) / max( lightDir.z, 0.1 );
 	float2 cxy = pm.xy + lightDir.xy * tMid + g_vecWind.xy;
 
-	float2 wm = tex2Dlod( sWeatherMap, float4( cxy / 40000.0, 0, 0 ) ).rg;
+	float4 wm = tex2Dlod( sWeatherMap, float4( cxy / 40000.0, 0, 0 ) );
 	float coverage = saturate( g_vecCloud0.x + ( wm.x - 0.5 ) * 0.5 * ( 1.0 - g_vecCloud0.x * 0.6 ) * saturate( ( 1.0 - g_vecCloud0.x ) * 6.0 ) );
 	float type = saturate( g_vecCloud0.z + ( wm.y - 0.5 ) * 0.7 );
 
-	// one slice of the shape noise where the height profile peaks (same parameterization as the clouds)
-	float hs = lerp( 0.11, 0.3, type );
-	float3 p = float3( cxy, hs * g_vecCloud1.y * 1.6 + g_vecCloud1.w * 3.0 ) / 20000.0;
+	// one slice of the convex Perlin-Worley shape noise matching weather_clouds_ps30
+	float hs = lerp( 0.18, 0.35, type );
+	float3 p = float3( cxy, hs * g_vecCloud1.y * 1.6 + g_vecCloud1.w * 3.0 ) * ( 1.0 / 16000.0 );
+	p.xy += ( wm.ba - 0.5 ) * 0.55;
 	p = frac( p );
 	float zs = p.z * 64.0 - 0.5;
 	float z0 = floor( zs );
 	z0 = ( z0 < 0.0 ) ? 63.0 : z0;
 	float2 inTile = ( 1.0 + p.xy * 62.0 ) / 512.0;
 	float2 t0 = float2( fmod( z0, 8.0 ), floor( z0 / 8.0 ) ) * 0.125;
-	float4 n = tex2Dlod( sCloudNoise, float4( t0 + inTile, 0, 0 ) );
-	float fbm = n.g * 0.625 + n.b * 0.25 + n.a * 0.125;
-	float shape = saturate( ( ( n.r - ( fbm - 1.0 ) ) / ( 2.0 - fbm ) - 0.66 ) * ( 1.0 / 0.27 ) );
+	float shape = tex2Dlod( sCloudNoise, float4( t0 + inTile, 0, 0 ) ).r;
 
 	// same coverage cut as weather_clouds_ps30 (CoverageThreshold)
-	float cu = ( ( -1.0825 * coverage + 1.6586 ) * coverage - 1.1291 ) * coverage + 0.7521;
-	float st = ( ( -1.2365 * coverage + 1.6690 ) * coverage - 1.1536 ) * coverage + 0.7396;
-	float threshold = lerp( st, cu, type ) * saturate( ( 1.0 - coverage ) * 20.0 );
-	float density = smoothstep( 0.0, 1.0, saturate( ( shape - threshold ) / max( ( 1.0 - threshold ) * 0.6, 0.05 ) ) ) * ( 0.35 + 0.65 * coverage );
+	float cu = ( ( -1.2207 * coverage + 1.6196 ) * coverage - 1.4986 ) * coverage + 1.0431;
+	float st = ( ( -0.6585 * coverage + 1.3479 ) * coverage - 1.7223 ) * coverage + 0.9918;
+	float threshold = max( lerp( st, cu, type ), 0.0 ) * saturate( ( 1.0 - coverage ) * 20.0 );
+	float edgeWidth = lerp( 0.55, 0.42, type );
+	float density = smoothstep( 0.0, 1.0, saturate( ( shape - threshold ) / max( ( 1.0 - threshold ) * edgeWidth, 0.05 ) ) ) * ( 0.55 + 0.45 * coverage );
+	float deck = saturate( ( coverage - 0.92 ) / 0.08 );
+	density = max( density, deck * ( 0.035 + 0.22 * shape * ( 0.55 + 0.90 * wm.r ) ) );
 	float opticalDepth = density * g_vecCloud0.y * 6.0;
 	return 1.0 - g_vecWeatherFlags.x * ( 1.0 - exp( -opticalDepth ) );
 }
@@ -484,9 +486,6 @@ PS_OUTPUT main( const PS_INPUT In )
 		// fills the temporary registers of ps_3_0 - with the ambient light, the AO and the GI
 		// computed ahead of it and kept through it nothing could be added to this shader at all.)
 
-		if ( g_vecWeatherFlags.x > 0.0 && lightAmount > 0.0 && flDepth < DEPTH_RECONSTRUCTION_LIMIT )
-			lightAmount *= CloudShadow( g_vecViewOrigin + In.vecWorldRay * flDepth, g_vecLightVec_Forward );
-
 	#if HAS_SHADOW
 		// (surfaces turned away from the sun need no shadow lookup; the cascade view needs it)
 		if ( !bSkybox && flDepth < DEPTH_RECONSTRUCTION_LIMIT && ( lightAmount > 0.0f || g_flCSMColorize > 0.5f ) )
@@ -623,6 +622,8 @@ PS_OUTPUT main( const PS_INPUT In )
 					const float distQ = length( q.xyz - g_vecViewOrigin );
 					const float behind = distQ - distScene;
 					occ = max( occ, saturate( ( behind - 0.5f ) * 0.5f ) * saturate( ( g_vecContact.y - behind ) / 4.0f ) );
+					if ( occ >= 0.99f )
+						break;
 				}
 				lightAmount *= 1.0f - occ * contactStrength;
 
@@ -648,6 +649,11 @@ PS_OUTPUT main( const PS_INPUT In )
 	#endif
 		}
 	#endif
+
+		// Deferred after CSM + contact shadows so already-shadowed pixels skip cloud evaluation
+		[branch]
+		if ( g_vecWeatherFlags.x > 0.0 && lightAmount > 0.001f && flDepth < DEPTH_RECONSTRUCTION_LIMIT )
+			lightAmount *= CloudShadow( g_vecViewOrigin + In.vecWorldRay * flDepth, g_vecLightVec_Forward );
 	}
 
 	// ---- the sky light and the specular highlight ----
@@ -714,8 +720,13 @@ PS_OUTPUT main( const PS_INPUT In )
 	const float flRoughness = lerp( phong_exp, min( phong_exp, g_vecPBRWet.y ), flWet );
 
 	const float3 vecV = normalize( -In.vecWorldRay );
-	float flSpecular = SpecularGGX( flNormal, vecV, g_vecLightVec_Forward.xyz, max( flRoughness, g_vecPBR.w ) )
-		* dot( g_light_diffuse.rgb, float3( 0.3f, 0.59f, 0.11f ) ) * g_vecPBR.x;
+	float flSpecular = 0.0f;
+	[branch]
+	if ( lightAmount > 0.001f )
+	{
+		flSpecular = SpecularGGX( flNormal, vecV, g_vecLightVec_Forward.xyz, max( flRoughness, g_vecPBR.w ) )
+			* dot( g_light_diffuse.rgb, float3( 0.3f, 0.59f, 0.11f ) ) * g_vecPBR.x;
+	}
 	const float flMirrorUp = reflect( -vecV, flNormal ).z;
 	const float flEnv = dot( ambient, float3( 0.3f, 0.59f, 0.11f ) )
 		* lerp( g_vecPBR.y, g_vecPBR.z, saturate( flMirrorUp * 0.5f + 0.5f ) )

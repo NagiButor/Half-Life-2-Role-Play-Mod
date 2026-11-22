@@ -304,14 +304,12 @@ PS_OUTPUT main( const PS_INPUT In )
 			g_flMixedData[ iDataIndex + 7 ],
 			g_flMixedData[ iDataIndex + 8 ] );
 
-		float3 normalizedLightVec = (-vecDelta) / dist;
+		float3 normalizedLightVec = (-vecDelta) / max( dist, 1e-4f );
 		float viewFwdDot = abs( dot( normalizedLightVec, flNormal ) );
 		float4 spotBias = g_flMixedData[ iDataIndex + 9 ];
 
-		// Normal Offset Bias for Spot Light
-		float cosAngle = abs( dot( normalizedLightVec, flNormal ) );
-		float sinAngle = sqrt( saturate( 1.0f - cosAngle * cosAngle ) );
-		// Multiply by 2.0 texels approx
+		// Normal Offset Bias for Spot Light (Multiply by 2.0 texels approx)
+		float sinAngle = sqrt( saturate( 1.0f - viewFwdDot * viewFwdDot ) );
 		float3 vecDeltaOffset = vecDelta + flNormal * ( sinAngle * 2.0f );
 
 		float spotViewZ;
@@ -360,13 +358,12 @@ PS_OUTPUT main( const PS_INPUT In )
 			g_flMixedData[ iDataIndex + 7 ],
 			g_flMixedData[ iDataIndex + 8 ] );
 
-		float3 normalizedLightVec = (-vecDelta) / dist;
+		float3 normalizedLightVec = (-vecDelta) / max( dist, 1e-4f );
 		float viewFwdDot = abs( dot( normalizedLightVec, flNormal ) );
 		float4 spotBias = g_flMixedData[ iDataIndex + 9 ];
 
 		// Normal Offset Bias for Spot Light
-		float cosAngle = abs( dot( normalizedLightVec, flNormal ) );
-		float sinAngle = sqrt( saturate( 1.0f - cosAngle * cosAngle ) );
+		float sinAngle = sqrt( saturate( 1.0f - viewFwdDot * viewFwdDot ) );
 		float3 vecDeltaOffset = vecDelta + flNormal * ( sinAngle * 2.0f );
 
 		float spotViewZ;

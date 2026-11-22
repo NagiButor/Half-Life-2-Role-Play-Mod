@@ -14,6 +14,7 @@ CDeferredExtension::CDeferredExtension()
 	m_matTFrustumD.Identity();
 	m_matMainViewToScreenTex.Identity();
 	m_bReflectionView = false;
+	m_bMainViewSkySkip = false;
 	Q_memset( m_dataOrtho, 0, sizeof( m_dataOrtho ) );
 	Q_memset( m_dataProj, 0, sizeof( m_dataProj ) );
 	Q_memset( &m_dataGeneral, 0, sizeof( m_dataGeneral ) );
@@ -276,6 +277,11 @@ void CDeferredExtension::CommitMainViewToScreenTex( const VMatrix &matWorldToScr
 void CDeferredExtension::CommitReflectionView( const bool &bReflection )
 {
 	m_bReflectionView = bReflection;
+}
+
+void CDeferredExtension::CommitMainViewSkySkip( const bool &bSkip )
+{
+	m_bMainViewSkySkip = bSkip;
 }
 
 void CDeferredExtension::CommitTexture_SSAO( ITexture *pAO, ITexture *pBlur )

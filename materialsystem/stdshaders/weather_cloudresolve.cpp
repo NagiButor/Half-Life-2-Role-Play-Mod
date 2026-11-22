@@ -79,6 +79,7 @@ BEGIN_VS_SHADER( WEATHER_CLOUDRESOLVE, "" )
 			float flResolve[4] = { flTexelX, flTexelY, w.vecScreenParams.z, w.vecCloudParams2.w };
 			pShaderAPI->SetPixelShaderConstant( 0, flResolve, 1, true );
 			pShaderAPI->SetPixelShaderConstant( 1, w.matPrevViewProj.Base(), 4, true );
+			pShaderAPI->SetPixelShaderConstant( 5, w.vecCloudUVRect.Base(), 1, true );
 		}
 
 		Draw();

@@ -30,6 +30,26 @@ struct PS_INPUT
 
 #define DOF_TAPS 16
 
+static const float2 g_dofDisk[DOF_TAPS] =
+{
+	float2( +0.176777f, +0.000000f ),
+	float2( -0.225772f, +0.206826f ),
+	float2( +0.034558f, -0.393771f ),
+	float2( +0.284571f, +0.371173f ),
+	float2( -0.522223f, -0.092374f ),
+	float2( +0.494695f, -0.314685f ),
+	float2( -0.165466f, +0.615525f ),
+	float2( -0.315561f, -0.607594f ),
+	float2( +0.684642f, +0.250030f ),
+	float2( -0.712256f, +0.294009f ),
+	float2( +0.343355f, -0.733729f ),
+	float2( +0.253730f, +0.808932f ),
+	float2( -0.764746f, -0.443186f ),
+	float2( +0.897134f, -0.197232f ),
+	float2( -0.547507f, +0.778772f ),
+	float2( -0.126487f, -0.976090f ),
+};
+
 float CircleOfConfusion( float depth )
 {
 	// nothing drawn (the sky): infinitely far
@@ -50,19 +70,24 @@ float4 main( const PS_INPUT In ) : COLOR
 	if ( coc < 0.6 )
 		return float4( center, 1.0 );
 
-	// interleaved gradient noise: the turn of the disk
+	// interleaved gradient noise: the turn of the disk (1 sincos instead of 16 cos+sin)
 	const float noise = frac( 52.9829189 * frac( dot( In.vScreenPos + g_vecDoF2.x * 5.588238, float2( 0.06711056, 0.00583715 ) ) ) );
-	const float angle0 = noise * 6.28318531;
+	float s0, c0;
+	sincos( noise * 6.28318531, s0, c0 );
+	const float2 rotX = float2( c0, -s0 );
+	const float2 rotY = float2( s0, c0 );
+	const float2 cocTexel = coc * g_vecTexel.xy;
 
 	float3 sum = center;
 	float wsum = 1.0;
 	[unroll]
 	for ( int i = 0; i < DOF_TAPS; i++ )
 	{
-		// Vogel disk
-		const float r = sqrt( ( i + 0.5 ) / DOF_TAPS ) * coc;
-		const float a = i * 2.39996323 + angle0;
-		const float2 tuv = uv + float2( cos( a ), sin( a ) ) * r * g_vecTexel.xy;
+		// Vogel disk (precomputed radial & angular layout, rotated by IGN)
+		const float rNorm = sqrt( ( i + 0.5 ) / DOF_TAPS );
+		const float r = rNorm * coc;
+		const float2 p = g_dofDisk[i];
+		const float2 tuv = uv + float2( dot( p, rotX ), dot( p, rotY ) ) * cocTexel;
 
 		const float3 s = tex2Dlod( sFrame, float4( tuv, 0, 0 ) ).rgb;
 		const float tcoc = CircleOfConfusion( tex2Dlod( sDepth, float4( tuv, 0, 0 ) ).x );

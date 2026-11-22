@@ -81,6 +81,7 @@ BEGIN_VS_SHADER( WEATHER_GODRAYS, "" )
 			pShaderAPI->SetPixelShaderConstant( 1, w.vecGodRays1.Base(), 1, true );
 			float flCloud[4] = { w.vecScreenParams.z, bClouds ? 1.0f : 0.0f, w.vecScreenParams.w, 0.0f };
 			pShaderAPI->SetPixelShaderConstant( 2, flCloud, 1, true );
+			pShaderAPI->SetPixelShaderConstant( 3, w.vecCloudUVRect.Base(), 1, true );
 		}
 
 		Draw();

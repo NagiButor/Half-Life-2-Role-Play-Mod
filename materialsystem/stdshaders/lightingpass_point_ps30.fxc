@@ -244,26 +244,24 @@ PS_OUTPUT main( const PS_INPUT In )
 									-vecDeltaWorld, dist, worldRayInv,
 									litface, half_lambert, phong_exp );
 
-		float cosAngle = abs( dot( normalize( -vecDeltaWorld ), flNormal ) );
-		float sinAngle = sqrt( saturate( 1.0f - cosAngle * cosAngle ) );
-		float normalOffsetScale = 0.25f + 1.25f * sinAngle;
-		float3 vecDeltaOffset = vecDeltaWorld + flNormal * normalOffsetScale;
-		float distOffset = length( vecDeltaOffset );
-
-		float3 vecDeltaRotated = mul3x3( vecDeltaOffset, matRotation );
-		float3 vecDeltaShadow = vecDeltaOffset;
-		if ( g_flMixedData[ iDataIndex + 2 ].w < 0.0f )
-			vecDeltaShadow = vecDeltaRotated;
-
-		float normalDotLight = dot( normalize( -vecDeltaWorld ), flNormal );
+		float3 vecDeltaRotated = mul3x3( vecDeltaWorld, matRotation );
 		// HL2RPM: no light reaches the point (outside the cone or the radius, turned away): the
-		// shadow can't change the result - its filter (25 compares) is skipped
+		// shadow filter and normal-offset shadow setup are skipped
 		float flShadow = 1.0f;
 		[branch]
 		if ( localLight.y * localLight.w > 0.0f )
+		{
+			float normalDotLight = dot( -vecDeltaWorld, flNormal ) / max( dist, 1e-4f );
+			float sinAngle = sqrt( saturate( 1.0f - normalDotLight * normalDotLight ) );
+			float normalOffsetScale = 0.25f + 1.25f * sinAngle;
+			float3 vecDeltaOffset = vecDeltaWorld + flNormal * normalOffsetScale;
+			float distOffset = length( vecDeltaOffset );
+			float3 vecDeltaShadow = ( g_flMixedData[ iDataIndex + 2 ].w < 0.0f )
+				? mul3x3( vecDeltaOffset, matRotation ) : vecDeltaOffset;
 			flShadow = PerformDualParaboloidShadow( sMixedSampler[ iSamplerIndex ],
-			vecDeltaShadow, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
-			distOffset, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
+				vecDeltaShadow, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
+				distOffset, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
+		}
 		localLight.y *= flShadow;
 
 		flLight += DoLightFinalCookied( g_flMixedData[ iDataIndex + 1 ].xyz,
@@ -281,34 +279,33 @@ PS_OUTPUT main( const PS_INPUT In )
 		float3 vecDeltaWorld = worldPos - g_flMixedData[ iDataIndex ].xyz;
 		float dist = length( vecDeltaWorld );
 
-		float3x3 matRotation = float3x3( g_flMixedData[ iDataIndex + 3 ].xyz,
-			g_flMixedData[ iDataIndex + 4 ].xyz,
-			g_flMixedData[ iDataIndex + 5 ].xyz );
-
 		float4 localLight = DoPointLightBasic( iDataIndex, flNormal,
 									-vecDeltaWorld, dist, worldRayInv,
 									litface, half_lambert, phong_exp );
 
-		float cosAngle = abs( dot( normalize( -vecDeltaWorld ), flNormal ) );
-		float sinAngle = sqrt( saturate( 1.0f - cosAngle * cosAngle ) );
-		float normalOffsetScale = 0.25f + 1.25f * sinAngle;
-		float3 vecDeltaOffset = vecDeltaWorld + flNormal * normalOffsetScale;
-		float distOffset = length( vecDeltaOffset );
-
-		float3 vecDeltaRotated = mul3x3( vecDeltaOffset, matRotation );
-		float3 vecDeltaShadow = vecDeltaOffset;
-		if ( g_flMixedData[ iDataIndex + 2 ].w < 0.0f )
-			vecDeltaShadow = vecDeltaRotated;
-
-		float normalDotLight = dot( normalize( -vecDeltaWorld ), flNormal );
 		// HL2RPM: no light reaches the point (outside the cone or the radius, turned away): the
-		// shadow can't change the result - its filter (25 compares) is skipped
+		// shadow filter and rotation/offset setup are skipped
 		float flShadow = 1.0f;
 		[branch]
 		if ( localLight.y * localLight.w > 0.0f )
+		{
+			float normalDotLight = dot( -vecDeltaWorld, flNormal ) / max( dist, 1e-4f );
+			float sinAngle = sqrt( saturate( 1.0f - normalDotLight * normalDotLight ) );
+			float normalOffsetScale = 0.25f + 1.25f * sinAngle;
+			float3 vecDeltaOffset = vecDeltaWorld + flNormal * normalOffsetScale;
+			float distOffset = length( vecDeltaOffset );
+			float3 vecDeltaShadow = vecDeltaOffset;
+			if ( g_flMixedData[ iDataIndex + 2 ].w < 0.0f )
+			{
+				float3x3 matRotation = float3x3( g_flMixedData[ iDataIndex + 3 ].xyz,
+					g_flMixedData[ iDataIndex + 4 ].xyz,
+					g_flMixedData[ iDataIndex + 5 ].xyz );
+				vecDeltaShadow = mul3x3( vecDeltaOffset, matRotation );
+			}
 			flShadow = PerformDualParaboloidShadow( sMixedSampler[ iSamplerIndex ],
-			vecDeltaShadow, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
-			distOffset, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
+				vecDeltaShadow, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
+				distOffset, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
+		}
 		localLight.y *= flShadow;
 
 		flLight += DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,

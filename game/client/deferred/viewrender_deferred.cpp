@@ -123,6 +123,10 @@ void DeferredSkyLUT_ForceRebuild()
 // before a lightning flash): what the LUT shaders will actually see
 static lightData_Global_t s_skyLightState;
 static bool s_bSkyLightStateValid = false;
+static lightData_Global_t s_csmLightState;
+static bool s_bCsmLightStateValid = false;
+static bool s_bGlobalLightSmoothed = false;
+static bool s_bMainViewSkySkipActive = false;
 
 static void UpdateSkyAtmoLUT()
 {
@@ -1911,10 +1915,23 @@ void CGlassViewDeferred::Draw()
 		const bool bReflectionOn = true;
 		QUEUE_FIRE( CommitReflectionView, bReflectionOn );
 	}
+	const bool bSavedSkySkip = s_bMainViewSkySkipActive;
+	if ( bSavedSkySkip )
+	{
+		s_bMainViewSkySkipActive = false;
+		const bool bSkipOff = false;
+		QUEUE_FIRE( CommitMainViewSkySkip, bSkipOff );
+	}
 
 	EnableWorldFog();
 	DrawExecute( 0.0f, nViewID, 0.0f );
 
+	if ( bSavedSkySkip )
+	{
+		s_bMainViewSkySkipActive = true;
+		const bool bSkipOn = true;
+		QUEUE_FIRE( CommitMainViewSkySkip, bSkipOn );
+	}
 	if ( m_bReflection )
 	{
 		const bool bReflectionOff = false;
@@ -2573,32 +2590,9 @@ void COrthoShadowView::CalcShadowView()
 		origin += Vector( sinf( iFrame * 12.9898f ) , cosf( iFrame * 78.233f ), sinf( iFrame * 37.719f ) * 0.5f ) * flAmp;
 	}
 
-	const lightData_Global_t& state = GetActiveGlobalLightState();
+	const lightData_Global_t& state = s_bCsmLightStateValid ? s_csmLightState : GetActiveGlobalLightState();
 	QAngle lightAng;
 	VectorAngles( -state.vecLight.AsVector3D(), lightAng );
-
-	// Smooth the light direction to prevent shadow jitter at high time speeds
-	static QAngle s_smoothedLightAng( 0, 0, 0 );
-	static bool s_bLightAngInit = false;
-	static int s_iLightAngFrame = -1;
-	if ( !s_bLightAngInit )
-	{
-		s_smoothedLightAng = lightAng;
-		s_bLightAngInit = true;
-		s_iLightAngFrame = gpGlobals->framecount;
-	}
-	else if ( s_iLightAngFrame != gpGlobals->framecount ) // once per frame, not once per cascade
-	{
-		s_iLightAngFrame = gpGlobals->framecount;
-		float dt = gpGlobals->frametime;
-		float rate = 1.0f - expf( -dt * 15.0f );
-		for ( int i = 0; i < 3; i++ )
-		{
-			float delta = AngleNormalize( lightAng[i] - s_smoothedLightAng[i] );
-			s_smoothedLightAng[i] = AngleNormalize( s_smoothedLightAng[i] + delta * rate );
-		}
-	}
-	lightAng = s_smoothedLightAng;
 
 	Vector viewFwd, viewRight, viewUp;
 	AngleVectors( lightAng, &viewFwd, &viewRight, &viewUp );
@@ -2935,6 +2929,8 @@ void CDeferredViewRender::LevelInit()
 {
 	BaseClass::LevelInit();
 
+	s_bGlobalLightSmoothed = false;
+	s_bCsmLightStateValid = false;
 	ResetCascadeDelay();
 	DeferredShadowCache_InvalidateAll();
 	extern void ClearShadowLeafCache();
@@ -3032,9 +3028,6 @@ void CDeferredViewRender::ViewDrawSceneDeferred( const CViewSetup &view, int nCl
 	}
 #endif
 
-	// other views (monitors, cubemaps...) must not sample this view's screen-space clouds
-	WeatherRender_SetCloudTextureValid( false );
-
 #if DEFCFG_ENABLE_RADIOSITY
 	if ( r_deferred_radiosity_nodes.GetBool() )
 		DebugRadiosity( view );
@@ -3052,6 +3045,9 @@ void CDeferredViewRender::ViewDrawSceneDeferred( const CViewSetup &view, int nCl
 		GPUPROF_SCOPE( "volumetrics" );
 		GetLightingManager()->RenderVolumetrics( view );
 	}
+
+	// other views (monitors, cubemaps...) must not sample this view's screen-space clouds
+	WeatherRender_SetCloudTextureValid( false );
 
 	GPUPROF_SCOPE( "effects" );
 
@@ -3141,6 +3137,11 @@ void CDeferredViewRender::ViewDrawGBuffer( const CViewSetup &view, bool &bDrew3d
 void CDeferredViewRender::ViewDrawComposite( const CViewSetup &view, bool &bDrew3dSkybox, SkyboxVisibility_t &nSkyboxVisible,
 		int nClearFlags, view_id_t viewID, bool bDrawViewModel )
 {
+	s_bMainViewSkySkipActive = ( viewID == VIEW_MAIN );
+	{
+		const bool bMainSkySkip = s_bMainViewSkySkipActive;
+		QUEUE_FIRE( CommitMainViewSkySkip, bMainSkySkip );
+	}
 	{
 		GPUPROF_SCOPE( "sky3d" );
 		UpdateSkyAtmoLUT();
@@ -3187,6 +3188,12 @@ void CDeferredViewRender::ViewDrawComposite( const CViewSetup &view, bool &bDrew
 	{
 		GPUPROF_SCOPE( "composite" );
 		DrawWorldComposite( view, nClearFlags, drawSkybox );
+	}
+	if ( s_bMainViewSkySkipActive )
+	{
+		s_bMainViewSkySkipActive = false;
+		const bool bMainSkySkipOff = false;
+		QUEUE_FIRE( CommitMainViewSkySkip, bMainSkySkipOff );
 	}
 
 	#ifdef SHADEREDITOR
@@ -3402,7 +3409,9 @@ static void DrawDeferredFXAA( const CViewSetup &view )
 	if ( s_pMatFXAA->IsErrorMaterial() )
 		return;
 
-	ITexture *pFrame = materials->FindTexture( "_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET );
+	ITexture *pFrame = GetDefRT_SceneCopy();
+	if ( !pFrame || pFrame->IsError() )
+		pFrame = materials->FindTexture( "_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET );
 	if ( !pFrame || pFrame->IsError() )
 		return;
 
@@ -3486,36 +3495,36 @@ void CDeferredViewRender::DrawWorldComposite( const CViewSetup &view, int nClear
 		}
 	}
 
+	// HL2RPM: mirrors and reflective windows (func_reflective_glass, its own render
+	// targets with Mapbase) - must run for expensive water views too, not only cheap water.
+	if ( r_deferred_glass_views.GetBool() )
+	{
+		cplane_t glassPlane;
+		Frustum_t frustum;
+		GeneratePerspectiveFrustum( view.origin, view.angles, view.zNear, view.zFar, view.fov, view.m_flAspectRatio, frustum );
+
+		ITexture *pTargets[2] = { NULL, NULL };
+		C_BaseEntity *pGlass = NextReflectiveGlass( NULL, view, glassPlane, frustum, pTargets );
+		while ( pGlass != NULL )
+		{
+			if ( pTargets[0] )
+			{
+				CRefPtr<CGlassViewDeferred> pReflectionView = new CGlassViewDeferred( this, true );
+				pReflectionView->Setup( view, bDrawSkybox, glassPlane, pTargets[0] );
+				AddViewToScene( pReflectionView );
+			}
+			if ( pTargets[1] )
+			{
+				CRefPtr<CGlassViewDeferred> pRefractionView = new CGlassViewDeferred( this, false );
+				pRefractionView->Setup( view, bDrawSkybox, glassPlane, pTargets[1] );
+				AddViewToScene( pRefractionView );
+			}
+			pGlass = NextReflectiveGlass( pGlass, view, glassPlane, frustum, pTargets );
+		}
+	}
+
 	if ( info.m_bCheapWater )
 	{
-		// HL2RPM: mirrors and reflective windows (func_reflective_glass, its own render
-		// targets with Mapbase) - this was "#if 0 // TODO": the glass stayed black
-		if ( r_deferred_glass_views.GetBool() )
-		{
-			cplane_t glassPlane;
-			Frustum_t frustum;
-			GeneratePerspectiveFrustum( view.origin, view.angles, view.zNear, view.zFar, view.fov, view.m_flAspectRatio, frustum );
-
-			ITexture *pTargets[2] = { NULL, NULL };
-			C_BaseEntity *pGlass = NextReflectiveGlass( NULL, view, glassPlane, frustum, pTargets );
-			while ( pGlass != NULL )
-			{
-				if ( pTargets[0] )
-				{
-					CRefPtr<CGlassViewDeferred> pReflectionView = new CGlassViewDeferred( this, true );
-					pReflectionView->Setup( view, bDrawSkybox, glassPlane, pTargets[0] );
-					AddViewToScene( pReflectionView );
-				}
-				if ( pTargets[1] )
-				{
-					CRefPtr<CGlassViewDeferred> pRefractionView = new CGlassViewDeferred( this, false );
-					pRefractionView->Setup( view, bDrawSkybox, glassPlane, pTargets[1] );
-					AddViewToScene( pRefractionView );
-				}
-				pGlass = NextReflectiveGlass( pGlass, view, glassPlane, frustum, pTargets );
-			}
-		}
-
 		// (the eye can be under cheap water as well)
 		if ( fogVolumeInfo.m_bEyeInFogVolume )
 			SetUnderwaterOverlay( this, fogVolumeInfo.m_pFogVolumeMaterial );
@@ -3601,17 +3610,16 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 
 		if ( r_deferred_light_global_smooth.GetBool() )
 		{
-			static bool s_hasSmoothed = false;
 			static lightData_Global_t s_smoothed;
 
 			const float dt = gpGlobals ? Max( 0.0f, gpGlobals->frametime ) : 0.0f;
 			const float tau = Max( 0.001f, r_deferred_light_global_smooth_tau.GetFloat() );
 			const float a = 1.0f - expf( -dt / tau );
 
-			if ( !s_hasSmoothed )
+			if ( !s_bGlobalLightSmoothed )
 			{
 				s_smoothed = lightDataState;
-				s_hasSmoothed = true;
+				s_bGlobalLightSmoothed = true;
 			}
 			else
 			{
@@ -3658,6 +3666,8 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 		if ( GetGlobalLight() && !GetLightingEditor()->IsEditorLightingActive() )
 			GetWeatherSystem()->ApplyLightningFlash( lightDataState, GetGlobalLight()->HasShadow() );
 
+		s_csmLightState = lightDataState;
+		s_bCsmLightStateValid = true;
 		QUEUE_FIRE( CommitLightData_Global, lightDataState );
 
 		// HL2RPM: top-down depth map that tells where rain can fall. Before the weather
@@ -4093,7 +4103,7 @@ void CDeferredViewRender::RenderCascadedShadows( const CViewSetup &view, const b
 
 	Vector vecViewFwd;
 	AngleVectors( view.angles, &vecViewFwd );
-	const Vector vecLightDir = GetActiveGlobalLightState().vecLight.AsVector3D();
+	const Vector vecLightDir = ( s_bCsmLightStateValid ? s_csmLightState : GetActiveGlobalLightState() ).vecLight.AsVector3D();
 
 	for ( int i = 0; i < SHADOW_NUM_CASCADES; i++ )
 	{
@@ -4390,10 +4400,9 @@ void CDeferredViewRender::DrawViewModels( const CViewSetup &view, bool drawViewm
 				}
 			}
 			DrawRenderablesInList( translucentViewModelList, STUDIO_TRANSPARENCY );
-		}
-		else
 			pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_RENDER_STAGE,
 			                                          DEFERRED_RENDER_STAGE_INVALID );
+		}
 	}
 
 	// Reset the depth range to the original values
@@ -4605,6 +4614,7 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 
 	// HL2RPM: anti-aliasing of the final frame (the viewmodel included, the HUD not): FXAA
 	bool bUpscalePushed = false;
+	bool bPostFXDirectFromScene = false;
 	if ( !building_cubemaps.GetBool() )
 	{
 		{
@@ -4618,15 +4628,23 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 
 		if ( pSceneRT )
 		{
-			// Stretch the scaled 3D frame up to the screen; the back buffer stays the render
-			// target until the end of the post-processing below.
+			// Stretch the scaled 3D frame up to the screen; when PostFX runs and pSceneRT matches
+			// worldView size, feed pSceneRT straight into PostFX (zero full-frame copies).
 			const int sw = Max( 2, worldView.width ), sh = Max( 2, worldView.height );
 			const int W = Max( 2, view.width ), H = Max( 2, view.height );
 			CMatRenderContextPtr pRC( materials );
 			pRC->PushRenderTargetAndViewport( NULL, view.x, view.y, W, H );
-			Rect_t src = { 0, 0, sw, sh };
-			Rect_t dst = { view.x, view.y, W, H };
-			pRC->CopyTextureToRenderTargetEx( 0, pSceneRT, &src, &dst );
+			if ( DeferredPostFX_IsActive()
+				&& pSceneRT->GetActualWidth() == sw && pSceneRT->GetActualHeight() == sh )
+			{
+				bPostFXDirectFromScene = true;
+			}
+			else
+			{
+				Rect_t src = { 0, 0, sw, sh };
+				Rect_t dst = { view.x, view.y, W, H };
+				pRC->CopyTextureToRenderTargetEx( 0, pSceneRT, &src, &dst );
+			}
 			bUpscalePushed = true;
 		}
 	}
@@ -4646,7 +4664,10 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	{
 		GPUPROF_SCOPE( "postfx" );
 		CPUPROF_SCOPE( "postfx" );
-		DeferredPostFX_Draw( postView );
+		if ( bPostFXDirectFromScene )
+			DeferredPostFX_Draw( postView, pSceneRT, Max( 2, worldView.width ), Max( 2, worldView.height ) );
+		else
+			DeferredPostFX_Draw( postView );
 	}
 
 	// HL2RPM: the view of a wounded man without the suit - red edges, vessels, clouding
@@ -5349,10 +5370,23 @@ void CAboveWaterViewDeferred::CReflectionView::Draw()
 		WeatherRender_SetCloudTextureValid( false );
 	const bool bReflectionOn = true;
 	QUEUE_FIRE( CommitReflectionView, bReflectionOn );
+	const bool bSavedSkySkip = s_bMainViewSkySkipActive;
+	if ( bSavedSkySkip )
+	{
+		s_bMainViewSkySkipActive = false;
+		const bool bSkipOff = false;
+		QUEUE_FIRE( CommitMainViewSkySkip, bSkipOff );
+	}
 
 	EnableWorldFog();
 	DrawExecute( GetOuter()->m_fogInfo.m_flWaterHeight, VIEW_REFLECTION, 0.0f );
 
+	if ( bSavedSkySkip )
+	{
+		s_bMainViewSkySkipActive = true;
+		const bool bSkipOn = true;
+		QUEUE_FIRE( CommitMainViewSkySkip, bSkipOn );
+	}
 	const bool bReflectionOff = false;
 	QUEUE_FIRE( CommitReflectionView, bReflectionOff );
 	if ( bCloudsValid )
@@ -5412,7 +5446,20 @@ void CAboveWaterViewDeferred::CRefractionView::Draw()
 
 	SetFogVolumeState( GetOuter()->m_fogInfo, true );
 	SetClearColorToFogColor();
+	const bool bSavedSkySkip = s_bMainViewSkySkipActive;
+	if ( bSavedSkySkip )
+	{
+		s_bMainViewSkySkipActive = false;
+		const bool bSkipOff = false;
+		QUEUE_FIRE( CommitMainViewSkySkip, bSkipOff );
+	}
 	DrawExecute( GetOuter()->m_waterHeight, VIEW_REFRACTION, GetOuter()->m_waterZAdjust );
+	if ( bSavedSkySkip )
+	{
+		s_bMainViewSkySkipActive = true;
+		const bool bSkipOn = true;
+		QUEUE_FIRE( CommitMainViewSkySkip, bSkipOn );
+	}
 
 	PopComposite();
 
@@ -5584,7 +5631,20 @@ void CUnderWaterViewDeferred::CRefractionView::Draw()
 	DrawSetup( GetOuter()->m_waterHeight, m_DrawFlags, GetOuter()->m_waterZAdjust );
 
 	EnableWorldFog();
+	const bool bSavedSkySkip = s_bMainViewSkySkipActive;
+	if ( bSavedSkySkip )
+	{
+		s_bMainViewSkySkipActive = false;
+		const bool bSkipOff = false;
+		QUEUE_FIRE( CommitMainViewSkySkip, bSkipOff );
+	}
 	DrawExecute( GetOuter()->m_waterHeight, VIEW_REFRACTION, GetOuter()->m_waterZAdjust );
+	if ( bSavedSkySkip )
+	{
+		s_bMainViewSkySkipActive = true;
+		const bool bSkipOn = true;
+		QUEUE_FIRE( CommitMainViewSkySkip, bSkipOn );
+	}
 
 	PopComposite();
 

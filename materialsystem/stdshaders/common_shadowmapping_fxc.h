@@ -753,9 +753,9 @@ float PerformDualParaboloidShadow( sampler shadowSampler, float3 vecLightToGeome
 	if ( shadowMode > 0.5f )
 	{
 		// ------ Cube-atlas path (6-face perspective shadow map) ------
-		offsets_0.xy *= float2( 3.0f, 2.0f );
-		offsets_0.zw *= float2( 3.0f, 2.0f );
-		offset_1.xy *= float2( 1.0f / 3.0f, 1.0f / 2.0f );
+		// offsets_0 and offset_1 are already in full-atlas units from MakeShadowProjectionConstants
+		
+		
 
 		float4 uvwfAtlas = BuildPointShadowCubeAtlasUVZ( vecLightToGeometry, lightToGeoDistance, radius );
 
@@ -769,7 +769,7 @@ float PerformDualParaboloidShadow( sampler shadowSampler, float3 vecLightToGeome
 
 		// Receiver-side slope-dependent depth bias
 		// Only apply when valid filter config is provided (volumetric passes send zeroes)
-		float faceRes = offset_1.x;  // per-face resolution after adjustment
+		float faceRes = offset_1.x * ( 1.0f / 3.0f );  // per-face resolution from full-atlas width
 		if ( faceRes > 0.5f )
 		{
 			// Compute the dominant-axis cosine (same value as 'ma' in BuildPointShadowCubeAtlasUVZ)

@@ -38,22 +38,6 @@ struct PS_INPUT
 	float2 vScreenPos			: VPOS;
 };
 
-float SunShadow( float3 p )
-{
-	[unroll]
-	for ( int c = 0; c < 4; c++ )
-	{
-		float3 uvz = mul( float4( p, 1 ), g_matOrtho[c] );
-		if ( all( uvz.xy > 0.003 ) && all( uvz.xy < 0.997 ) )
-		{
-			float2 uv = uvz.xy * g_vecUVTransform[c].zw + g_vecUVTransform[c].xy;
-			// texldl: no gradients (required inside a loop with break), z is the compare value
-			return tex2Dlod( sShadowDepth, float4( uv, uvz.z - 0.0005, 0 ) ).x;
-		}
-	}
-	return 1.0;
-}
-
 float CloudShadow( float3 p )
 {
 	// project to the cloud base along the light and look at the large scale coverage
@@ -61,31 +45,13 @@ float CloudShadow( float3 p )
 	float tBase = ( g_vecCloud1.x - pm.z ) / max( g_vecLightDir.z, 0.08 );
 	float2 cxy = pm.xy + g_vecLightDir.xy * tBase + g_vecWind.xy;
 	float wm = tex2Dlod( sWeatherMap, float4( cxy / 40000.0, 0, 0 ) ).r;
-	float cov = saturate( g_vecCloud0.x * lerp( 0.55, 1.45, wm ) );
+	float cov = saturate( g_vecCloud0.x + ( wm - 0.5 ) * 0.5 * ( 1.0 - g_vecCloud0.x * 0.6 ) * saturate( ( 1.0 - g_vecCloud0.x ) * 6.0 ) );
 	return 1.0 - saturate( ( cov - 0.25 ) * 1.6 ) * saturate( g_vecCloud0.y * 0.7 );
-}
-
-// HL2RPM: whether the point is under a roof (something more than 24 units above it in the
-// top-down rain map; hardware compare: 1 = nothing above)
-float Covered( float3 p )
-{
-	const float4 wp = float4( p, 1.0 );
-	const float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
-	if ( any( uvz.xy < 0.0 ) || any( uvz.xy > 1.0 ) )
-		return 0.0;
-	return 1.0 - tex2Dlod( sRainDepth, float4( uvz.xy, uvz.z - g_vecDust.x, 0 ) ).x;
 }
 
 float PhaseHG( float g, float cosTheta )
 {
 	return ( 1.0 - g * g ) / pow( max( 1.0 + g * g - 2.0 * g * cosTheta, 1e-3 ), 1.5 ) * ( 1.0 / ( 4.0 * 3.14159265 ) );
-}
-
-float Hash12( float2 p )
-{
-	float3 p3 = frac( float3( p.xyx ) * 0.1031 );
-	p3 += dot( p3, p3.yzx + 33.33 );
-	return frac( ( p3.x + p3.y ) * p3.z );
 }
 
 float4 main( const PS_INPUT In ) : COLOR
@@ -98,7 +64,8 @@ float4 main( const PS_INPUT In ) : COLOR
 	float dist = ( depth < 0.1 ) ? maxDist : min( depth * rayLen, maxDist );
 
 	const float steps = max( g_vecParams.x, 4.0 );
-	float jitter = frac( Hash12( In.vScreenPos ) + g_vecParams.z * 0.61803398 );
+	// Interleaved Gradient Noise (rotated temporally via golden ratio)
+	float jitter = frac( 52.9829189f * frac( dot( In.vScreenPos + g_vecParams.z * 5.588238f, float2( 0.06711056f, 0.00583715f ) ) ) );
 	// HL2RPM: samples spread over the visible part of the ray, denser near the eye (t = dist * u^2):
 	// a window's beam a few dozen units wide fell between the evenly spaced samples of the whole
 	// distance (100+ units apart) and no beam was ever seen indoors
@@ -108,6 +75,24 @@ float4 main( const PS_INPUT In ) : COLOR
 	const float k = g_vecFog.y * 0.001;
 	// base haze always present, weather fog on top
 	const float sigma0 = ( 0.00006 + g_vecFog.x * 0.00030 ) * g_vecFog.w;
+
+	// HL2RPM: hoist affine world->cascade and world->rainmap projections out of the 48-step loop
+	const float4 ro4 = float4( g_vecViewOrigin, 1.0 );
+	const float4 rd4 = float4( rd, 0.0 );
+	float3 csmStart[4];
+	float3 csmStep[4];
+	[unroll]
+	for ( int c = 0; c < 4; c++ )
+	{
+		csmStart[c] = mul( ro4, g_matOrtho[c] );
+		csmStep[c] = mul( rd4, g_matOrtho[c] );
+	}
+	const float3 rainStart = float3( dot( g_matRainMap[0], ro4 ), dot( g_matRainMap[1], ro4 ), dot( g_matRainMap[2], ro4 ) );
+	const float3 rainStep = float3( dot( g_matRainMap[0].xyz, rd ), dot( g_matRainMap[1].xyz, rd ), dot( g_matRainMap[2].xyz, rd ) );
+
+	// Cloud attenuation varies over hundreds of meters, so evaluating once at the ray midpoint avoids
+	// up to 48 texture lookups per pixel inside the march loop.
+	const float cloudLit = ( g_vecCloud0.x > 0.01 ) ? CloudShadow( g_vecViewOrigin + rd * ( dist * 0.5 ) ) : 1.0;
 
 	// (the haze and the dust apart: they scatter differently, see below)
 	float inscatter = 0.0;
@@ -127,14 +112,29 @@ float4 main( const PS_INPUT In ) : COLOR
 		const float uj = ( i + jitter ) * invSteps;
 		const float t = dist * uj * uj;
 		const float dt = dist * ( u1 * u1 - u0 * u0 );
-		float3 p = g_vecViewOrigin + rd * t;
+		const float pz = g_vecViewOrigin.z + rd.z * t;
 
-		const float sigmaFog = sigma0 * exp( -k * ( p.z - g_vecFog.z ) );
-		const float covered = bDust ? Covered( p ) : 0.0;
+		const float sigmaFog = sigma0 * exp( -k * ( pz - g_vecFog.z ) );
+		float covered = 0.0;
+		if ( bDust )
+		{
+			const float3 ruvz = rainStart + rainStep * t;
+			if ( all( ruvz.xy >= 0.0 ) && all( ruvz.xy <= 1.0 ) )
+				covered = 1.0 - tex2Dlod( sRainDepth, float4( ruvz.xy, ruvz.z - g_vecDust.x, 0 ) ).x;
+		}
 		const float sigmaDust = g_vecDust.y * covered;
-		float lit = SunShadow( p );
-		if ( lit > 0.0 )
-			lit *= CloudShadow( p );
+		float lit = 1.0;
+		[unroll]
+		for ( int c = 0; c < 4; c++ )
+		{
+			const float3 uvz = csmStart[c] + csmStep[c] * t;
+			if ( all( uvz.xy > 0.003 ) && all( uvz.xy < 0.997 ) )
+			{
+				const float2 uv = uvz.xy * g_vecUVTransform[c].zw + g_vecUVTransform[c].xy;
+				lit = tex2Dlod( sShadowDepth, float4( uv, uvz.z - 0.0005, 0 ) ).x;
+				break;
+			}
+		}
 		litSum += lit;
 		coverSum += covered;
 
@@ -142,6 +142,9 @@ float4 main( const PS_INPUT In ) : COLOR
 		inscatterDust += T * sigmaDust * lit * dt;
 		T *= exp( -( sigmaFog + sigmaDust ) * dt );
 	}
+	inscatter *= cloudLit;
+	inscatterDust *= cloudLit;
+	litSum *= cloudLit;
 
 	float cosTheta = dot( rd, g_vecLightDir );
 	// HL2RPM: haze scatters most of the light it takes within a few degrees of where it was
@@ -168,10 +171,15 @@ float4 main( const PS_INPUT In ) : COLOR
 		if ( g_vecDust.w < 3.5 )
 			return float4( 0, 0, litSum / steps * 0.5, 1 );
 		const float3 ps = g_vecViewOrigin + rd * dist * 0.97;
-		if ( g_vecDust.w < 4.5 )
-			return float4( 0, Covered( ps ) * 0.5, 0, 1 );
 		const float4 wp = float4( ps, 1.0 );
 		const float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
+		if ( g_vecDust.w < 4.5 )
+		{
+			const float covEnd = ( all( uvz.xy >= 0.0 ) && all( uvz.xy <= 1.0 ) )
+				? ( 1.0 - tex2Dlod( sRainDepth, float4( uvz.xy, uvz.z - g_vecDust.x, 0 ) ).x )
+				: 0.0;
+			return float4( 0, covEnd * 0.5, 0, 1 );
+		}
 		return float4( saturate( uvz.xy ) * 0.5, saturate( uvz.z ) * 0.5, 1 );
 	}
 	return float4( light, 1.0 );

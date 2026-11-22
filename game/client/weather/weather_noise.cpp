@@ -4,8 +4,10 @@
 //
 // _rt_hl2rpm_cloudnoise : tileable 3D noise, 64 slices of 62x62 (+1 texel wrap
 //                         border) packed 8x8 into a 512x512 RGBA8 atlas.
-//                         R = Perlin-Worley (base shape)
-//                         G/B/A = Worley at 4, 8, 16 cells (erosion detail)
+//                         R = convex Perlin-Worley (base shape)
+//                         G = mid-scale billowing Worley fbm (w4/w8/w16)
+//                         B = fine cauliflower Worley fbm (w8/w16/w24)
+//                         A = wispy Perlin turbulence (6/12) for cloud bases/strata
 // _rt_hl2rpm_weathermap : tileable 2D 256x256 RGBA8
 //                         R = coverage variation, G = cloud type variation,
 //                         B = cirrus streaks, A = ground detail (puddles)
@@ -155,26 +157,34 @@ namespace
 					{
 						const float fx = WrapI( i - 1, INNER ) / (float)INNER;
 
-						// Perlin fbm (low frequency billows)
-						float flPerlin = 0.0f, flAmp = 1.0f, flNorm = 0.0f;
-						for ( int o = 0; o < 3; o++ )
-						{
-							const int p = 4 << o;
-							flPerlin += flAmp * PerlinPeriodic( fx * p, fy * p, fz * p, p, 0x1234u + o );
-							flNorm += flAmp;
-							flAmp *= 0.5f;
-						}
-						flPerlin = clamp( flPerlin / flNorm * 0.7f + 0.5f, 0.0f, 1.0f );
+						// 4-octave Perlin fbm (grand fronts + low-frequency billows)
+						const float p2  = PerlinPeriodic( fx * 2,  fy * 2,  fz * 2,  2,  0x1233u );
+						const float p4  = PerlinPeriodic( fx * 4,  fy * 4,  fz * 4,  4,  0x1234u );
+						const float p8  = PerlinPeriodic( fx * 8,  fy * 8,  fz * 8,  8,  0x1235u );
+						const float p16 = PerlinPeriodic( fx * 16, fy * 16, fz * 16, 16, 0x1236u );
+						float flPerlin = ( p2 + 0.65f * p4 + 0.35f * p8 + 0.18f * p16 ) / 2.18f;
+						flPerlin = clamp( flPerlin * 1.15f + 0.5f, 0.0f, 1.0f );
 
-						const float w4 = WorleyPeriodic( fx * 4, fy * 4, fz * 4, 4, 0xA11u );
-						const float w8 = WorleyPeriodic( fx * 8, fy * 8, fz * 8, 8, 0xB22u );
+						const float w4  = WorleyPeriodic( fx * 4,  fy * 4,  fz * 4,  4,  0xA11u );
+						const float w8  = WorleyPeriodic( fx * 8,  fy * 8,  fz * 8,  8,  0xB22u );
 						const float w16 = WorleyPeriodic( fx * 16, fy * 16, fz * 16, 16, 0xC33u );
+						const float w24 = WorleyPeriodic( fx * 24, fy * 24, fz * 24, 24, 0xD44u );
 
-						// Perlin-Worley: perlin dilated by the worley fbm (Schneider 2015)
+						// Convex Perlin-Worley base shape normalized to [0..1] (bright inside puffs, eroded at cracks)
 						const float flWorleyFbm = w4 * 0.625f + w8 * 0.25f + w16 * 0.125f;
-						const float flPerlinWorley = clamp( Remap( flPerlin, flWorleyFbm - 1.0f, 1.0f, 0.0f, 1.0f ), 0.0f, 1.0f );
+						const float flPwErode  = clamp( Remap( flPerlin, ( 1.0f - flWorleyFbm ) * 0.50f, 1.0f, 0.0f, 1.0f ), 0.0f, 1.0f );
+						const float flPwDilate = clamp( Remap( flPerlin, -flWorleyFbm * 0.45f, 1.0f, 0.0f, 1.0f ), 0.0f, 1.0f );
+						const float flShapeRaw = 0.55f * flPwErode + 0.45f * flPwDilate;
+						const float flShape    = clamp( ( flShapeRaw - 0.10f ) / ( 0.78f - 0.10f ), 0.0f, 1.0f );
 
-						pixelWriter.WritePixel( ToByte( flPerlinWorley ), ToByte( w4 ), ToByte( w8 ), ToByte( w16 ) );
+						// Pre-packed octaves so the pixel shader gets mid, fine & wispy detail in one Noise3D fetch
+						const float flDetailMid  = clamp( w4 * 0.55f + w8 * 0.30f + w16 * 0.15f, 0.0f, 1.0f );
+						const float flDetailFine = clamp( w8 * 0.50f + w16 * 0.35f + w24 * 0.15f, 0.0f, 1.0f );
+						const float flWispP = PerlinPeriodic( fx * 6, fy * 6, fz * 6, 6, 0xE55u ) * 0.65f
+							+ PerlinPeriodic( fx * 12, fy * 12, fz * 12, 12, 0xE56u ) * 0.35f;
+						const float flDetailWisp = clamp( flWispP * 1.1f + 0.5f, 0.0f, 1.0f );
+
+						pixelWriter.WritePixel( ToByte( flShape ), ToByte( flDetailMid ), ToByte( flDetailFine ), ToByte( flDetailWisp ) );
 					}
 				}
 			}

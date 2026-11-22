@@ -59,7 +59,6 @@ static CTextureReference g_tex_RadiosityNormal[ 2 ];
 
 static CTextureReference g_tex_ProjectableVGUI[ NUM_PROJECTABLE_VGUI ];
 
-static CTextureReference g_tex_SkyAtmoLUT;
 static CTextureReference g_tex_SkyAtmoTransmittanceLUT;
 static CTextureReference g_tex_SkyAtmoMultiScatteringLUT;
 static CTextureReference g_tex_SkyAtmoSkyViewLUT;
@@ -400,15 +399,6 @@ const ImageFormat fmt_gbuffer0 =
 			fmt_gbuffer1,
 			MATERIAL_RT_DEPTH_NONE,
 			gbufferFlags ) );
-
-		g_tex_SkyAtmoLUT.Init( materials->CreateNamedRenderTargetTextureEx2(
-			"_rt_SkyAtmoLUT",
-			512, 256,
-			RT_SIZE_NO_CHANGE,
-			IMAGE_FORMAT_RGBA16161616F,
-			MATERIAL_RT_DEPTH_NONE,
-			TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT,	// HL2RPM: bilinear, point sampling made steps in the sky
-			0 ) );
 
 		g_tex_SkyAtmoTransmittanceLUT.Init( materials->CreateNamedRenderTargetTextureEx2(
 			"_rt_SkyAtmoTransmittanceLUT",
@@ -828,8 +818,7 @@ ITexture *GetDefRT_VolumetricsBuffer( int index )
 
 ITexture *GetDefRT_SkyAtmoLUT()
 {
-	Assert( g_tex_SkyAtmoLUT.IsValid() );
-	return g_tex_SkyAtmoLUT;
+	return GetDefRT_SkyAtmoSkyViewLUT();
 }
 
 ITexture *GetDefRT_SkyAtmoTransmittanceLUT()
