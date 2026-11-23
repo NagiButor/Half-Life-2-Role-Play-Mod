@@ -26,7 +26,7 @@ static const bool g_bSkinning		= SKINNING ? true : false;
 const float3 g_vecOrigin					: register( SHADER_SPECIFIC_CONST_0 );
 const float3 g_vecForward					: register( SHADER_SPECIFIC_CONST_1 );
 
-const float g_flDepthScale					: register( SHADER_SPECIFIC_CONST_2 );
+const float2 g_flDepthScale					: register( SHADER_SPECIFIC_CONST_2 ); // x = depth scale, y > 0.5 = viewmodel
 
 #if TREESWAY
 const float4 g_vecSwayWind					: register( SHADER_SPECIFIC_CONST_8 );
@@ -238,7 +238,10 @@ VS_OUTPUT main( const VS_INPUT In )
 	Out.vTexCoord.xy = In.vTexCoord_0;
 
 	Out.worldNormal_Depth.xyz = worldNormal;
-	Out.worldNormal_Depth.w = WriteDepth( worldPos, g_vecOrigin, g_vecForward, g_flDepthScale );
+	const float flLinearDepth = WriteDepth( worldPos, g_vecOrigin, g_vecForward, g_flDepthScale.x );
+	// HL2RPM: map first-person viewmodel depth monotonically into [0.25, 2.4] (above 0.1 sky cutoff,
+	// strictly below world zNear >= 6.0) so lighting/SSAO identify viewmodel pixels while keeping full PBR gloss.
+	Out.worldNormal_Depth.w = ( g_flDepthScale.y > 0.5f ) ? clamp( flLinearDepth * 0.03f + 0.5f, 0.25f, 2.4f ) : flLinearDepth;
 
 #if TANGENTSPACE
 	Out.worldTangentS = worldTangentS;

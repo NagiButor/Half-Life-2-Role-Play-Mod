@@ -577,7 +577,8 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 		// reflection views); w 0 turns the MSAA lookup off
 		{
 			const float *pFwd = GetDeferredExt()->GetForwardBase();
-			const bool bLookup = bReflectView || ( r_deferred_msaa_light.GetBool() && !bTranslucent );
+			const bool bViewmodel = pShaderAPI->GetIntRenderingParameter( INT_RENDERPARM_DEFERRED_LOCAL_BODY ) == 2;
+			const bool bLookup = bReflectView || ( r_deferred_msaa_light.GetBool() && !bTranslucent && !bViewmodel );
 			float flFwd[4] = { pFwd[0], pFwd[1], pFwd[2], bLookup ? GetDeferredExt()->GetZScale() : 0.0f };
 			pShaderAPI->SetPixelShaderConstant( 21, flFwd, 1, true );
 			pShader->BindTexture( SHADER_SAMPLER11, GetDeferredExt()->GetTexture_Depth() );

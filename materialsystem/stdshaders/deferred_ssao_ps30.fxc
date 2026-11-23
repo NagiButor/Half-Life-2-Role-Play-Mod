@@ -127,6 +127,10 @@ float4 main( const PS_INPUT In ) : COLOR
 
 	float sky = ( g_vecSky.x > 0.5 && g_vecRainMap.w > 0.5 ) ? SkyVisibility( g_vecViewOrigin + P, N ) : 1.0;
 
+	// HL2RPM: skip screen-space AO on compressed viewmodel depth (keeps indoor/outdoor sky visibility intact)
+	if ( depth < 2.5 )
+		return float4( 1, sky, 1, 1 );
+
 	float radius = g_vecAO.x;
 	float radiusPx = radius * g_vecAO.w / depth;
 	if ( g_vecAO.y <= 0.0 || radiusPx < 1.5 )

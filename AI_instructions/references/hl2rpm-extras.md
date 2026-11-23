@@ -11,7 +11,7 @@
 | `materials/` | `E:\Steam\steamapps\sourcemods\hl2rpm\materials` — текстовые материалы мода: `hl2rpm/water/*.vmt` (типы воды: чистая, мутная, болотная, морская, радиоактивная — `$water_absorb`/`$water_glow`, `stdshaders/water.cpp`) |
 | `tools/` | скрипты-генераторы и dev-утилиты (оригиналы, рабочих копий нет) — см. ниже |
 | `imported/` | отчёты `import_gma.py`: что из каждого аддона Garry's Mod легло в мод, что пропущено и почему |
-| `art/` | исходные картинки пользователя: `lambda_graffiti_src.jpg` (лямбда-графити меню и Steam; «прозрачность» нарисована шахматкой — её вырезает `make_menu_assets.py`), `icon_src.jpg` (значок мода), `loading_valve_ref.png` (референс вентиля экрана загрузки) |
+| `art/` | исходные картинки пользователя и галерея `README.md`: `readme/*.jpg` (чистые игровые скриншоты для GitHub), `lambda_graffiti_src.jpg` (лямбда-графити меню и Steam; «прозрачность» нарисована шахматкой — её вырезает `make_menu_assets.py`), `icon_src.jpg` (значок мода), `loading_valve_ref.png` (референс вентиля экрана загрузки) |
 | `../skills/` | канонические процедуры для любой AI-модели: `hl2rpm-hammer`, `hl2rpm-playtest`, `hl2rpm-dialogs`, `hl2rpm-voice`. Клиентские `.claude/skills` и `.agents/skills` — локальные junction на [../skills](../skills) |
 
 ## tools/

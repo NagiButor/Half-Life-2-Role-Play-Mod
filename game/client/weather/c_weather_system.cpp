@@ -283,6 +283,10 @@ void C_WeatherSystem::UpdateTargetFromEntity()
 			// start wet if it's already raining
 			m_flWetness = m_To.flWetness;
 			m_flPuddles = SmoothStep01( ( m_To.flWetness - 0.5f ) * 2.0f );
+			m_flWindYaw = pWeather->GetWindYaw();
+			float s, c;
+			SinCos( DEG2RAD( m_flWindYaw ), &s, &c );
+			m_vecWindDir.Init( c, s );
 		}
 	}
 	else
@@ -463,7 +467,7 @@ void C_WeatherSystem::UpdateWind( float dt )
 {
 	CEnvWeather *pWeather = GetWeatherEntity();
 	const float flTargetYaw = pWeather ? pWeather->GetWindYaw() : 45.0f;
-	m_flWindYaw = ApproachAngle( flTargetYaw, m_flWindYaw, dt * 5.0f );
+	m_flWindYaw = ApproachAngle( flTargetYaw, m_flWindYaw, dt * 0.5f );
 
 	float s, c;
 	SinCos( DEG2RAD( m_flWindYaw ), &s, &c );

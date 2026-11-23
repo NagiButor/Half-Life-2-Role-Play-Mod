@@ -400,7 +400,12 @@ void DrawPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 
 		float vPos[4] = {0,0,0,0};
 		pShaderAPI->GetWorldSpaceCameraPosition( vPos );
-		float zScale[4] = {GetDeferredExt()->GetZScale(),0,0,0};
+		const float flZScale = GetDeferredExt()->GetZScale();
+		const int iLocalBody = pShaderAPI->GetIntRenderingParameter( INT_RENDERPARM_DEFERRED_LOCAL_BODY );
+		const bool bMark = flZScale > 1.5f && !r_deferred_skybox_sunshadow.GetBool();
+		const bool bBody = !bMark && ( iLocalBody == 1 );
+		const bool bViewmodel = !bMark && ( iLocalBody == 2 );
+		float zScale[4] = { flZScale, bViewmodel ? 1.0f : 0.0f, 0, 0 };
 		pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_0, vPos );
 		pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_1, GetDeferredExt()->GetForwardBase() );
 		pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_2, zScale );
@@ -410,8 +415,6 @@ void DrawPassGBuffer( const defParms_gBuffer &info, CBaseVSShader *pShader, IMat
 		// So does the local player's first person body (the client sets the render parameter
 		// while it draws it): the sun pass ignores the body's own casters there.
 		{
-			const bool bMark = zScale[0] > 1.5f && !r_deferred_skybox_sunshadow.GetBool();
-			const bool bBody = !bMark && pShaderAPI->GetIntRenderingParameter( INT_RENDERPARM_DEFERRED_LOCAL_BODY ) != 0;
 			float flSkybox[4] = { bMark ? 1.0f : 0.0f, bBody ? 1.0f : 0.0f, 0, 0 };
 			pShaderAPI->SetPixelShaderConstant( 3, flSkybox, 1, true );
 		}

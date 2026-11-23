@@ -62,6 +62,8 @@ static ConVar r_deferred_contact_shadows_dither( "r_deferred_contact_shadows_dit
 
 static ConVar r_csm_body_bias( "r_csm_body_bias", "36", 0,
 	"Sun shadows on the local player's first person body ignore casters closer than this (units) - the body's own", true, 0.0f, true, 128.0f );
+static ConVar r_csm_closeup_softness( "r_csm_closeup_softness", "1.75", FCVAR_ARCHIVE,
+	"Sun shadows: minimum B-spline filter scale when close-up shadow texels are magnified on screen (1.0 = off, up to 2.0)", true, 1.0f, true, 2.0f );
 
 BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 	BEGIN_SHADER_PARAMS
@@ -198,8 +200,8 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 4, w.vecCloudParams0.Base(), 1, true );
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 5, w.vecCloudParams1.Base(), 1, true );
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 6, w.vecWind.Base(), 1, true );
-			// (z: the contact shadow march, in texels of the cascade at the point)
-			float flWeatherFlags[4] = { bCloudShadows ? w.vecCloudParams2.y : 0.0f, w.vecCloudParams3.z, r_deferred_contact_shadows_texels.GetFloat(), 0 };
+			// (z: the contact shadow march, in texels of the cascade at the point; w: close-up softness min scale)
+			float flWeatherFlags[4] = { bCloudShadows ? w.vecCloudParams2.y : 0.0f, w.vecCloudParams3.z, r_deferred_contact_shadows_texels.GetFloat(), r_csm_closeup_softness.GetFloat() };
 			pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 7, flWeatherFlags, 1, true );
 
 			// HL2RPM: ambient occlusion (SSAO) and sky visibility (top-down occlusion map), both

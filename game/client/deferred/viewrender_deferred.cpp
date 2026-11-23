@@ -4313,8 +4313,8 @@ void CDeferredViewRender::DrawViewModels( const CViewSetup &view, bool drawViewm
 
 	if ( bGBuffer )
 	{
-		const float flViewmodelScale = view.zFarViewmodel / view.zFar;
-		CGBufferView::PushGBuffer( false, flViewmodelScale, false );
+		// Pass unit depth scale so gbuffer_vs30 gets true distance before compressing viewmodel depth into [0.25, 2.4].
+		CGBufferView::PushGBuffer( false, 1.0f, false );
 	}
 	else
 	{
@@ -4383,10 +4383,12 @@ void CDeferredViewRender::DrawViewModels( const CViewSetup &view, bool drawViewm
 		// G-buffer behind the lens.
 
 		// (the weapon's own effects - ViewModelDrawn - belong to the composite, see c_baseviewmodel.cpp)
+		pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_LOCAL_BODY, 2 );
 		extern bool g_bViewModelGBufferPass;
 		g_bViewModelGBufferPass = bGBuffer;
 		DrawRenderablesInList( opaqueViewModelList, STUDIO_TWOPASS );
 		g_bViewModelGBufferPass = false;
+		pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_DEFERRED_LOCAL_BODY, 0 );
 		if (!bGBuffer)
 		{
 			for ( int i = 0; i < opaqueViewModelList.Count(); ++i )

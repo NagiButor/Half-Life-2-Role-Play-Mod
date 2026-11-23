@@ -329,12 +329,15 @@ float4 main( const PS_INPUT In ) : COLOR
 			p += ( wmAc - 0.5 ) * 1200.0;
 			float amount = saturate( acAmount * 1.2 + ( wmAc.x - 0.5 ) * 1.1 );
 			float4 n1 = Noise3D( float3( p / 8000.0, 0.31 + g_vecCloud1.w * 0.0003 ) );
-			float4 n2 = Noise3D( float3( p / 2400.0, 0.73 + g_vecCloud1.w * 0.0008 ) );
-			float cells = saturate( ( n1.g * 0.45 + n2.b * 0.55 - 0.30 ) * 2.5 );
-			float rows = 0.5 + 0.5 * sin( dot( p, windDir ) * ( 6.2831853 / 700.0 ) + n1.a * 6.0 );
-			cells *= 0.80 + 0.35 * rows;
+			float4 n2 = Noise3D( float3( p / 2500.0, 0.73 + g_vecCloud1.w * 0.0008 ) );
+			// Soft rippled cloudlets (smooth n1.g/n2.g blend avoids confetti aliasing on half-res texels)
+			float cells = saturate( ( n1.g * 0.55 + n2.g * 0.35 + n2.b * 0.10 - 0.28 ) * 2.2 );
+			// Fixed periodic wave direction (exact integer cycles in the 160 km wrap): using time-varying windDir
+			// here multiplied tiny yaw changes by 5-40 km of world distance, causing rapid boiling and 1 Hz jumps.
+			float rows = 0.5 + 0.5 * sin( dot( p, float2( 0.8, 0.6 ) ) * ( 6.2831853 / 800.0 ) + n1.a * 6.0 );
+			cells *= 0.82 + 0.32 * rows;
 			float patches = saturate( ( n1.r - 0.42 ) * 2.8 );
-			float dens = smoothstep( 0.0, 1.0, saturate( ( cells - ( 0.88 - amount * 0.58 ) ) / 0.32 ) ) * patches;
+			float dens = smoothstep( 0.0, 1.0, saturate( ( cells - ( 0.86 - amount * 0.56 ) ) / 0.36 ) ) * patches;
 			float acFade = exp( -tAc / 48000.0 ) * saturate( rd.z * 12.0 );
 			float acAlpha = dens * amount * 0.52 * acFade;
 

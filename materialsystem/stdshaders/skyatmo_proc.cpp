@@ -278,19 +278,8 @@ BEGIN_VS_SHADER( SkyAtmoProc, "" )
 				};
 				pShaderAPI->SetPixelShaderConstant( 25, c25, 1, true );
 
-				float windX = w.vecWind.x + 1e-3f;
-				float windY = w.vecWind.y;
-				const float flWindLen = sqrtf( windX * windX + windY * windY );
-				if ( flWindLen > 1e-6f )
-				{
-					windX /= flWindLen;
-					windY /= flWindLen;
-				}
-				else
-				{
-					windX = 1.0f;
-					windY = 0.0f;
-				}
+				const float windX = 0.8f;
+				const float windY = 0.6f;
 
 				float c26[4] = {
 					vecVenusTint.x * ( flNautical * 0.030f ),

@@ -40,7 +40,7 @@ const float g_flCSMColorize				: register( c61 );
 const float4 g_vecCloud0					: register( c62 );	// coverage, density, type, darkness
 const float4 g_vecCloud1					: register( c63 );	// base (m), thickness (m), cirrus, time
 const float4 g_vecWind						: register( c64 );	// xy cloud offset (m)
-const float4 g_vecWeatherFlags				: register( c65 );	// x cloud shadow strength, y cloud space meters per unit, z contact shadows: march length in texels of the cascade at the point
+const float4 g_vecWeatherFlags				: register( c65 );	// x cloud shadow strength, y cloud space meters per unit, z contact shadows: march length in texels of the cascade at the point, w close-up B-spline min scale
 
 sampler sWeatherMap							: register( s4 );
 sampler sCloudNoise							: register( s5 );
@@ -163,7 +163,8 @@ float4 BSplineWeights( float4 t )
 float3 SunShadowUVZ( float3 worldPos, float3 flNormal, float NdotL, int c )
 {
 	// g_vecSlopeData[c].z = half a texel in world units
-	const float sinA = sqrt( saturate( 1.0f - NdotL * NdotL ) );
+	const float clN = max( NdotL, 0.0f );
+	const float sinA = sqrt( saturate( 1.0f - clN * clN ) );
 	worldPos += flNormal * ( sinA * 2.0f * g_vecSlopeData[c].z * g_vecAmbientCtrl.x );
 	return mul( float4( worldPos, 1 ), g_matOrtho[c] ).xyz;
 }
@@ -174,7 +175,7 @@ bool InsideCascade( float3 uvz )
 }
 
 // filtered sun shadow from cascade c
-float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBias, float3 footX, float3 footY, int c, bool bDebug, float flFoliage )
+float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBias, float3 footX, float3 footY, int c, bool bDebug, float flFoliage, float minScale )
 {
 	const float4 tile = g_vecUVTransform[c];		// atlas offset / scale of this cascade
 	const float2 atlasTexel = g_vecFilterConfig_A[c].xy;
@@ -190,7 +191,9 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 	const float gz2 = dot( gz, gz );
 	float2 dzdTexel = -float2( dot( flNormal, gu ) * gz2 / dot( gu, gu ), dot( flNormal, gv ) * gz2 / dot( gv, gv ) ) / nz;
 	dzdTexel *= atlasTexel / tile.zw;
-	dzdTexel = clamp( dzdTexel, -6.0f * oneTexelDepth, 6.0f * oneTexelDepth );
+	dzdTexel = clamp( dzdTexel, -4.0f * oneTexelDepth, 4.0f * oneTexelDepth );
+	if ( minScale > 1.5f )
+		dzdTexel = 0.0f;
 
 	// a small depth bias on top of the normal offset (r_csm_bias_slope texels per unit of tan):
 	// within one bilinear compare the plane is not followed. The caster side keeps only a
@@ -249,10 +252,8 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 			return blockers / 10.0f;	// r_csm_pcss 2: how many blockers the search found
 		if ( blockers < 0.01f )
 		{
-			// nothing between the point and the sun. The caster depth map can miss casters
-			// the hardware map has (long sunrise shadows of distant buildings did): ask the
-			// hardware map at the point itself before calling it lit
-			if ( tex2Dlod( sShadowDepth, float4( atlasUV, uvz.z, 0 ) ).x > 0.99f )
+			// Skip early-out on close cascade 0 / viewmodel when magnification smoothing is enabled
+			if ( ( c > 0 || ( minScale < 1.02f && g_vecWeatherFlags.w < 1.02f ) ) && tex2Dlod( sShadowDepth, float4( atlasUV, uvz.z, 0 ) ).x > 0.99f )
 				return 1.0f;
 		}
 		else
@@ -272,16 +273,16 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 		return 0.0f;
 	}
 
-	// the pixel's footprint on the shadow map (texels): far away and at grazing angles one
-	// pixel covers several texels, and the shadows of thin things (rods, ribs, railings)
-	// smaller than a pixel flickered from texel to texel while walking. The kernel covers the
-	// footprint instead, like a mip level (up to the widest kernel). (g_vecShadowExtra.z: on)
 	{
 		const float texelsPerUV = tile.z / atlasTexel.x;
 		const float2 fx = float2( dot( footX, gu ), dot( footX, gv ) ) * texelsPerUV;
 		const float2 fy = float2( dot( footY, gu ), dot( footY, gv ) ) * texelsPerUV;
-		const float footprint = sqrt( max( dot( fx, fx ), dot( fy, fy ) ) );
-		scale = max( scale, min( footprint * g_vecShadowExtra.z, 2.0f ) );
+		const float fx2 = dot( fx, fx );
+		const float fy2 = dot( fy, fy );
+		const float footprint = sqrt( max( fx2, fy2 ) );
+		const float minFoot = sqrt( min( fx2, fy2 ) );
+		const float magScale = ( c == 0 ) ? lerp( g_vecWeatherFlags.w, 1.0f, saturate( ( minFoot - 0.10f ) * ( 1.0f / 0.40f ) ) ) : 1.0f;
+		scale = max( scale, max( minScale, max( magScale, min( footprint * g_vecShadowExtra.z, 2.0f ) ) ) );
 	}
 
 	// texel centre units: the centre of texel k at k
@@ -348,7 +349,7 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 #define SUN_SHADOW_CASCADES 4
 
 // flNormal: the geometric normal (see main), NdotL: its dot with the direction to the sun
-float SunShadowPCSS( float3 worldPos, float3 flNormal, float NdotL, float extraBias, float3 footX, float3 footY, out int outCascade, float flFoliage )
+float SunShadowPCSS( float3 worldPos, float3 flNormal, float NdotL, float extraBias, float3 footX, float3 footY, out int outCascade, float flFoliage, float minScale )
 {
 	int c = -1;
 	float3 uvz = 0;
@@ -367,7 +368,7 @@ float SunShadowPCSS( float3 worldPos, float3 flNormal, float NdotL, float extraB
 	if ( c < 0 )
 		return 1.0f;
 
-	float shadow = SunShadowCascade( uvz, flNormal, NdotL, extraBias, footX, footY, c, true, flFoliage );
+	float shadow = SunShadowCascade( uvz, flNormal, NdotL, extraBias, footX, footY, c, true, flFoliage, minScale );
 
 	// a narrow band at the rim of the cascade fades into the next one, filtered the same way
 	float2 centered = abs( uvz.xy * 2.0f - 1.0f );
@@ -377,7 +378,7 @@ float SunShadowPCSS( float3 worldPos, float3 flNormal, float NdotL, float extraB
 	{
 		float3 uvzNext = SunShadowUVZ( worldPos, flNormal, NdotL, c + 1 );
 		if ( InsideCascade( uvzNext ) )
-			shadow = lerp( shadow, SunShadowCascade( uvzNext, flNormal, NdotL, extraBias, footX, footY, c + 1, false, flFoliage ), blendFactor );
+			shadow = lerp( shadow, SunShadowCascade( uvzNext, flNormal, NdotL, extraBias, footX, footY, c + 1, false, flFoliage, minScale ), blendFactor );
 	}
 
 	return shadow;
@@ -456,6 +457,7 @@ PS_OUTPUT main( const PS_INPUT In )
 		// tree near the edge of the map threw sparkling shadows on the skybox city): plain Lambert,
 		// no shadow map lookups.
 		const bool bSkybox = flNormalCtrl.a > ( 254.5f / 255.0f );
+		const bool bViewmodel = ( flDepth < 2.5f );
 		if ( bSkybox )
 		{
 			half_lambert = false;
@@ -463,11 +465,11 @@ PS_OUTPUT main( const PS_INPUT In )
 		}
 
 	#if HAS_SHADOW
-		// r_csm_pcss 8: what the G-buffer holds - red the 3D skybox, green the map, blue the body
+		// r_csm_pcss 8: what the G-buffer holds - red the 3D skybox, green the map, blue the body, cyan the viewmodel
 		if ( g_vecPCSS.w > 7.5f )
 		{
 			const bool bBody = abs( flNormalCtrl.a * 255.0f - 254.0f ) < 0.5f;
-			Out.vColor_0 = WriteLighting( float4( bSkybox ? 1 : 0, ( bSkybox || bBody ) ? 0 : 1, bBody ? 1 : 0, 0 ) );
+			Out.vColor_0 = WriteLighting( float4( bSkybox ? 1 : 0, ( bSkybox || bBody ) ? 0 : 1, ( bBody || bViewmodel ) ? 1 : 0, 0 ) );
 			return Out;
 		}
 	#endif
@@ -475,9 +477,11 @@ PS_OUTPUT main( const PS_INPUT In )
 		float3 flLitNormal = lerp( 1, dot( flNormal, g_vecLightVec_Forward ), litface ) * flNormal;
 
 		float viewFwdDot = dot( g_vecLightVec_Forward.xyz, flLitNormal );
-		float litDot = lerp( viewFwdDot, viewFwdDot * 0.5f + 0.5f, half_lambert );
+		float hlWrap = saturate( viewFwdDot );
+		hlWrap = hlWrap * ( 1.55f - 0.55f * hlWrap );
+		float litDot = lerp( saturate( viewFwdDot ), hlWrap, half_lambert );
 
-		lightAmount = saturate( litDot );
+		lightAmount = litDot;
 
 		float sunVis = saturate( ( g_vecLightVec_Forward.z + 0.02 ) / 0.08 );
 		lightAmount *= sunVis;
@@ -490,21 +494,13 @@ PS_OUTPUT main( const PS_INPUT In )
 		// (surfaces turned away from the sun need no shadow lookup; the cascade view needs it)
 		if ( !bSkybox && flDepth < DEPTH_RECONSTRUCTION_LIMIT && ( lightAmount > 0.0f || g_flCSMColorize > 0.5f ) )
 		{
-			float3 worldPos = g_vecViewOrigin + In.vecWorldRay * flDepth;
+			float3 worldPos = g_vecViewOrigin + ( bViewmodel ? normalize( In.vecWorldRay ) * 12.0f : vecRayPos );
 
-			// The geometric normal, facing the camera. The derivatives of a 2x2 pixel quad straddle
-			// every crease (the foot of a wall, the ribs of corrugated metal) and mix both surfaces -
-			// and which pixels pair up changes with any move of the camera: speckles flickering
-			// along all the creases while walking. Per axis the side whose linear extrapolation
-			// predicts this pixel (1 / depth is linear in screen space on a plane): the pixel's own
-			// surface. (r_csm_shadow_normal 1: the quad derivatives, 0: the G-buffer normal.)
 			float3 geoCross = vecGeoCross;
-			// (the pixel footprint: the steps to the neighbouring pixels, on the pixel's own surface
-			// when it's known - the 2x2 quad steps straddle the edges)
 			float3 footX = vecPosDx;
 			float3 footY = vecPosDy;
 			[branch]
-			if ( g_vecShadowExtra.y > 1.5f )
+			if ( g_vecShadowExtra.y > 1.5f && !bViewmodel && !half_lambert )
 			{
 				const float2 uv = In.vTexCoord;
 				const float2 dx = float2( vecTexelUV.x, 0 );
@@ -532,8 +528,11 @@ PS_OUTPUT main( const PS_INPUT In )
 			}
 			float3 shadowNormal = geoCross * rsqrt( max( dot( geoCross, geoCross ), 1e-30f ) );
 			shadowNormal *= ( dot( shadowNormal, In.vecWorldRay ) > 0.0f ) ? -1.0f : 1.0f;
-			// (a sliver one pixel wide, a silhouette: no surface to tell - the G-buffer normal)
-			shadowNormal = ( dot( shadowNormal, flNormal ) > 0.3f && g_vecShadowExtra.y > 0.5f ) ? shadowNormal : flNormal;
+			// Skip geometric normal on halflambert characters & viewmodels; smooth near curved terminators otherwise.
+			shadowNormal = ( !bViewmodel && !half_lambert && dot( shadowNormal, flNormal ) > 0.3f && g_vecShadowExtra.y > 0.5f ) ? shadowNormal : flNormal;
+			float gNdotL = dot( shadowNormal, g_vecLightVec_Forward );
+			if ( !bViewmodel && !half_lambert && gNdotL < 0.25f && viewFwdDot > gNdotL )
+				shadowNormal = normalize( lerp( flNormal, shadowNormal, saturate( gNdotL * 4.0f ) ) );
 			float shadowNdotL = dot( shadowNormal, g_vecLightVec_Forward );
 			// (foliage lit from both sides: the face toward the sun)
 			if ( litface && shadowNdotL < 0.0f )
@@ -543,11 +542,11 @@ PS_OUTPUT main( const PS_INPUT In )
 			}
 
 			// (r_csm_pcss 0: the same filter, always the sharpest kernel - no blocker search)
-			// the local player's first person body (lighting controls 254, gbuffer_ps30)
-			const float bodyBias = ( abs( flNormalCtrl.a * 255.0f - 254.0f ) < 0.5f ) ? g_vecShadowExtra.x : 0.0f;
+			// the local player's first person body (lighting controls 254, gbuffer_ps30) or viewmodel
+			const float bodyBias = ( bViewmodel || abs( flNormalCtrl.a * 255.0f - 254.0f ) < 0.5f ) ? g_vecShadowExtra.x : 0.0f;
 
 			int csmCascadeIndex = 0;
-			float shadowMult = SunShadowPCSS( worldPos, shadowNormal, shadowNdotL, bodyBias, footX, footY, csmCascadeIndex, litface ? 1.0f : 0.0f );
+			float shadowMult = SunShadowPCSS( worldPos, shadowNormal, shadowNdotL, bodyBias, footX, footY, csmCascadeIndex, litface ? 1.0f : 0.0f, bViewmodel ? 2.0f : 0.0f );
 			if ( g_flCSMColorize > 0.5f )
 			{
 				float3 cascadeColor = float3( 1, 0, 1 );
@@ -590,7 +589,7 @@ PS_OUTPUT main( const PS_INPUT In )
 			const float contactLen = min( g_vecContact.x, 2.0f * contactTexel * g_vecWeatherFlags.z );
 			const float contactStrength = g_vecContact.w * saturate( contactLen * 0.25f );
 			[branch]
-			if ( contactStrength > 0.01f && lightAmount > 0.001f && flDepth * length( In.vecWorldRay ) < g_vecContact.z )
+			if ( !bViewmodel && contactStrength > 0.01f && lightAmount > 0.001f && flDepth * length( In.vecWorldRay ) < g_vecContact.z )
 			{
 				const float3 p0 = worldPos + shadowNormal * min( 1.0f, contactLen * 0.125f );
 				// The start of the march is offset per pixel: 10 steps would band otherwise. The offsets
@@ -741,7 +740,9 @@ PS_OUTPUT main( const PS_INPUT In )
 	[branch]
 	if ( litface && g_vecFoliage.z > 0.0f )
 	{
-		const float litFront = max( lerp( viewFwdDot, viewFwdDot * 0.5f + 0.5f, half_lambert ), 0.05f );
+		float hlFront = saturate( viewFwdDot );
+		hlFront = hlFront * ( 1.55f - 0.55f * hlFront );
+		const float litFront = max( lerp( saturate( viewFwdDot ), hlFront, half_lambert ), 0.05f );
 		const float reach = saturate( lightAmount / litFront );
 		const float toSun = saturate( dot( -vecV, g_vecLightVec_Forward.xyz ) );
 		transmit = reach * g_vecFoliage.z * ( pow( toSun, g_vecFoliage.w ) + 2.0f * pow( toSun, g_vecFoliage.w * 6.0f ) );

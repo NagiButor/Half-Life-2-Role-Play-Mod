@@ -8,6 +8,17 @@
 > Собранные DLL, карты, модели и прочие ресурсы в git не хранятся — они публикуются
 > архивами в [Releases](../../releases).
 
+## Скриншоты
+
+<p align="center">
+  <img src="hl2rpm_extras/art/readme/day_clouds.jpg" width="49%" alt="День, процедурное небо и объёмные облака">
+  <img src="hl2rpm_extras/art/readme/sunset_citadel.jpg" width="49%" alt="Золотой закат, Цитадель и мягкие тени">
+  <img src="hl2rpm_extras/art/readme/rain_wet.jpg" width="49%" alt="Дождь и мокрая брусчатка">
+  <img src="hl2rpm_extras/art/readme/night_lights.jpg" width="49%" alt="Ночь, облака и динамический свет фонаря">
+  <img src="hl2rpm_extras/art/readme/water_deferred.jpg" width="49%" alt="Deferred-вода с flowmap-рябью, отражениями и преломлением">
+  <img src="hl2rpm_extras/art/readme/firstperson_beretta.jpg" width="49%" alt="Вид от первого лица: PBR-материалы и гладкие тени на оружии">
+</p>
+
 ## Что есть в моде
 
 ### RPG-системы и Creation Kit
