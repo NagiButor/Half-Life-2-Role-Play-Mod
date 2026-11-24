@@ -1079,7 +1079,15 @@ class WorldView(QOpenGLWidget):
                     col = SEL_COL if sel else _light_color(ob)
                     self._star(lines, [o[0], o[1], o[2]], 10, col)
                     if cls in ("light_spot", "light_deferred_spot", "env_projectedtexture"):
-                        f = angle_matrix(*ob.angles)[:, 0]
+                        ang = list(ob.angles)
+                        if cls == "light_spot":
+                            p = ob.get("pitch", "")
+                            if p not in ("", None):
+                                try:
+                                    ang[0] = -float(p)
+                                except ValueError:
+                                    pass
+                        f = angle_matrix(*ang)[:, 0]
                         lines.append(tuple(o) + col)
                         lines.append((o[0] + f[0] * 48, o[1] + f[1] * 48, o[2] + f[2] * 48) + col)
                     if sel:
@@ -1533,8 +1541,15 @@ class WorldView(QOpenGLWidget):
         self._warp = c
         QCursor.setPos(self.mapToGlobal(c))
 
+    @staticmethod
+    def _phys_key(e):
+        vk = e.nativeVirtualKey()
+        if 0x41 <= vk <= 0x5A:
+            return vk
+        return e.key()
+
     def keyPressEvent(self, e):
-        key = e.key()
+        key = self._phys_key(e)
         if e.isAutoRepeat() and key in self.keys:
             return
         mods = e.modifiers()
@@ -1590,7 +1605,7 @@ class WorldView(QOpenGLWidget):
 
     def keyReleaseEvent(self, e):
         if not e.isAutoRepeat():
-            self.keys.discard(e.key())
+            self.keys.discard(self._phys_key(e))
         super().keyReleaseEvent(e)
 
     def focusOutEvent(self, e):

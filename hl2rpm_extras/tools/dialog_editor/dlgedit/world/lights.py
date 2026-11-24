@@ -82,7 +82,7 @@ def light_of(ob):
         ang = list(ob.angles)
         if "pitch" in kv and cls == "light_spot":
             try:
-                ang[0] = float(kv["pitch"])
+                ang[0] = -float(kv["pitch"])
             except ValueError:
                 pass
         direction = _forward(ang[0], ang[1])
