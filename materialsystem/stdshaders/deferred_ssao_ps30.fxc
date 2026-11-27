@@ -52,9 +52,15 @@ float SkyVisibility( float3 worldPos, float3 normal )
 	float4 wp = float4( worldPos + normal * max( 6.0, g_vecRainMap.z * 1.5 ), 1.0 );
 	float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
 
-	// outside the map: no information, treat as outdoors
+	// outside the map: no information, treat as outdoors.
+	// Smooth radial fade centered on the continuous camera position so roof shadows never
+	// pop forward in blocks when the snapped rainmap re-centers; finishes strictly inside
+	// the guaranteed valid interior (half-size - 5% drift - 512u wide disk radius).
+	float distCam = length( wp.xy - g_vecViewOrigin.xy );
+	float insideCam = 1.0 - smoothstep( g_vecRainMap.y * 0.27, g_vecRainMap.y * 0.38, distCam );
 	float2 edge = abs( uvz.xy * 2.0 - 1.0 );
-	float inside = saturate( ( 1.0 - max( edge.x, edge.y ) ) * 10.0 );
+	float insideMap = saturate( ( 1.0 - max( edge.x, edge.y ) ) * 16.0 );
+	float inside = min( insideCam, insideMap );
 
 	const float4 vis = tex2Dlod( sSkyMap, float4( uvz.xy, 0, 0 ) );
 	const float4 visWide = tex2Dlod( sSkyMapWide, float4( uvz.xy, 0, 0 ) );

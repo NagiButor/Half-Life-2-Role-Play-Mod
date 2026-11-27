@@ -41,7 +41,7 @@ static ConVar r_weather_motes( "r_weather_motes", "1", FCVAR_ARCHIVE,
 static ConVar r_weather_fog( "r_weather_fog", "1", FCVAR_ARCHIVE, "Weather height fog" );
 static ConVar r_weather_cloud_temporal( "r_weather_cloud_temporal", "1", FCVAR_ARCHIVE, "Temporal accumulation for clouds (less noise)" );
 static ConVar r_weather_cloud_brightness( "r_weather_cloud_brightness", "1.0", FCVAR_ARCHIVE, "Cloud lighting multiplier" );
-static ConVar r_weather_rainmap_size( "r_weather_rainmap_size", "3072", 0, "World size (units) covered by the rain occlusion map" );
+static ConVar r_weather_rainmap_size( "r_weather_rainmap_size", "8192", 0, "World size (units) covered by the rain occlusion map" );
 static ConVar r_weather_godrays( "r_weather_godrays", "1", FCVAR_ARCHIVE, "Crepuscular rays through the gaps in the clouds (screen space)" );
 static ConVar r_weather_godrays_strength( "r_weather_godrays_strength", "1.0", FCVAR_ARCHIVE, "Strength of the crepuscular rays" );
 static ConVar r_weather_debug_view( "r_weather_debug_view", "0", FCVAR_CHEAT, "Weather debug view: 1 = rain exposure (red = open sky, blue = covered)" );
@@ -79,7 +79,7 @@ bool WeatherRender_WantsRainMap()
 // ---------------------------------------------------------------------------
 // Render targets
 // ---------------------------------------------------------------------------
-#define RAINMAP_RES 1024
+#define RAINMAP_RES 2048
 
 static CTextureReference g_tex_Clouds[2];		// resolved clouds, ping-pong history
 static CTextureReference g_tex_CloudRaw;		// this frame's raymarch
@@ -191,7 +191,7 @@ static int g_iCloudDivisor = 2;
 
 static VMatrix g_matRainMap;
 static Vector g_vecRainMapCenter( 0, 0, 0 );
-static float g_flRainMapSize = 3072.0f;
+static float g_flRainMapSize = 8192.0f;
 static float g_flRainMapZFar = 16384.0f;
 static float g_flRainMapTime = -100.0f;
 static bool g_bRainMapValid = false;
@@ -1054,25 +1054,31 @@ bool WeatherRender_ShouldUpdateRainMap( const CViewSetup &view, Vector &vecCente
 	if ( !WeatherRender_WantsRainMap() )
 		return false;
 
-	flSize = Clamp( r_weather_rainmap_size.GetFloat(), 1024.0f, 8192.0f );
+	flSize = Clamp( r_weather_rainmap_size.GetFloat(), 1024.0f, 16384.0f );
 	const float flTexel = flSize / RAINMAP_RES;
 
-	// snap so a re-render of the same world gives the same map: to 4 texels (the sky
-	// visibility filter halves the resolution) and to 64 units of height
-	const float flSnap = flTexel * 4.0f;
-	vecCenter.x = floorf( view.origin.x / flSnap ) * flSnap;
-	vecCenter.y = floorf( view.origin.y / flSnap ) * flSnap;
-	vecCenter.z = floorf( view.origin.z / 64.0f ) * 64.0f;
+	// Snap strictly to the SkyVis texel grid (RAINMAP_RES / SKYVIS_RES raw texels) so every
+	// texel of both the raw rainmap and the filtered sky visibility map lands on the exact same
+	// world coordinates after every re-center (no half-texel shift on roof edges/walls/ceilings).
+	const int iSkyRes = DeferredSSAO_GetSkyVisResolution();
+	const int iSnapTexels = ( iSkyRes > 0 && ( RAINMAP_RES % iSkyRes ) == 0 ) ? ( RAINMAP_RES / iSkyRes ) : 8;
+	const float flSnap = flTexel * (float)iSnapTexels;
+	vecCenter.x = floorf( view.origin.x / flSnap + 0.5f ) * flSnap;
+	vecCenter.y = floorf( view.origin.y / flSnap + 0.5f ) * flSnap;
+	vecCenter.z = floorf( view.origin.z / 64.0f + 0.5f ) * 64.0f;
 
 	if ( !g_bRainMapValid || fabsf( g_flRainMapSize - flSize ) > 1.0f )
 		return true;
 
-	const float flMoved = ( vecCenter.AsVector2D() - g_vecRainMapCenter.AsVector2D() ).Length();
-	if ( flMoved > flSize * 0.12f || fabsf( vecCenter.z - g_vecRainMapCenter.z ) > 512.0f )
+	// Re-center before the camera drifts more than 5% of map size from g_vecRainMapCenter, so
+	// the camera-centered radial fade (<= 38%..42% of map size) always stays strictly inside the
+	// valid interior (even including the 512u wide SkyVis disk) with zero edge pop-in.
+	const float flMoved = ( view.origin.AsVector2D() - g_vecRainMapCenter.AsVector2D() ).Length();
+	if ( flMoved > flSize * 0.05f || fabsf( vecCenter.z - g_vecRainMapCenter.z ) > 512.0f )
 		return true;
 
 	// moving doors/props: refresh now and then
-	return ( gpGlobals->curtime - g_flRainMapTime ) > 1.0f;
+	return ( gpGlobals->curtime - g_flRainMapTime ) > 1.0f || gpGlobals->curtime < g_flRainMapTime;
 }
 
 void WeatherRender_OnRainMapRendered( const VMatrix &matWorldToTexture, const Vector &vecCenter, float flSize, float flZFar )

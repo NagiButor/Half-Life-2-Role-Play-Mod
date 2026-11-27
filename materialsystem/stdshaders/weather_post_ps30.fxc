@@ -111,9 +111,13 @@ float RainExposure( float3 worldPos, float3 normal )
 	float4 wp = float4( worldPos + normal * 2.0, 1.0 );
 	float3 uvz = float3( dot( g_matRainMap[0], wp ), dot( g_matRainMap[1], wp ), dot( g_matRainMap[2], wp ) );
 
-	// outside the map: fade to the normal-based guess
+	// outside the map: smooth camera-centered radial fade to the normal-based guess so
+	// wet/dry roof borders never pop in rectangular blocks when the rainmap re-centers
+	float distCam = length( wp.xy - g_vecViewOrigin.xy );
+	float insideCam = 1.0 - smoothstep( g_vecRainMap.y * 0.30, g_vecRainMap.y * 0.42, distCam );
 	float2 edge = abs( uvz.xy * 2.0 - 1.0 );
-	float inside = saturate( ( 1.0 - max( edge.x, edge.y ) ) * 12.0 );
+	float insideMap = saturate( ( 1.0 - max( edge.x, edge.y ) ) * 16.0 );
+	float inside = min( insideCam, insideMap );
 
 	float z = uvz.z - g_vecRainMap.x;
 	float2 o = g_vecRainMap.z / g_vecRainMap.y * 1.5;	// ~1.5 texels in uv

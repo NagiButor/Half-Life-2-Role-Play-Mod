@@ -270,11 +270,11 @@ BEGIN_VS_SHADER( DEFERRED_SKYVIS, "" )
 			CommitBaseDeferredConstants_Frustum( pShaderAPI, VERTEX_SHADER_SHADER_SPECIFIC_CONST_0 );
 
 			const float flRange = GetRainMapDepthRange( w );
-			const float flMapSize = ( w.vecRainMapParams.y > 1.0f ) ? w.vecRainMapParams.y : 3072.0f;
+			const float flMapSize = ( w.vecRainMapParams.y > 1.0f ) ? w.vecRainMapParams.y : 8192.0f;
 			// x a quarter of the target's texel (4x4 samples per texel), y depth range, z disk
 			// radius (uv), w how far below its own top the ground under a cover may be (depth units)
 			ShaderViewport_t viewport;
-			const int iTargetW = ( pShaderAPI->GetViewports( &viewport, 1 ) > 0 ) ? viewport.m_nWidth : 128;
+			const int iTargetW = ( pShaderAPI->GetViewports( &viewport, 1 ) > 0 ) ? viewport.m_nWidth : 256;
 			const float flRadius = ( params[RADIUS]->GetFloatValue() > 0.0f ) ? params[RADIUS]->GetFloatValue() : r_deferred_skyvis_area.GetFloat();
 			float flParams[4] = { 0.25f / Max( 1, iTargetW ), flRange, flRadius / flMapSize, 512.0f / flRange };
 			pShaderAPI->SetPixelShaderConstant( 0, flParams, 1, true );

@@ -34,7 +34,7 @@ static ConVar r_deferred_ssao_intensity( "r_deferred_ssao_intensity", "1.3", FCV
 static ConVar r_deferred_skyvis( "r_deferred_skyvis", "1", FCVAR_ARCHIVE, "Sky light dims under roofs and indoors (top-down occlusion map)" );
 static ConVar r_deferred_skyvis_indoor( "r_deferred_skyvis_indoor", "0.35", FCVAR_ARCHIVE, "Part of the sky light left deep indoors (0..1)" );
 
-#define SKYVIS_RES 128	// 24 units per texel: the map changes over the 128 unit radius of its disk
+#define SKYVIS_RES 256	// 32 units per texel at 8192 rainmap size (24 at 6144); exact 1/8 of RAINMAP_RES
 
 static CTextureReference g_tex_SSAO;
 static CTextureReference g_tex_SSAOBlur;
@@ -145,6 +145,11 @@ void DeferredSSAO_UpdateSkyVisibility()
 bool DeferredSSAO_WantsSkyVisibility()
 {
 	return r_deferred_skyvis.GetBool();
+}
+
+int DeferredSSAO_GetSkyVisResolution()
+{
+	return SKYVIS_RES;
 }
 
 void DeferredSSAO_Render( const CViewSetup &view )

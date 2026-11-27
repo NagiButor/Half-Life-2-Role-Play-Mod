@@ -3675,18 +3675,27 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 		// re-rendered the map (every second while walking) read the new map through the
 		// previous matrix - sky light, wet surfaces and rain shifted by the distance walked
 		// for one frame (a flash over everything near walls and roofs, only when moving)
+		bool bRainMapUpdated = false;
 		if ( !r_deferred_rainmap_debug_late.GetBool() )
 		{
 			GPUPROF_SCOPE( "rainmap" );
 			CPUPROF_SCOPE( "rainmap" );
-			RenderRainOcclusion( view );
+			bRainMapUpdated = RenderRainOcclusion( view );
 		}
 
 		// HL2RPM: weather constants for this frame (clouds, sky, fog, rain...)
 		WeatherRender_CommitFrame( view, lightDataState );
 
 		if ( r_deferred_rainmap_debug_late.GetBool() )
-			RenderRainOcclusion( view );
+			bRainMapUpdated = RenderRainOcclusion( view );
+
+		// Filter SkyVis after WeatherRender_CommitFrame so DEFERRED_SKYVIS always reads this
+		// frame's rainmap size and depth range (including on the very first frame after map load).
+		if ( bRainMapUpdated )
+		{
+			GPUPROF_SCOPE( "skyvis" );
+			DeferredSSAO_UpdateSkyVisibility();
+		}
 
 		if ( lightDataState.bEnabled )
 		{
@@ -4175,17 +4184,17 @@ void CDeferredViewRender::RenderCascadedShadows( const CViewSetup &view, const b
 	}
 }
 
-void CDeferredViewRender::RenderRainOcclusion( const CViewSetup &view )
+bool CDeferredViewRender::RenderRainOcclusion( const CViewSetup &view )
 {
 	Vector vecCenter;
-	float flSize = 3072.0f;
+	float flSize = 8192.0f;
 	if ( !WeatherRender_ShouldUpdateRainMap( view, vecCenter, flSize ) )
-		return;
+		return false;
 
 	ITexture *pDepth = GetWeatherRT_RainMapDepth();
 	ITexture *pDummy = GetWeatherRT_RainMapDummy();
 	if ( !pDepth || !pDummy )
-		return;
+		return false;
 
 	CRefPtr<CRainOcclusionView> pRainView = new CRainOcclusionView( this, vecCenter, flSize );
 	pRainView->Setup( view, pDepth, pDummy );
@@ -4202,9 +4211,7 @@ void CDeferredViewRender::RenderRainOcclusion( const CViewSetup &view )
 	// call; the main view sets up its own vis again before the composite.)
 	render->ViewSetupVis( true, 1, &view.origin );
 	AddViewToScene( pRainView );
-
-	// the sky visibility of the ambient light is filtered from it once per render
-	DeferredSSAO_UpdateSkyVisibility();
+	return true;
 }
 
 void CDeferredViewRender::DrawLightShadowView( const CViewSetup &view, int iDesiredShadowmap, def_light_t *l )

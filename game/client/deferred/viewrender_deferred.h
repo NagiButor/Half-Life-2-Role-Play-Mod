@@ -52,7 +52,7 @@ private:
 	void DebugRadiosity( const CViewSetup &view );
 
 	void RenderCascadedShadows( const CViewSetup &view, bool bEnableRadiosity );
-	void RenderRainOcclusion( const CViewSetup &view );	// HL2RPM
+	bool RenderRainOcclusion( const CViewSetup &view );	// HL2RPM
 
 	float m_flRenderDelay[SHADOW_NUM_CASCADES];
 

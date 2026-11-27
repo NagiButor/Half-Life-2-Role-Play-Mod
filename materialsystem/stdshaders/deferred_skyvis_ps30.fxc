@@ -40,8 +40,8 @@ struct PS_INPUT
 	float2 vTexCoord			: TEXCOORD0;
 };
 
-static const int NUM_TAPS_LOW = 48;
-static const int NUM_TAPS = 192;
+static const int NUM_TAPS_LOW = 32;
+static const int NUM_TAPS = 128;
 static const float VOID_DEPTH = 0.99999;
 
 float4 main( const PS_INPUT In ) : COLOR
@@ -71,7 +71,29 @@ float4 main( const PS_INPUT In ) : COLOR
 		}
 	}
 	if ( dSelf <= 0.0 )
-		return float4( 1, 1, 1, 1 );	// nothing at all here: open (A 1 = the far plane: any point is above)
+		return float4( 1, 0, 1, 0 );	// pure void outside the sealed map hull: open for outdoor tops (R, B = 1), blocked for indoor covers (G, A = 0) so bilinear reads near exterior walls never leak sky light through the wall
+
+	// Also check the immediate +/-1 SkyVis-texel border for a higher cover: open-ground texels
+	// right outside a roof edge have dLow == dTop, so zeroing vis.y via (dLow - dTop) pulled
+	// bilinear lookups down by 50-75% along every roof edge/corner (a sharp dark outline where
+	// cover flips 0->1). Keeping openLow valid within one SkyVis texel of a cover makes bilinear
+	// filtering continuous across roof edges while flat roof interiors still stay 0.
+	float dNearHigh = dTop;
+	static const float2 kNearRing[16] =
+	{
+		float2( -3.5, -3.5 ), float2( -1.5, -3.5 ), float2(  1.5, -3.5 ), float2(  3.5, -3.5 ),
+		float2( -3.5, -1.5 ),                                             float2(  3.5, -1.5 ),
+		float2( -3.5,  1.5 ),                                             float2(  3.5,  1.5 ),
+		float2( -3.5,  3.5 ), float2( -1.5,  3.5 ), float2(  1.5,  3.5 ), float2(  3.5,  3.5 ),
+		float2( -2.5,  0.0 ), float2(  2.5,  0.0 ), float2(  0.0, -2.5 ), float2(  0.0,  2.5 ),
+	};
+	[unroll]
+	for ( int k = 0; k < 16; k++ )
+	{
+		const float d = tex2Dlod( sRaw, float4( uv + kNearRing[k] * texel, 0, 0 ) ).x;
+		if ( d < VOID_DEPTH )
+			dNearHigh = min( dNearHigh, d );
+	}
 
 	// the lowest level around (void doesn't count, and not much below the own top: a pit
 	// or the end of the map nearby doesn't make the ground under a cover a cellar)
@@ -92,7 +114,6 @@ float4 main( const PS_INPUT In ) : COLOR
 	// its top is higher than the level by more than g_vecLevels.y (soft over .x)
 	float openTop = 0.0;
 	float openLow = 0.0;
-	float openVoid = 0.0;
 	float wsum = 0.0;
 	[loop]
 	for ( int j = 0; j < NUM_TAPS; j++ )
@@ -105,8 +126,9 @@ float4 main( const PS_INPUT In ) : COLOR
 		const float w = ( 1.0 - r * r ) * ( 1.0 - r * r );
 		if ( d >= VOID_DEPTH )
 		{
+			// Outside the sealed BSP hull: outdoor tops still see open sky, but under a
+			// roof void behind an outer map wall must NOT leak sky light through the wall.
 			openTop += w;
-			openVoid += w;
 		}
 		else
 		{
@@ -117,9 +139,10 @@ float4 main( const PS_INPUT In ) : COLOR
 		wsum += w;
 	}
 
-	// openLow is used under covers: if no ground significantly below dTop exists anywhere in
-	// the disk (in the middle of a roof wider than the disk, dLow collapses to the roof top
-	// itself and openLow jumped to 1.0 - lighting up the middle of ceilings under thin roofs)
-	const float hasLower = saturate( ( ( dLow - dTop ) * range - 24.0 ) / 24.0 );
-	return float4( openTop / wsum, ( openVoid + openLow * hasLower ) / wsum, dSelf, dLow );
+	// openLow is used under covers: if no ground significantly below dNearHigh exists anywhere in
+	// the disk (in the middle of a flat roof wider than the disk, dLow collapses to the roof top
+	// itself and openLow jumped to 1.0 - lighting up the middle of ceilings under thin roofs;
+	// using dNearHigh preserves openLow on open ground right outside a roof edge for smooth bilinear)
+	const float hasLower = saturate( ( ( dLow - dNearHigh ) * range - 24.0 ) / 24.0 );
+	return float4( openTop / wsum, ( openLow * hasLower ) / wsum, dSelf, dLow );
 }
