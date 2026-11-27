@@ -560,9 +560,12 @@ void CLightingManager::UpdateShadowBudget( const Vector &vecViewOrigin )
 
 		const float flDist = l->pos.DistTo( vecViewOrigin );
 		const float flShadowEnd = (float)l->iShadow_Dist + (float)l->iShadow_Range;
+		const bool bAllLeaves = l->iNumLeaves < DEFLIGHT_MAX_LEAVES;
 
 		if ( flDist < flShadowEnd &&
-			( !bLeafCull || render->AreAnyLeavesVisible( l->iLeaveIDs, l->iNumLeaves ) ) )
+			( !bLeafCull || !bAllLeaves || render->AreAnyLeavesVisible( l->iLeaveIDs, l->iNumLeaves ) ) &&
+			!engine->CullBox( l->bounds_min_naive, l->bounds_max_naive ) &&
+			!DeferredOcclusion_IsBoxHidden( l->bounds_min_naive, l->bounds_max_naive ) )
 		{
 			// the lights that already have one keep it unless another is clearly nearer
 			budgetCandidate_t c = { l, flDist * ( 0.8f + 0.2f * l->flBudgetFade ) };
@@ -820,12 +823,15 @@ void CLightingManager::SortLights()
 				continue;
 
 			const bool  bSpot        = l->IsSpot();
-			const float flSizeFactor = bSpot ? 1.5f : 2.25f;
+			// HL2RPM: keep a safe margin above the 1.05x proxy sphere without promoting small
+			// nearby lamps to full-screen passes (old 2.25/1.5 turned small rooms' lamps fullscreen).
+			const float flSizeFactor = bSpot ? 1.05f : 1.20f;
 
 			const Vector& viewVec = l->boundsCenter - m_vecViewOrigin;
 			const float   flDot   = DotProduct( m_vecForward, viewVec.Normalized() );
 
-			const float flCoverageFactor = flSizeFactor * l->flRadius / l->flDistance_ViewOrigin * flDot;
+			const float flCoverageFactor = ( l->flDistance_ViewOrigin > 1e-3f )
+				? ( flSizeFactor * l->flRadius / l->flDistance_ViewOrigin * flDot ) : 2.0f;
 
 			if ( flCoverageFactor > 1 )
 				hBatchFullscreen.AddToTail( l );

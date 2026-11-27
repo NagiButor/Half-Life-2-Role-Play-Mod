@@ -33,7 +33,7 @@ from .. import logic
 
 APP_NAME = "HL2RPM Creation Kit"
 FILE_FILTER = "Проект HL2RPM (*.hl2dlg)"
-DEFAULT_MAPSRC = r"E:\XBLAH's modding tool\content\Mapbase\hl2rpm\mapsrc"
+DEFAULT_MAPSRC = r"E:\SourceModding\HL2RPMSOURCE\Mapping\mapsrc"
 HL2_ITEMS = ["item_healthkit", "item_healthvial", "item_battery", "item_suit", "item_suit_pcv", "item_suit_cp",
              "item_combine_soldier_suit", "item_suit_prison", "item_suit_elite", "item_suit_worker", "item_suit_hazmat", "item_ammo_pistol", "item_ammo_smg1",
              "item_ammo_smg1_grenade", "item_ammo_ar2", "item_ammo_ar2_altfire", "item_box_buckshot", "item_ammo_357",

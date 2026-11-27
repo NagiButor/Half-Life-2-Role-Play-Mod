@@ -33,28 +33,51 @@ float4 main( const PS_INPUT In ) : COLOR
 	const float2 uvRaw = min( In.vTexCoord * g_vecCloudUVRect.xy, uvMax );
 
 	float4 cur = tex2Dlod( sRaw, float4( uvRaw, 0, 0 ) );
+	[branch]
 	if ( cur.a < 0.0 )
 	{
 		// HL2RPM: dilate valid sky/cloud values 1 texel into covered geometry borders so bilinear
 		// filtering in procsky_atmo_ps20b never blends with (0,0,0,-1) to cause black halos.
+		// Check 4 cardinal neighbors first (1-texel distance): straight sky edges resolve in 4 taps.
 		float4 dilSum = 0.0;
 		float dilCount = 0.0;
-		[unroll]
-		for ( int dy = -1; dy <= 1; dy++ )
+		float4 nL = tex2Dlod( sRaw, float4( clamp( uvRaw + float2( -texel.x, 0.0 ), 0.0, uvMax ), 0, 0 ) );
+		float4 nR = tex2Dlod( sRaw, float4( clamp( uvRaw + float2(  texel.x, 0.0 ), 0.0, uvMax ), 0, 0 ) );
+		float4 nU = tex2Dlod( sRaw, float4( clamp( uvRaw + float2( 0.0, -texel.y ), 0.0, uvMax ), 0, 0 ) );
+		float4 nD = tex2Dlod( sRaw, float4( clamp( uvRaw + float2( 0.0,  texel.y ), 0.0, uvMax ), 0, 0 ) );
+		if ( nL.a >= 0.0 ) { dilSum += nL; dilCount += 1.0; }
+		if ( nR.a >= 0.0 ) { dilSum += nR; dilCount += 1.0; }
+		if ( nU.a >= 0.0 ) { dilSum += nU; dilCount += 1.0; }
+		if ( nD.a >= 0.0 ) { dilSum += nD; dilCount += 1.0; }
+		if ( dilCount > 0.0 )
+			return dilSum / dilCount;
+
+		// Deep interior geometry check via bilinear-filtered, already-dilated history: if last
+		// frame's reprojected 2x2 neighborhood was also all covered (-1.0), skip the 4 diagonal taps.
+		if ( g_vecResolve.w > 0.0 )
 		{
-			[unroll]
-			for ( int dx = -1; dx <= 1; dx++ )
+			float4 p = float4( normalize( In.vecWorldRay ) * 1000.0, 1.0 );
+			float4 clip = float4( dot( g_matPrevVP[0], p ), dot( g_matPrevVP[1], p ), dot( g_matPrevVP[2], p ), dot( g_matPrevVP[3], p ) );
+			if ( clip.w > 0.001 )
 			{
-				if ( dx == 0 && dy == 0 )
-					continue;
-				float4 ns = tex2Dlod( sRaw, float4( clamp( uvRaw + float2( dx, dy ) * texel, 0.0, uvMax ), 0, 0 ) );
-				if ( ns.a >= 0.0 )
+				float2 prevUV = ( clip.xy / clip.w ) * float2( 0.5, -0.5 ) + 0.5;
+				if ( all( prevUV >= 0.0 ) && all( prevUV <= 1.0 ) )
 				{
-					dilSum += ns;
-					dilCount += 1.0;
+					if ( tex2Dlod( sHistory, float4( min( prevUV * g_vecCloudUVRect.xy, uvMax ), 0, 0 ) ).a < -0.99 )
+						return float4( 0, 0, 0, -1 );
 				}
 			}
 		}
+
+		// Concave corner / fast-turn fallback: check the 4 diagonals to guarantee zero black halos
+		float4 d0 = tex2Dlod( sRaw, float4( clamp( uvRaw + float2( -texel.x, -texel.y ), 0.0, uvMax ), 0, 0 ) );
+		float4 d1 = tex2Dlod( sRaw, float4( clamp( uvRaw + float2(  texel.x, -texel.y ), 0.0, uvMax ), 0, 0 ) );
+		float4 d2 = tex2Dlod( sRaw, float4( clamp( uvRaw + float2( -texel.x,  texel.y ), 0.0, uvMax ), 0, 0 ) );
+		float4 d3 = tex2Dlod( sRaw, float4( clamp( uvRaw + float2(  texel.x,  texel.y ), 0.0, uvMax ), 0, 0 ) );
+		if ( d0.a >= 0.0 ) { dilSum += d0; dilCount += 1.0; }
+		if ( d1.a >= 0.0 ) { dilSum += d1; dilCount += 1.0; }
+		if ( d2.a >= 0.0 ) { dilSum += d2; dilCount += 1.0; }
+		if ( d3.a >= 0.0 ) { dilSum += d3; dilCount += 1.0; }
 		if ( dilCount > 0.0 )
 			return dilSum / dilCount;
 		return float4( 0, 0, 0, -1 );

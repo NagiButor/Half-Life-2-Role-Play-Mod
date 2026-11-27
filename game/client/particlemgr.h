@@ -685,6 +685,7 @@ public:
 	// HL2RPM: the first of the particle systems of the new interface alive now (the rest through
 	// m_pNext) - the deferred renderer lights the fires and explosions among them
 	CNewParticleEffect *FirstNewEffect() const { return m_NewEffects.m_pHead; }
+	int GetNumActiveOldParticles() const { return m_nCurrentParticlesAllocated; }
 
 	// Should particle effects be rendered?
 	void RenderParticleSystems( bool bEnable );

@@ -19,6 +19,7 @@ public:
 	{
 		m_iAllocated = -1;
 		m_piCommandArray = NULL;
+		m_bEnvmapIsDefault = false;
 		for ( int i = 0; i < DEFSTAGE_MAX; i++ )
 			m_nStageVarChangeID[i] = 0xfffffffe;
 	};
@@ -86,12 +87,16 @@ public:
 		return m_piCommandArray[ p_iStage ] != NULL;
 	}
 
+	void SetEnvmapIsDefault( bool bDefault ) { m_bEnvmapIsDefault = bDefault; }
+	bool IsEnvmapDefault() const { return m_bEnvmapIsDefault; }
+
 private:
 
 	int m_iAllocated;
 
 	uint8 **m_piCommandArray;
 	uint32 m_nStageVarChangeID[DEFSTAGE_MAX];
+	bool m_bEnvmapIsDefault;
 };
 
 

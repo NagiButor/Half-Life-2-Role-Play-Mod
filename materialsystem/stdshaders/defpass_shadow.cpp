@@ -134,30 +134,8 @@ void DrawPassShadowPass( const defParms_shadow &info, CBaseVSShader *pShader, IM
 				PARM_VALIDATE( info.iAlphatestRef );
 
 				tmpBuf.SetPixelShaderConstant1( 0, PARM_FLOAT( info.iAlphatestRef ) );
-#ifndef DEFCFG_ENABLE_RADIOSITY
 				tmpBuf.BindTexture( pShader, SHADER_SAMPLER0, info.iAlbedo );
-#endif
 			}
-
-#if DEFCFG_ENABLE_RADIOSITY
-			if ( bAlbedo )
-				tmpBuf.BindTexture( pShader, SHADER_SAMPLER0, info.iAlbedo );
-			else
-				tmpBuf.BindStandardTexture( SHADER_SAMPLER0, TEXTURE_WHITE );
-
-			if ( bBaseTexture2 || bMultiBlend )
-				tmpBuf.BindTexture( pShader, SHADER_SAMPLER1, info.iAlbedo2 );
-
-			if ( bMultiBlend )
-			{
-				tmpBuf.BindTexture( pShader, SHADER_SAMPLER2, info.iAlbedo3 );
-
-				if ( bAlbedo4 )
-					tmpBuf.BindTexture( pShader, SHADER_SAMPLER3, info.iAlbedo4 );
-				else
-					tmpBuf.BindStandardTexture( SHADER_SAMPLER3, TEXTURE_WHITE );
-			}
-#endif
 
 			tmpBuf.End();
 
@@ -193,6 +171,35 @@ void DrawPassShadowPass( const defParms_shadow &info, CBaseVSShader *pShader, IM
 		}
 
 		pShaderAPI->ExecuteCommandBuffer( pDeferredContext->GetCommands( CDeferredPerMaterialContextData::DEFSTAGE_SHADOW ) );
+
+#if DEFCFG_ENABLE_RADIOSITY
+		// HL2RPM: only bind albedo samplers during shadow passes when radiosity output is actually active
+		// (alphatest materials already bind SAMPLER0 in DEFSTAGE_SHADOW above). Avoids 1-4 redundant D3D9
+		// SetTexture state changes on every opaque draw call in every CSM/spot/point/rain shadow pass.
+		if ( radiosityOutput )
+		{
+			if ( !bAlphatest )
+			{
+				if ( bAlbedo )
+					pShader->BindTexture( SHADER_SAMPLER0, info.iAlbedo );
+				else
+					pShaderAPI->BindStandardTexture( SHADER_SAMPLER0, TEXTURE_WHITE );
+			}
+
+			if ( bBaseTexture2 || bMultiBlend )
+				pShader->BindTexture( SHADER_SAMPLER1, info.iAlbedo2 );
+
+			if ( bMultiBlend )
+			{
+				pShader->BindTexture( SHADER_SAMPLER2, info.iAlbedo3 );
+
+				if ( bAlbedo4 )
+					pShader->BindTexture( SHADER_SAMPLER3, info.iAlbedo4 );
+				else
+					pShaderAPI->BindStandardTexture( SHADER_SAMPLER3, TEXTURE_WHITE );
+			}
+		}
+#endif
 
 		if ( iTreeSway > 0 )
 			PBR_SetTreeSwayConstants( pShaderAPI, iTreeSway );

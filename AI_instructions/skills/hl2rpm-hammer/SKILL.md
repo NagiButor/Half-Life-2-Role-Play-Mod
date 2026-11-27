@@ -19,11 +19,11 @@ without compiling. GUI automation depends on the current client's capabilities.
 
 | What | Path |
 |---|---|
-| Map sources (`.vmf`; `.vmx` = Hammer's autosave copy, never edit it) | `E:\XBLAH's modding tool\content\Mapbase\hl2rpm\mapsrc` (game maps), `mapsrc\test\` (test/dev maps) |
+| Map sources (`.vmf`; `.vmx` = Hammer's autosave copy, never edit it) | `E:\SourceModding\HL2RPMSOURCE\Mapping\mapsrc` (game maps), `mapsrc\test\` (test/dev maps) |
 | Compiled maps the game loads | `E:\Steam\steamapps\sourcemods\hl2rpm\maps` (game maps), `hl2rpm\testmaps\maps` (test maps: separate search path below the mod root, not shipped) |
 | Compile tools: the mod's own (a fork of the Mapbase compilers, `sp/src/utils`; Hammer++ runs them too) | `E:\Steam\steamapps\common\Source SDK Base 2013 Singleplayer\bin\hl2rpm_{vbsp,vvis,vrad}.exe` (+ `hl2rpm_vvis_dll.dll`, `hl2rpm_vrad_dll.dll`); build + install: `powershell -File <sp/src>\hl2rpm_extras\tools\install_compilers.ps1`. Valve's `vbsp/vvis/vrad.exe` stay beside them (`-Tools stock`) |
-| Hammer++ | `...\Source SDK Base 2013 Singleplayer\bin\hammerplusplus.exe` (config `bin\hammerplusplus\hammerplusplus_gameconfig.txt`) |
-| FGDs (entity definitions, custom keys) | `E:\XBLAH's modding tool\tools\FGDs\Mapbase\` — `base_vizzys.fgd` (BaseNPC with dialog/loot/faction keys), `halflife2_vizzys.fgd`, `hl2rpm.fgd`, `deferred.fgd` |
+| Hammer++ | `...\Source SDK Base 2013 Singleplayer\bin\hammerplusplus.exe` (shortcut `Mapping\Hammer++.lnk`, config `bin\hammerplusplus\hammerplusplus_gameconfig.txt`, junction `Mapping\hammerplusplus_cfg`) |
+| FGDs (entity definitions, custom keys) | `E:\SourceModding\HL2RPMSOURCE\Mapping\fgd\` — `base_vizzys.fgd` (BaseNPC with dialog/loot/faction keys), `halflife2_vizzys.fgd`, `hl2rpm.fgd`, `deferred.fgd` |
 | BSP backups made by compile_map.ps1 | `E:\SourceModding\HL2RPMSOURCE\map_backups` |
 
 Test maps with full permission to change: `test_deferred`, `demo_map`, `map_v11` (all in `mapsrc\test`). `compile_map.ps1 -Map <name>` also finds VMFs in `mapsrc\test` and copies their BSP to `hl2rpm\testmaps\maps`.
@@ -39,8 +39,7 @@ Any other map: ask before changing it.
    file byte-identical except for the edits (`vmf.py check` proves the round trip).
 3. After editing: compile, copy to the mod (the script does both), then load the
    map in the game with the `hl2rpm-playtest` skill and look at it.
-4. Map names/paths with spaces: always quote (`XBLAH's` contains an apostrophe —
-   in bash use double quotes, in PowerShell single quotes don't work around it).
+4. Map names/paths with spaces: always quote in PowerShell/bash.
 5. Background knowledge (FGD rules, our compilers, budgets): `../../topics/mapping.md`.
 
 ## The user's task markers (start here when asked to work on a sketched map)
@@ -96,7 +95,7 @@ Library (bigger edits: write a small Python script):
 ```python
 import sys; sys.path.insert(0, r"E:\SourceModding\HL2RPMSOURCE\AI_instructions\skills\hl2rpm-hammer\scripts")
 from vmf import VMF
-m = VMF.load(r"E:\XBLAH's modding tool\content\Mapbase\hl2rpm\mapsrc\test_deferred.vmf")
+m = VMF.load(r"E:\SourceModding\HL2RPMSOURCE\Mapping\mapsrc\test\test_deferred.vmf")
 npc = m.add_entity("npc_citizen", (0, 256, 0), targetname="trader_1", angles="0 180 0",
                    additionalequipment="weapon_pistol", loot_displayname="Trader")
 trig = m.add_brush_entity("trigger_dialog_start",

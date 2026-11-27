@@ -35,7 +35,7 @@ def lowest_offset(model, yaw):
     v = np.concatenate([x.pos for x in md.meshes])
     return -float((v @ angle_matrix(0, yaw, 0).T)[:, 2].min())
 
-OUT = r"E:\XBLAH's modding tool\content\Mapbase\hl2rpm\mapsrc\test\ck_test.vmf"
+OUT = r"E:\SourceModding\HL2RPMSOURCE\Mapping\mapsrc\test\ck_test.vmf"
 PEN_WALL = "BRICK/BRICKWALL003A"
 
 

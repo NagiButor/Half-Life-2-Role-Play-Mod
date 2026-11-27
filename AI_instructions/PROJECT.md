@@ -48,10 +48,10 @@
 | Собранный мод | `E:\Steam\steamapps\sourcemods\hl2rpm` — собственный локальный `.git`, без remote |
 | Игровые карты | `hl2rpm/maps` |
 | Dev-карты и ресурсы | `hl2rpm/testmaps/{maps,scripts,scenes,sound,models,materials}` — путь поиска ниже корня мода, в релиз не идёт |
-| Исходники карт | `E:\XBLAH's modding tool\content\Mapbase\hl2rpm\mapsrc`; тестовые — `mapsrc/test` |
+| Исходники карт | `E:\SourceModding\HL2RPMSOURCE\Mapping\mapsrc`; тестовые — `mapsrc/test` |
 | Референсная 3D-сцена Сити-27 и координаты | `E:\SourceModding\HL2RPMSOURCE\hl2rpm_map_developing\hl2rpm_map.blend` и `hl2rpm_map_inspiration.txt` |
-| FGD | `E:\XBLAH's modding tool\tools\FGDs\Mapbase` |
-| Hammer++ | `E:\Steam\steamapps\common\Source SDK Base 2013 Singleplayer\bin\hammerplusplus.exe`; конфиг — `bin/hammerplusplus/hammerplusplus_gameconfig.txt` |
+| FGD | `E:\SourceModding\HL2RPMSOURCE\Mapping\fgd` |
+| Hammer++ | `E:\Steam\steamapps\common\Source SDK Base 2013 Singleplayer\bin\hammerplusplus.exe` (ярлык `Mapping\Hammer++.lnk`); конфиги — `bin/hammerplusplus/hammerplusplus_gameconfig.txt` (junction `Mapping\hammerplusplus_cfg`) |
 | Blender (CLI/фоновый рендер) | Blender 5.3 (`blender-launcher.exe` / Store) и Blender 4.4.3 (`Google Map 3D Exporter v3.0\02 Prepare Blender 4.4.3 with Map's Plugin\blender-4.4.3-windows-x64\blender.exe`) |
 | CK: программа | `E:\SourceModding\HL2RPMSOURCE\HL2RPM Creation Kit` |
 | CK: исходники и сборка | `hl2rpm_extras/tools/dialog_editor`; окружение — `E:\SourceModding\HL2RPMSOURCE\dialog_editor_build` |

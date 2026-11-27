@@ -80,6 +80,8 @@ struct FireLight_t
 	float flFlashScale;				// flashes: how big
 	int iEntity;					// what burns (left out of its own shadow), -1 = nothing
 	float flStrength;				// this frame (for the choice of the strongest)
+	Vector vecLastTracedPos;		// last pos/radius where full UpdateXForms() ran
+	float flLastTracedRadius;
 };
 
 static CUtlVector< FireLight_t > s_Fires;
@@ -132,6 +134,8 @@ void DeferredFireLights_AddFlash( const Vector &vecOrigin, float flScale )
 	f.vecPos = vecOrigin;
 	f.iEntity = -1;
 	f.flStrength = 0.0f;
+	f.vecLastTracedPos.Init();
+	f.flLastTracedRadius = -1.0f;
 }
 
 // a flicker of a few incommensurate waves around 1
@@ -209,6 +213,8 @@ void DeferredFireLights_Update( const Vector &vecViewOrigin )
 			f.vecPos = pEffect->GetControlPointAtCurrentTime( 0 );
 			f.flFlashScale = 1.0f;
 			f.iEntity = -1;
+			f.vecLastTracedPos.Init();
+			f.flLastTracedRadius = -1.0f;
 		}
 		FireLight_t &f = s_Fires[iSlot];
 		f.iFrame = iFrame;
@@ -280,10 +286,12 @@ void DeferredFireLights_Update( const Vector &vecViewOrigin )
 			}
 			continue;
 		}
-		if ( !f.pLight )
+		const bool bNewLight = ( f.pLight == NULL );
+		if ( bNewLight )
 		{
 			f.pLight = new def_light_t();
 			GetLightingManager()->AddLight( f.pLight );
+			f.flLastTracedRadius = -1.0f;
 		}
 		def_light_t *l = f.pLight;
 		const float flAge = flNow - f.flBorn;
@@ -320,7 +328,24 @@ void DeferredFireLights_Update( const Vector &vecViewOrigin )
 			nFlashShadows++;
 		}
 		l->iFlags |= DEFLIGHT_ENABLED;
-		l->MakeDirtyAll();
+		// HL2RPM: firelights are always point lights (shared unit sphere) and flicker every frame;
+		// avoid 14 world traces + leaf enumeration every frame for minor flame wander (< 8 u).
+		if ( bNewLight )
+		{
+			l->MakeDirtyAll();
+			f.vecLastTracedPos = l->pos;
+			f.flLastTracedRadius = l->flRadius;
+		}
+		else if ( l->pos.DistToSqr( f.vecLastTracedPos ) >= 64.0f || fabsf( l->flRadius - f.flLastTracedRadius ) >= 8.0f )
+		{
+			l->MakeDirtyXForms();
+			f.vecLastTracedPos = l->pos;
+			f.flLastTracedRadius = l->flRadius;
+		}
+		else
+		{
+			l->UpdatePointTransformFast();
+		}
 
 		if ( r_deferred_firelights_debug.GetBool() )
 		{

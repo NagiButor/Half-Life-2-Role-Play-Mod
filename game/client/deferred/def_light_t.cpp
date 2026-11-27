@@ -668,6 +668,28 @@ void def_light_t::UpdateXForms()
 	UpdateLeaves();
 }
 
+void def_light_t::UpdatePointTransformFast()
+{
+	Assert( IsPoint() );
+
+	flMaxDistSqr = iVisible_Dist + iVisible_Range;
+	flMaxDistSqr *= flMaxDistSqr;
+
+	const Vector vecExt( flRadius, flRadius, flRadius );
+	bounds_min_naive = pos - vecExt;
+	bounds_max_naive = pos + vecExt;
+	bounds_min = bounds_min_naive;
+	bounds_max = bounds_max_naive;
+	boundsCenter = pos;
+
+	worldTransform.Identity();
+	MatrixBuildScale( worldTransform, flRadius, flRadius, flRadius );
+	worldTransform.SetTranslation( pos );
+
+	if ( bReachBounds && ( reachBoundsPos != pos || flReachBoundsRadius != flRadius ) )
+		bReachBounds = false;
+}
+
 // HL2RPM: the leaves the light is culled by (CLightingManager::CullLights - visibility data, occlusion
 // buffer; the shadow budget) are those of all it can reach: its radius / cone (bounds_*_naive), or, once
 // its reach map is traced, the box of what its rays reached. They were the leaves of bounds_min/max -

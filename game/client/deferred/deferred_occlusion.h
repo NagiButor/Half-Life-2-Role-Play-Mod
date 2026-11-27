@@ -39,4 +39,8 @@ bool DeferredOcclusion_AreLeafPartsHidden( const int *pLeaves, int nLeaves, cons
 // The bounds of a leaf of the map as the .bsp has them (false: no such leaf / the leaves are not read)
 bool DeferredOcclusion_GetLeafBounds( int iLeaf, Vector &vecMins, Vector &vecMaxs, bool &bSolid );
 
+// HL2RPM: bounding box of the playable world leaves (excluding solid leaves and the 3D skybox area),
+// cached per level for CSM far-distance clamping.
+bool DeferredOcclusion_GetPlayableWorldBounds( Vector &vecMins, Vector &vecMaxs );
+
 #endif // DEFERRED_OCCLUSION_H

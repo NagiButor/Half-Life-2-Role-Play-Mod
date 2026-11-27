@@ -50,8 +50,10 @@ void InitSSAORTs()
 {
 	const unsigned int flags = TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_RENDERTARGET;
 
-	g_tex_SSAO.Init( CreateFrameSizedRT( "_rt_hl2rpm_ssao", 1, IMAGE_FORMAT_RGBA8888, MATERIAL_RT_DEPTH_NONE, flags ) );
-	g_tex_SSAOBlur.Init( CreateFrameSizedRT( "_rt_hl2rpm_ssao_blur", 1, IMAGE_FORMAT_RGBA8888, MATERIAL_RT_DEPTH_NONE, flags ) );
+	// HL2RPM: allocate SSAO buffers at exact half resolution (saves ~12 MB VRAM at 1080p
+	// and avoids unused 3/4 quadrant bandwidth; flUVScale adapts dynamically below).
+	g_tex_SSAO.Init( CreateFrameSizedRT( "_rt_hl2rpm_ssao", 2, IMAGE_FORMAT_RGBA8888, MATERIAL_RT_DEPTH_NONE, flags ) );
+	g_tex_SSAOBlur.Init( CreateFrameSizedRT( "_rt_hl2rpm_ssao_blur", 2, IMAGE_FORMAT_RGBA8888, MATERIAL_RT_DEPTH_NONE, flags ) );
 
 	// the sky visibility map: r open part around a point on its own top, g the same under a
 	// cover, b the depth of the top (deferred_skyvis_ps30); bilinear
@@ -159,9 +161,11 @@ void DeferredSSAO_Render( const CViewSetup &view )
 	// one half resolution pass for both: r = SSAO, g = sky visibility (see deferred_ssao_ps30)
 	const bool bSSAO = r_deferred_ssao.GetBool();
 	const bool bAO = ( bSSAO || r_deferred_skyvis.GetBool() ) && g_tex_SSAO.IsValid() && g_tex_SSAOBlur.IsValid() && EnsureSSAOMaterials();
-	const int w = Max( 1, view.width / 2 );
-	const int h = Max( 1, view.height / 2 );
-	const float flUVScale = bAO ? (float)w / Max( 1, g_tex_SSAO->GetActualWidth() ) : 0.0f;
+	const int texW = bAO ? Max( 1, g_tex_SSAO->GetActualWidth() ) : 1;
+	const int texH = bAO ? Max( 1, g_tex_SSAO->GetActualHeight() ) : 1;
+	const int w = bAO ? clamp( view.width / 2, 1, texW ) : Max( 1, view.width / 2 );
+	const int h = bAO ? clamp( view.height / 2, 1, texH ) : Max( 1, view.height / 2 );
+	const float flUVScale = bAO ? (float)w / (float)texW : 0.0f;
 
 	data.bEnabled = bAO;
 	data.vecApply.Init( r_deferred_skyvis.GetBool() ? 1.0f : 0.0f,

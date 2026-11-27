@@ -335,7 +335,7 @@ static void OnPOMChanged( IConVar *pVar, const char *pszOldValue, float flOldVal
 }
 static ConVar r_deferred_pom_scale( "r_deferred_pom_scale", "1.0", FCVAR_ARCHIVE,
 	"Parallax occlusion mapping: scale of the depth of all reliefs", true, 0.0f, true, 4.0f );
-static ConVar r_deferred_pom_distance( "r_deferred_pom_distance", "1100", 0,
+static ConVar r_deferred_pom_distance( "r_deferred_pom_distance", "700", 0,
 	"Parallax occlusion mapping: the distance at which the relief is gone (it fades over the far half)", true, 64.0f, true, 8192.0f );
 static ConVar r_deferred_pom_occlusion( "r_deferred_pom_occlusion", "0.35", 0,
 	"Parallax occlusion mapping: how much darker the bottom of a relief is (the mortar, the gaps between the stones)", true, 0.0f, true, 1.0f );

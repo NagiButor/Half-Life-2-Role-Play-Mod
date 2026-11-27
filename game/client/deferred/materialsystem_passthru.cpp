@@ -1043,6 +1043,7 @@ static void DeferredMaterials_OnRelease()
 }
 
 extern void DeferredSkyLUT_ForceRebuild();	// viewrender_deferred.cpp
+extern void DeferredWaterTargets_Invalidate();	// viewrender_deferred.cpp
 #include "deferred/deferred_shadowcache.h"
 extern void WeatherRender_OnMaterialsRestored();	// weather_render.cpp
 
@@ -1060,6 +1061,7 @@ static void DeferredMaterials_OnRestore( int nChangeFlags )
 	DeferredLightReach_OnRTContentLost();
 	DeferredPostFX_Reset();
 	DeferredSkyLUT_ForceRebuild();
+	DeferredWaterTargets_Invalidate();
 	DeferredShadowCache_InvalidateAll();
 	// (the materials may have been loaded anew: the colors scaled with the light go back in)
 	WeatherRender_OnMaterialsRestored();

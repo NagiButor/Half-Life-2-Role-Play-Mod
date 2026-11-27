@@ -101,8 +101,9 @@ float4 main( const PS_INPUT In ) : COLOR
 	float litSum = 0.0;
 	float coverSum = 0.0;
 
+	int curC = 0;
 	[loop]
-	for ( int i = 0; i < 48; i++ )
+	for ( int i = 0; i < 32; i++ )
 	{
 		if ( i >= (int)steps )
 			break;
@@ -116,6 +117,7 @@ float4 main( const PS_INPUT In ) : COLOR
 
 		const float sigmaFog = sigma0 * exp( -k * ( pz - g_vecFog.z ) );
 		float covered = 0.0;
+		[branch]
 		if ( bDust )
 		{
 			const float3 ruvz = rainStart + rainStep * t;
@@ -123,17 +125,40 @@ float4 main( const PS_INPUT In ) : COLOR
 				covered = 1.0 - tex2Dlod( sRainDepth, float4( ruvz.xy, ruvz.z - g_vecDust.x, 0 ) ).x;
 		}
 		const float sigmaDust = g_vecDust.y * covered;
+		// HL2RPM: monotone cascade index tracking along the outgoing camera ray (t strictly
+		// increases, so once a ray exits cascade c it only advances to c+1..3 -> 1 test/step).
 		float lit = 1.0;
-		[unroll]
-		for ( int c = 0; c < 4; c++ )
+		if ( curC == 0 )
 		{
-			const float3 uvz = csmStart[c] + csmStep[c] * t;
+			const float3 uvz = csmStart[0] + csmStep[0] * t;
 			if ( all( uvz.xy > 0.003 ) && all( uvz.xy < 0.997 ) )
-			{
-				const float2 uv = uvz.xy * g_vecUVTransform[c].zw + g_vecUVTransform[c].xy;
-				lit = tex2Dlod( sShadowDepth, float4( uv, uvz.z - 0.0005, 0 ) ).x;
-				break;
-			}
+				lit = tex2Dlod( sShadowDepth, float4( uvz.xy * g_vecUVTransform[0].zw + g_vecUVTransform[0].xy, uvz.z - 0.0005, 0 ) ).x;
+			else
+				curC = 1;
+		}
+		if ( curC == 1 )
+		{
+			const float3 uvz = csmStart[1] + csmStep[1] * t;
+			if ( all( uvz.xy > 0.003 ) && all( uvz.xy < 0.997 ) )
+				lit = tex2Dlod( sShadowDepth, float4( uvz.xy * g_vecUVTransform[1].zw + g_vecUVTransform[1].xy, uvz.z - 0.0005, 0 ) ).x;
+			else
+				curC = 2;
+		}
+		if ( curC == 2 )
+		{
+			const float3 uvz = csmStart[2] + csmStep[2] * t;
+			if ( all( uvz.xy > 0.003 ) && all( uvz.xy < 0.997 ) )
+				lit = tex2Dlod( sShadowDepth, float4( uvz.xy * g_vecUVTransform[2].zw + g_vecUVTransform[2].xy, uvz.z - 0.0005, 0 ) ).x;
+			else
+				curC = 3;
+		}
+		if ( curC == 3 )
+		{
+			const float3 uvz = csmStart[3] + csmStep[3] * t;
+			if ( all( uvz.xy > 0.003 ) && all( uvz.xy < 0.997 ) )
+				lit = tex2Dlod( sShadowDepth, float4( uvz.xy * g_vecUVTransform[3].zw + g_vecUVTransform[3].xy, uvz.z - 0.0005, 0 ) ).x;
+			else
+				curC = 4;
 		}
 		litSum += lit;
 		coverSum += covered;

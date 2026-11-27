@@ -31,16 +31,34 @@ public:
 
 class weather_post_ps30_Dynamic_Index
 {
+	unsigned int m_nWET : 2;
+#ifdef _DEBUG
+	bool m_bWET : 1;
+#endif	// _DEBUG
 public:
+	void SetWET( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nWET = i;
+#ifdef _DEBUG
+		m_bWET = true;
+#endif	// _DEBUG
+	}
+
 	weather_post_ps30_Dynamic_Index( IShaderDynamicAPI* pShaderAPI )
 	{
+		m_nWET = 0;
+#ifdef _DEBUG
+		m_bWET = false;
+#endif	// _DEBUG
 	}
 
 	int GetIndex() const
 	{
-		return 0;
+		Assert( m_bWET );
+		return ( 1 * m_nWET ) + 0;
 	}
 };
 
-#define shaderDynamicTest_weather_post_ps30 1
+#define shaderDynamicTest_weather_post_ps30 psh_forgot_to_set_dynamic_WET
 

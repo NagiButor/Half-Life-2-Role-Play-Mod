@@ -31,6 +31,11 @@ ITexture *DeferredShadowCache_GetTexture( int iEntry );
 // false = draw it now (the entry then remembers what is drawn).
 bool DeferredShadowCache_IsCurrent( int iEntry, def_light_t *pLight, int iResolution, const CClientRenderablesList *pList );
 
+// HL2RPM: point-light 3x2 cube shadow atlas cache (per-face caster hashing, invalidates all 6 faces if light changes)
+int DeferredShadowCache_AcquirePoint( def_light_t *pLight, int iResolution );
+ITexture *DeferredShadowCache_GetPointTexture( int iEntry );
+bool DeferredShadowCache_IsCurrentPointFace( int iEntry, int iFace, def_light_t *pLight, int iResolution, const CClientRenderablesList *pList );
+
 // Everything drawn so far is stale (map change, render targets re-made or their content lost,
 // settings of the shadow passes changed)
 void DeferredShadowCache_InvalidateAll();

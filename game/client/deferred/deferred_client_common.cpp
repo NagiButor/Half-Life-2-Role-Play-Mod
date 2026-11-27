@@ -10,27 +10,33 @@ ConVar r_deferred_rt_shadowspot_res( "r_deferred_rt_shadowspot_res", "2048", 0, 
 ConVar r_deferred_rt_shadowspot_lod1_res( "r_deferred_rt_shadowspot_lod1_res", "1024", 0, "", OnShadowRTResolutionChanged );
 ConVar r_deferred_rt_shadowspot_lod2_res( "r_deferred_rt_shadowspot_lod2_res", "512", 0, "", OnShadowRTResolutionChanged );
 #endif
-ConVar r_deferred_rt_shadowpoint_res( "r_deferred_rt_shadowpoint_res", "2048", 0, "", OnShadowRTResolutionChanged );
+ConVar r_deferred_rt_shadowpoint_res( "r_deferred_rt_shadowpoint_res", "1024", 0, "", OnShadowRTResolutionChanged );
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
-ConVar r_deferred_rt_shadowpoint_lod1_res( "r_deferred_rt_shadowpoint_lod1_res", "1024", 0, "", OnShadowRTResolutionChanged );
-ConVar r_deferred_rt_shadowpoint_lod2_res( "r_deferred_rt_shadowpoint_lod2_res", "512", 0, "", OnShadowRTResolutionChanged );
+ConVar r_deferred_rt_shadowpoint_lod1_res( "r_deferred_rt_shadowpoint_lod1_res", "512", 0, "", OnShadowRTResolutionChanged );
+ConVar r_deferred_rt_shadowpoint_lod2_res( "r_deferred_rt_shadowpoint_lod2_res", "256", 0, "", OnShadowRTResolutionChanged );
 #endif
 
 struct pointspot_shadow_quality_preset_t
 {
-	int iMainRes;
-	int iLod1Res;
-	int iLod2Res;
+	int iSpotRes;
+	int iSpotLod1Res;
+	int iSpotLod2Res;
+	int iPointRes;
+	int iPointLod1Res;
+	int iPointLod2Res;
 };
 
+// HL2RPM: point lights use a 3x2 cube atlas (6 faces), so decoupling point face resolution
+// from spot resolution cuts point shadow VRAM and fillrate by 4x on High/Very High/Ultra
+// while keeping crisp 1024^2 per face on Ultra.
 static const pointspot_shadow_quality_preset_t g_PointSpotShadowPresets[] =
 {
-	{  128,   64,   32 },
-	{  256,  128,   64 },
-	{  512,  256,  128 },
-	{ 1024,  512,  256 },
-	{ 1536,  768,  384 },
-	{ 2048, 1024,  512 },
+	{  128,   64,   32,  128,   64,   32 }, // Very Low
+	{  256,  128,   64,  256,  128,   64 }, // Low
+	{  512,  256,  128,  256,  128,   64 }, // Medium
+	{ 1024,  512,  256,  512,  256,  128 }, // High
+	{ 1536,  768,  384,  768,  384,  192 }, // Very High
+	{ 2048, 1024,  512, 1024,  512,  256 }, // Ultra
 };
 
 static void ApplyPointSpotShadowQualityPreset( int quality )
@@ -38,14 +44,14 @@ static void ApplyPointSpotShadowQualityPreset( int quality )
 	quality = clamp( quality, 0, ARRAYSIZE( g_PointSpotShadowPresets ) - 1 );
 	const pointspot_shadow_quality_preset_t &preset = g_PointSpotShadowPresets[quality];
 
-	r_deferred_rt_shadowspot_res.SetValue( preset.iMainRes );
-	r_deferred_rt_shadowpoint_res.SetValue( preset.iMainRes );
+	r_deferred_rt_shadowspot_res.SetValue( preset.iSpotRes );
+	r_deferred_rt_shadowpoint_res.SetValue( preset.iPointRes );
 
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
-	r_deferred_rt_shadowspot_lod1_res.SetValue( preset.iLod1Res );
-	r_deferred_rt_shadowspot_lod2_res.SetValue( preset.iLod2Res );
-	r_deferred_rt_shadowpoint_lod1_res.SetValue( preset.iLod1Res );
-	r_deferred_rt_shadowpoint_lod2_res.SetValue( preset.iLod2Res );
+	r_deferred_rt_shadowspot_lod1_res.SetValue( preset.iSpotLod1Res );
+	r_deferred_rt_shadowspot_lod2_res.SetValue( preset.iSpotLod2Res );
+	r_deferred_rt_shadowpoint_lod1_res.SetValue( preset.iPointLod1Res );
+	r_deferred_rt_shadowpoint_lod2_res.SetValue( preset.iPointLod2Res );
 #endif
 }
 

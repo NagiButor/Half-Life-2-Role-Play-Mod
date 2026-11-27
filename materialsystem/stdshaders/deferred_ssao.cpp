@@ -73,7 +73,8 @@ BEGIN_VS_SHADER( DEFERRED_SSAO, "" )
 			pShaderShadow->SetDefaultState();
 			pShaderShadow->EnableDepthTest( false );
 			pShaderShadow->EnableDepthWrites( false );
-			pShaderShadow->EnableAlphaWrites( false );
+			// HL2RPM: write packed depth into B/A channels so deferred_ssaoblur reads depth without full-res sDepth fetches
+			pShaderShadow->EnableAlphaWrites( true );
 
 			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
 			pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
@@ -164,7 +165,8 @@ BEGIN_VS_SHADER( DEFERRED_SSAOBLUR, "" )
 			pShaderShadow->SetDefaultState();
 			pShaderShadow->EnableDepthTest( false );
 			pShaderShadow->EnableDepthWrites( false );
-			pShaderShadow->EnableAlphaWrites( false );
+			// HL2RPM: write packed depth into B/A channels so deferred_ssaoblur reads depth without full-res sDepth fetches
+			pShaderShadow->EnableAlphaWrites( true );
 
 			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
 			pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );

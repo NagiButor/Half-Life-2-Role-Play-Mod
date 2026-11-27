@@ -5231,7 +5231,13 @@ void CRendering3dView::DrawTranslucentRenderables( bool bInSkybox, bool bShadowD
 		case VIEW_INTRO_CAMERA:
 		case VIEW_INTRO_PLAYER:
 #endif
-			UpdateFullScreenDepthTexture();
+			{
+				extern bool DeferredShouldUpdateFullScreenDepth();
+				if ( DeferredShouldUpdateFullScreenDepth() )
+					UpdateFullScreenDepthTexture();
+				else
+					materials->GetRenderContext()->SetFullScreenDepthTextureValidityFlag( false );
+			}
 			break;
 
 		default:

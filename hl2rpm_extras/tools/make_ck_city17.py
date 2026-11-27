@@ -22,7 +22,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "AI_instructions", "skills", "hl2rpm-hammer", "scripts")))
 from vmf import VMF, Node, parse  # noqa: E402
 
-VMF_PATH = r"E:\XBLAH's modding tool\content\Mapbase\hl2rpm\mapsrc\test\ck_test.vmf"
+VMF_PATH = r"E:\SourceModding\HL2RPMSOURCE\Mapping\mapsrc\test\ck_test.vmf"
 VISGROUP = "ck_city17"
 
 B = 1536        # half the yard

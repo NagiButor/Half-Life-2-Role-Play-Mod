@@ -38,7 +38,15 @@ static ConVar r_weather_rain_density( "r_weather_rain_density", "1.0", FCVAR_ARC
 static ConVar r_weather_wetness( "r_weather_wetness", "1", FCVAR_ARCHIVE, "Wet surfaces and puddles after rain" );
 static ConVar r_weather_motes( "r_weather_motes", "1", FCVAR_ARCHIVE,
 	"Dust motes in the air: specks floating around the camera, lit where the sun reaches them - the beams through the windows of a room" );
-static ConVar r_weather_fog( "r_weather_fog", "1", FCVAR_ARCHIVE, "Weather height fog" );
+static ConVar r_weather_fog( "r_weather_fog", "1", FCVAR_ARCHIVE, "Weather height fog and atmospheric aerial perspective" );
+static ConVar r_weather_fog_aerial( "r_weather_fog_aerial", "1.0", FCVAR_ARCHIVE,
+	"Atmospheric aerial perspective strength (0 = off, 1 = realistic default)", true, 0.0f, true, 3.0f );
+static ConVar r_weather_fog_aerial_start( "r_weather_fog_aerial_start", "150", 0,
+	"Distance (units) where atmospheric aerial perspective begins to ramp in", true, 0.0f, true, 2000.0f );
+static ConVar r_weather_fog_aerial_falloff( "r_weather_fog_aerial_falloff", "0.12", 0,
+	"Height falloff (per 1000 units) of atmospheric aerial perspective", true, 0.0f, true, 2.0f );
+static ConVar r_weather_fog_aerial_indoor( "r_weather_fog_aerial_indoor", "0.12", 0,
+	"Fraction of atmospheric aerial perspective kept deep indoors (0..1)", true, 0.0f, true, 1.0f );
 static ConVar r_weather_cloud_temporal( "r_weather_cloud_temporal", "1", FCVAR_ARCHIVE, "Temporal accumulation for clouds (less noise)" );
 static ConVar r_weather_cloud_brightness( "r_weather_cloud_brightness", "1.0", FCVAR_ARCHIVE, "Cloud lighting multiplier" );
 static ConVar r_weather_rainmap_size( "r_weather_rainmap_size", "8192", 0, "World size (units) covered by the rain occlusion map" );
@@ -228,6 +236,12 @@ static inline float Luminance( const Vector &v )
 	return v.x * 0.2126f + v.y * 0.7152f + v.z * 0.0722f;
 }
 
+static inline float WeatherSmoothStep01( float x )
+{
+	x = clamp( x, 0.0f, 1.0f );
+	return x * x * ( 3.0f - 2.0f * x );
+}
+
 float WeatherRender_GetSkyLightIlluminance()
 {
 	C_WeatherSystem *pSys = GetWeatherSystem();
@@ -273,19 +287,32 @@ static bool s_bGodRaysVisible = false;	// this frame's sun / moon is on (or near
 static Vector4D s_vecWeatherFogParams( 0, 0, 0, 0 );	// density /1000u, falloff /1000u, base z, -
 static float s_flWeatherFogEyeZ = 0.0f;
 static float s_flWeatherFogMaxDensity = 0.985f;
+static float s_flWeatherAerialDensity = 0.0f;			// aerial perspective extinction /1000u
+static float s_flWeatherAerialStart = 150.0f;
 
 bool WeatherRender_GetForwardFog( float &flStart, float &flEnd, float &flMaxDensity )
 {
-	if ( !GetWeatherSystem()->IsActive() || !s_bWeatherFogColorValid || s_vecWeatherFogParams.x <= 0.0f )
+	if ( !GetWeatherSystem()->IsActive() || !s_bWeatherFogColorValid )
 		return false;
 
-	const float flFalloff = Max( s_vecWeatherFogParams.y * 0.001f, 1e-6f );
-	const float flSigma = s_vecWeatherFogParams.x * 0.001f * expf( -flFalloff * ( s_flWeatherFogEyeZ - s_vecWeatherFogParams.z ) );
-	if ( flSigma < 1e-7f )
+	float flSigmaHeight = 0.0f;
+	if ( s_vecWeatherFogParams.x > 0.0f )
+	{
+		const float flFalloff = Max( s_vecWeatherFogParams.y * 0.001f, 1e-6f );
+		flSigmaHeight = s_vecWeatherFogParams.x * 0.001f * expf( -flFalloff * ( s_flWeatherFogEyeZ - s_vecWeatherFogParams.z ) );
+	}
+
+	const float flSigmaAerial = s_flWeatherAerialDensity * 0.001f;
+	const float flSigmaTotal = flSigmaHeight + flSigmaAerial;
+	if ( flSigmaTotal < 1e-7f )
 		return false;
 
-	flStart = -0.2f / flSigma;
-	flEnd = 1.4f / flSigma;
+	const float flAerialFrac = flSigmaAerial / flSigmaTotal;
+	const float flStartOffset = s_flWeatherAerialStart * flAerialFrac;
+	const float flLead = Lerp( flAerialFrac, 0.20f, 0.15f );
+	const float flSpan = Lerp( flAerialFrac, 1.40f, 1.45f );
+	flStart = flStartOffset - flLead / flSigmaTotal;
+	flEnd = flStartOffset + flSpan / flSigmaTotal;
 	flMaxDensity = s_flWeatherFogMaxDensity;
 	return true;
 }
@@ -349,9 +376,10 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 	data.vecSunColor.Init( vecDirect.x, vecDirect.y, vecDirect.z, pSys->GetNightFactor() );
 
 	// --- the sky LUT is built for the global light: the untinted sun (the atmosphere colors
-	// it and casts the earth's shadow at dusk) or, once it has taken over, the moon
+	// it and casts the earth's shadow at dusk) or, once it has taken over, the moon.
+	// w carries flFogSkyColor (unused by sky LUT, read by weather_post without ABI change).
 	const float flSkyLight = WeatherRender_GetSkyLightIlluminance();
-	data.vecSkyLight.Init( flSkyLight, flSkyLight, flSkyLight, 0.0f );
+	data.vecSkyLight.Init( flSkyLight, flSkyLight, flSkyLight, Clamp( p.flFogSkyColor, 0.0f, 1.0f ) );
 	data.vecDebug.Init( (float)r_weather_debug_view.GetInt(), 0.0f, 0.0f, 0.0f );
 	data.vecSkyLightDir = s_vecSkyLightDir;
 	data.vecSkyLightDiff = s_vecSkyLightDiff;
@@ -404,13 +432,24 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 		s_bGodRaysVisible = flStrength > 0.0f;
 	}
 
+	// --- atmospheric aerial perspective density (extinction / 1000u, packed into vecSkyHorizon.w)
+	float flAerialDensity = 0.0f;
+	if ( r_weather_fog.GetBool() && r_weather_fog_aerial.GetFloat() > 0.001f )
+	{
+		const float flHazeEff = Clamp( p.flHaze, 0.5f, 2.5f );
+		const float flBaseAerial = 0.065f * ( 0.45f + 0.55f * flHazeEff );
+		const float flDenseTaper = 1.0f / ( 1.0f + Max( p.flFogDensity, 0.0f ) * 2.0f );
+		const float flNightScale = Lerp( pSys->GetNightFactor(), 1.0f, 0.75f );
+		flAerialDensity = flBaseAerial * flDenseTaper * flNightScale * r_weather_fog_aerial.GetFloat();
+	}
+
 	// --- sky light, used for cloud ambient, fog and wet reflections
 	Vector vecAmbHigh = light.ambh.AsVector3D();
 	Vector vecAmbLow = light.ambl.AsVector3D();
 	Vector vecZenith = vecAmbHigh * p.flSkyBrightness;
 	Vector vecHorizon = ( vecAmbHigh * 0.75f + vecAmbLow * 0.25f ) * ( 1.15f * p.flSkyBrightness ) + light.diff.AsVector3D() * 0.04f;
 	data.vecSkyZenith.Init( vecZenith.x, vecZenith.y, vecZenith.z, pSys->GetEnvLightScale() );
-	data.vecSkyHorizon.Init( vecHorizon.x, vecHorizon.y, vecHorizon.z, 0.0f );
+	data.vecSkyHorizon.Init( vecHorizon.x, vecHorizon.y, vecHorizon.z, flAerialDensity );
 
 	static ConVarRef cl_weather_debug( "cl_weather_debug" );
 	if ( cl_weather_debug.IsValid() && cl_weather_debug.GetBool() )
@@ -419,10 +458,10 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 		if ( gpGlobals->realtime > s_flNextPrint )
 		{
 			s_flNextPrint = gpGlobals->realtime + 1.0f;
-			Msg( "[weather light] sun alt %.2f night %.2f | cloud sun %.3f %.3f %.3f | zenith %.4f %.4f %.4f | horizon %.4f %.4f %.4f | light dir %.2f %.2f %.2f diff %.3f %.3f %.3f\n",
+			Msg( "[weather light] sun alt %.2f night %.2f | cloud sun %.3f %.3f %.3f | zenith %.4f %.4f %.4f | horizon %.4f %.4f %.4f | light dir %.2f %.2f %.2f diff %.3f %.3f %.3f | aerial %.4f\n",
 				pSys->GetSunAltitude(), pSys->GetNightFactor(), vecDirect.x, vecDirect.y, vecDirect.z,
 				vecZenith.x, vecZenith.y, vecZenith.z, vecHorizon.x, vecHorizon.y, vecHorizon.z,
-				light.vecLight.x, light.vecLight.y, light.vecLight.z, light.diff.x, light.diff.y, light.diff.z );
+				light.vecLight.x, light.vecLight.y, light.vecLight.z, light.diff.x, light.diff.y, light.diff.z, flAerialDensity );
 		}
 	}
 
@@ -430,15 +469,75 @@ void WeatherRender_CommitFrame( const CViewSetup &view, const lightData_Global_t
 	const float flHorizonLum = Luminance( vecHorizon );
 	const Vector vecGrey = Vector( 0.93f, 0.96f, 1.0f ) * flHorizonLum;
 	Vector vecFog = Lerp( Clamp( p.flFogSkyColor, 0.0f, 1.0f ), vecGrey, vecHorizon );
-	data.vecFogColor.Init( vecFog.x, vecFog.y, vecFog.z, 0.985f );
-	s_vecWeatherFogColor = vecFog;
+
+	// Analytical match to procsky_atmo horizon (~90 deg azimuth, ~1 deg elev) so 3D skybox linear fog
+	// and forward translucents (water, glass, particles, ropes) match weather_post's SkyView LUT.
+	const float flOvercast = WeatherSmoothStep01( ( Clamp( p.flCloudCoverage, 0.0f, 1.0f ) - 0.65f ) / 0.31f );
+	const float flOvercastDim = 1.0f - flOvercast * Clamp( p.flCloudDarkness, 0.0f, 1.0f ) * 0.42f;
+	const float flFogSkyCol = Clamp( p.flFogSkyColor, 0.0f, 1.0f );
+	const float flOpenSky = Clamp( ( 1.0f - flOvercast * 0.82f ) * ( flFogSkyCol / 0.85f ), 0.0f, 1.0f );
+	const float flSkyMatch = 0.55f + flOpenSky * 0.45f;
+
+	Vector vecAtmoHorizon = vecFog;
+	{
+		const float flSunAlt = pSys->GetSunAltitude();
+		const float flBaseLum = Max( Luminance( vecBaseDiff ), 0.001f );
+		const float flDayElev = WeatherSmoothStep01( ( flSunAlt + 2.0f ) / 18.0f );
+		const float flTwil = WeatherSmoothStep01( ( flSunAlt + 8.0f ) / 8.0f )
+			* ( 1.0f - WeatherSmoothStep01( ( flSunAlt - 2.0f ) / 12.0f ) );
+		const float flBlue = WeatherSmoothStep01( ( -flSunAlt + 1.0f ) / 7.0f );
+		const float flHazeNorm = Clamp( ( p.flHaze - 1.0f ) * 0.25f + flAerialDensity * 1.4f, 0.0f, 1.0f );
+		const float flMoonScale = pSys->GetMoonLightScale();
+
+		Vector vecAtmoDay = Lerp( flHazeNorm, Vector( 0.85f, 1.40f, 2.45f ), Vector( 1.55f, 1.85f, 2.25f ) ) * flBaseLum;
+		Vector vecAtmoTwil = Vector( 0.55f, 0.40f, 0.42f ) * flBaseLum;
+		Vector vecAtmoNight = Vector( 0.014f, 0.024f, 0.048f ) * ( 0.35f + 16.0f * flMoonScale ) * flBaseLum;
+
+		Vector vecAtmoRaw = vecAtmoDay * flDayElev + vecAtmoTwil * ( flTwil * 0.75f ) + vecAtmoNight * ( 1.0f - flDayElev );
+		vecAtmoRaw.x *= Lerp( flBlue * 0.55f, 1.0f, 0.62f );
+		vecAtmoRaw.y *= Lerp( flBlue * 0.55f, 1.0f, 0.78f );
+		vecAtmoRaw.z *= Lerp( flBlue * 0.55f, 1.0f, 1.30f );
+		const float flAtmoLum = Luminance( vecAtmoRaw );
+		vecAtmoRaw = Lerp( Clamp( p.flSkyDesaturation, 0.0f, 1.0f ), vecAtmoRaw, Vector( 0.93f, 0.97f, 1.03f ) * flAtmoLum );
+		vecAtmoRaw *= p.flSkyBrightness * flOvercastDim;
+
+		const float flInvW2 = 1.0f / 25.0f;
+		const float flAtmoL = Luminance( vecAtmoRaw );
+		const float flLcScale = ( 1.0f + flAtmoL * flInvW2 ) / ( flAtmoL + 1.0f );
+		for ( int i = 0; i < 3; i++ )
+		{
+			const float c = Max( vecAtmoRaw[i], 0.0f );
+			const float tc = c * ( 1.0f + c * flInvW2 ) / ( c + 1.0f );
+			const float lc = c * flLcScale;
+			vecAtmoHorizon[i] = Clamp( lc + ( tc - lc ) * Clamp( tc, 0.0f, 1.0f ), 0.0f, 1.0f );
+		}
+	}
+
+	const float flFogLift = Clamp( ( 1.0f - p.flCloudCoverage * 0.75f ) * flFogSkyCol * 0.35f, 0.0f, 0.35f );
+	const Vector vecHeightFog = Lerp( flFogLift, vecFog, vecAtmoHorizon );
+	data.vecFogColor.Init( vecHeightFog.x, vecHeightFog.y, vecHeightFog.z, 0.985f );
+
+	// 3D skybox linear fog + forward translucents match the unified shader fog color formula
+	const Vector vecAerialApprox = Lerp( flSkyMatch, vecHeightFog, vecAtmoHorizon );
+	const float flAerialLum = Luminance( vecAerialApprox );
+	const Vector vecMistBase = Lerp( 0.25f, vecAerialApprox, Vector( 0.96f, 0.98f, 1.02f ) * flAerialLum );
+	const Vector vecHeightApprox = Lerp( Lerp( flFogSkyCol, 0.35f, 0.92f ), vecHeightFog, vecMistBase );
+	const float flHeightEff = r_weather_fog.GetBool() ? Max( data.vecFogParams.x, 0.0f ) : 0.0f;
+	const float flAerialFrac = ( flAerialDensity > 0.0f ) ? ( flAerialDensity / ( flHeightEff + flAerialDensity ) ) : 0.0f;
+	s_vecWeatherFogColor = Lerp( flAerialFrac, vecHeightApprox, vecAerialApprox );
 	s_bWeatherFogColorValid = true;
 
 	if ( !r_weather_fog.GetBool() )
+	{
 		data.vecFogParams.x = 0.0f;
+		flAerialDensity = 0.0f;
+		data.vecSkyHorizon.w = 0.0f;
+	}
 	s_vecWeatherFogParams = data.vecFogParams;
 	s_flWeatherFogEyeZ = view.origin.z;
 	s_flWeatherFogMaxDensity = data.vecFogColor.w;
+	s_flWeatherAerialDensity = flAerialDensity;
+	s_flWeatherAerialStart = r_weather_fog_aerial_start.GetFloat();
 	if ( !r_weather_wetness.GetBool() )
 	{
 		data.vecRainParams.y = 0.0f;
@@ -566,7 +665,7 @@ void WeatherRender_PostOpaque( const CViewSetup &view )
 
 	const WeatherParams_t &p = pSys->GetParams();
 	const bool bWet = r_weather_wetness.GetBool() && pSys->GetWetness() > 0.005f;
-	const bool bFog = r_weather_fog.GetBool() && p.flFogDensity > 0.001f;
+	const bool bFog = r_weather_fog.GetBool() && ( p.flFogDensity > 0.001f || s_flWeatherAerialDensity > 0.001f );
 	// (mirror-smooth surfaces - glass in the facades, wet blood - get what is around them here too)
 	static ConVarRef r_deferred_reflections( "r_deferred_reflections" );
 	const bool bMirror = r_deferred_reflections.IsValid() && r_deferred_reflections.GetBool();
@@ -623,9 +722,12 @@ void WeatherRender_PostOpaque( const CViewSetup &view )
 	}
 
 	// mirror-smooth surfaces first (hl2rpm_mirror.cpp: the glass of the facades, wet blood - from the
-	// same copy), then the weather, which fogs them with the rest
+	// same copy), then the weather, which fogs them with the rest. On dry frames weather_post does
+	// no SSR, so clear INT_RENDERPARM_HL2RPM_SSR before it to avoid binding the scene copy needlessly.
 	if ( bMirror && g_pMatMirror )
 		DrawLightPassFullscreen( g_pMatMirror, view.width, view.height );
+	if ( !bWet && iSSRSteps > 0 )
+		pRenderContext->SetIntRenderingParameter( INT_RENDERPARM_HL2RPM_SSR, 0 );
 	if ( bWet || bFog || r_weather_debug_view.GetInt() != 0 )
 		DrawLightPassFullscreen( g_pMatPost, view.width, view.height );
 
@@ -1114,6 +1216,8 @@ static CUtlVector< ForwardMatVar_t > s_ForwardVars;
 static int s_nForwardMatCount = -1;
 static int s_nForwardPrecached = -1;
 static float s_flForwardScale = 1.0f;
+static bool s_bForwardForceRescan = false;
+static float s_flForwardLateScanTime = -1.0f;
 
 // How many materials are loaded right now. Asking a material for its shader, a variable or
 // whether it is translucent *loads* it - and the material system keeps every material it has
@@ -1264,6 +1368,7 @@ static void ScanForwardMaterials()
 void WeatherRender_OnMaterialsRestored()
 {
 	s_flForwardScale = -1.0f;
+	s_bForwardForceRescan = true;
 }
 
 static bool IsDeferredShaderMaterial( IMaterial *pMat )
@@ -1280,16 +1385,15 @@ static void UpdateForwardMaterials( float flScale )
 	for ( int i = 0; i < s_ForwardVars.Count() && !bReplaced; i++ )
 		bReplaced = IsDeferredShaderMaterial( s_ForwardVars[i].pMat );
 
-	bool bRescan = bReplaced || materials->GetNumMaterials() != s_nForwardMatCount;
+	bool bRescan = s_bForwardForceRescan || bReplaced || materials->GetNumMaterials() != s_nForwardMatCount;
+	s_bForwardForceRescan = false;
 
-	// (once a second anyway: a material loaded anew - mat_reloadmaterial, a setting that reloads
-	// the water materials - has the colors of its file again)
-	static float s_flNextApply = 0.0f;
-	if ( gpGlobals->realtime > s_flNextApply || gpGlobals->realtime < s_flNextApply - 2.0f )
+	// One-shot delayed check shortly after level load catches materials that were in the engine
+	// table before load and only precached on their first draw, without scanning 2000-5000 engine
+	// materials every second during gameplay (eliminates 1 Hz CPU spikes).
+	if ( s_flForwardLateScanTime >= 0.0f && gpGlobals->realtime >= s_flForwardLateScanTime )
 	{
-		s_flNextApply = gpGlobals->realtime + 1.0f;
-		s_flForwardScale = -1.0f;
-		// (a material found earlier and loaded only now, with its first draw, changes no count)
+		s_flForwardLateScanTime = -1.0f;
 		if ( !bRescan && CountPrecachedMaterials() != s_nForwardPrecached )
 			bRescan = true;
 	}
@@ -1333,12 +1437,15 @@ public:
 	{
 		WeatherRender_LevelInit();
 		ScanForwardMaterials();
+		s_flForwardLateScanTime = gpGlobals->realtime + 2.5f;
 	}
 
 	virtual void LevelShutdownPreEntity()
 	{
 		// the materials outlive the map: leave them as they were loaded
 		RestoreForwardMaterials();
+		s_flForwardLateScanTime = -1.0f;
+		s_bForwardForceRescan = false;
 	}
 
 	virtual void Shutdown()

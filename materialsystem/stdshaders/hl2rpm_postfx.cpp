@@ -23,6 +23,8 @@
 #include "hl2rpm_dof_ps30.inc"
 #include "hl2rpm_lowhealth_ps30.inc"
 
+extern void HL2RPM_GetFXAAParams( float out4[4] );
+
 static void SetupPostShadowState( IShaderShadow *pShaderShadow, int nSamplers )
 {
 	pShaderShadow->SetDefaultState();
@@ -271,10 +273,13 @@ BEGIN_VS_SHADER( HL2RPM_POSTFX, "" )
 
 			const postfxData_t &data = GetDeferredExt()->GetPostFXData();
 
+			const bool bFusedFXAA = ( data.vecLevelTexel[0].z > 0.5f );
+
 			DECLARE_DYNAMIC_VERTEX_SHADER( defconstruct_vs30 );
 			SET_DYNAMIC_VERTEX_SHADER( defconstruct_vs30 );
 
 			DECLARE_DYNAMIC_PIXEL_SHADER( hl2rpm_postfx_ps30 );
+			SET_DYNAMIC_PIXEL_SHADER_COMBO( FXAA, bFusedFXAA ? 1 : 0 );
 			SET_DYNAMIC_PIXEL_SHADER( hl2rpm_postfx_ps30 );
 
 			pShaderAPI->BindStandardTexture( SHADER_SAMPLER0, TEXTURE_FRAME_BUFFER_FULL_TEXTURE_0 );
@@ -303,6 +308,12 @@ BEGIN_VS_SHADER( HL2RPM_POSTFX, "" )
 			pShaderAPI->SetPixelShaderConstant( 6, c6, 1, true );
 			pShaderAPI->SetPixelShaderConstant( 7, data.vecFlare.Base(), 1, true );
 			pShaderAPI->SetPixelShaderConstant( 8, data.vecGlare.Base(), 1, true );
+			if ( bFusedFXAA )
+			{
+				float c9[4];
+				HL2RPM_GetFXAAParams( c9 );
+				pShaderAPI->SetPixelShaderConstant( 9, c9, 1, true );
+			}
 		}
 
 		Draw();

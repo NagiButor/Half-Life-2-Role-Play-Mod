@@ -4,7 +4,7 @@
 
 | Папка | Рабочее расположение |
 |---|---|
-| `fgd/` | `E:\XBLAH's modding tool\tools\FGDs\Mapbase` (Hammer++ грузит их оттуда) |
+| `fgd/` | `E:\SourceModding\HL2RPMSOURCE\Mapping\fgd` (Hammer++ грузит их оттуда) |
 | `crashtools/` | `E:\Steam\steamapps\sourcemods\hl2rpm\crashtools` |
 | `resource/` | `E:\Steam\steamapps\sourcemods\hl2rpm\resource` — локализация мода (`hl2rpm_<язык>.txt`, UTF-16LE **с BOM**), `gamemenu.res`, `clientscheme.res` (шрифты `RPMUI_*` окон M6 — `game/client/hl2rpm_ui.*`) |
 | `scripts/` | `E:\Steam\steamapps\sourcemods\hl2rpm\scripts` — `hl2rpm_pbr.txt` (из чего сделаны материалы, PBR), `hl2rpm_relief.txt` (исключения рельефа материалов без карты нормалей), `HudLayout.res` |

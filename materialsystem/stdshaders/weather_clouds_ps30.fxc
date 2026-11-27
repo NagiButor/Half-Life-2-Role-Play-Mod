@@ -214,9 +214,8 @@ float4 main( const PS_INPUT In ) : COLOR
 	const float ambScale = g_vecCloud2.x * 0.75 * ( ( dbg > 0.5 && dbg < 1.5 ) ? 0.0 : 1.0 );
 	float sunLow = saturate( 1.0 - L.z * 3.5 ) * saturate( ( L.z + 0.08 ) * 8.0 );
 
-	float3 flashColor = float3( 0.80, 0.86, 1.0 ) * g_vecLightning.w * 3.2;
 	float flashCos = saturate( dot( rd, normalize( g_vecLightning.xyz ) ) );
-	float flashAim = pow( flashCos, 14.0 ) + 0.1 * flashCos * flashCos;
+	float flashScale = ( pow( flashCos, 14.0 ) + 0.1 * flashCos * flashCos ) * g_vecLightning.w * 3.2;
 
 	float3 scatter = 0.0;
 	float T = 1.0;
@@ -297,7 +296,7 @@ float4 main( const PS_INPUT In ) : COLOR
 			* ( 0.12 + 0.88 * h01 * h01 ) * ( 1.0 - darkness * 0.50 ) * skyAO;
 		ambient += lightColor * ( 0.055 * sunLow * ( 1.0 - h01 ) * exp( -tau * 0.22 ) );
 
-		float3 S = sun * lightColor + ambient * ambScale + flashColor * flashAim * ( 1.0 - 0.6 * h01 );
+		float3 S = sun * lightColor + ambient * ambScale + float3( 0.80, 0.86, 1.0 ) * ( flashScale * ( 1.0 - 0.6 * h01 ) );
 
 		float sigma = density * sigmaScale;
 		float stepT = exp( -sigma * dt );
@@ -309,11 +308,11 @@ float4 main( const PS_INPUT In ) : COLOR
 	if ( T < 0.025 )
 		T = saturate( ( T - 0.02 ) / 0.98 );
 
-	// Aerial perspective toward horizon + gentle clip fade at MAX_DIST
-	float distHaze = 1.0 - exp( -tStart / 45000.0 );
-	float3 horizonHaze = g_vecSkyHorizon.rgb * ambScale * ( 0.55 - 0.25 * darkness );
-	scatter = lerp( scatter, horizonHaze * ( 1.0 - T ), distHaze * 0.55 );
-	float fade = saturate( ( MAX_DIST - tStart ) / 18000.0 );
+	// Distance atmospheric fade toward horizon: distant clouds dissolve softly into the sky behind them
+	// (no dark-ambient tinting), while procsky_atmo applies the unified horizon atmospheric fog on top.
+	// Keep solid overcast decks intact near the horizon so overcast fog blends evenly without blue gaps.
+	float fade = saturate( ( MAX_DIST - tStart ) * ( 1.0 / 26000.0 ) );
+	fade *= lerp( exp( -tStart * ( 1.0 / 34000.0 ) ), 1.0, saturate( ( g_vecCloud0.x - 0.85 ) * 8.3333 ) );
 	scatter *= fade;
 	T = lerp( 1.0, T, fade );
 

@@ -149,7 +149,7 @@ void DeferredDLights_Clear()
 	s_EffectsProxy.m_ElightKeys.RemoveAll();
 }
 
-static void UpdateBridgedLight( def_light_t *l, const dlight_t *src, bool bElight )
+static void UpdateBridgedLight( def_light_t *l, const dlight_t *src, bool bElight, bool bNew )
 {
 	// color: r,g,b * 2^exponent in lightmap units (255 = full light)
 	Vector col( TexLightToLinear( src->color.r, src->color.exponent ),
@@ -166,38 +166,56 @@ static void UpdateBridgedLight( def_light_t *l, const dlight_t *src, bool bEligh
 	// Engine dlights light the lightmaps by distance only; a deferred light also uses
 	// the angle, so one lying on the floor (flares, explosions at the impact point)
 	// would not light the floor at all: lift it a little.
-	l->pos = src->origin + Vector( 0, 0, clamp( src->GetRadius() * 0.08f, 4.0f, 24.0f ) );
+	const Vector vecNewPos = src->origin + Vector( 0, 0, clamp( src->GetRadius() * 0.08f, 4.0f, 24.0f ) );
+	const float flNewRadius = Max( src->GetRadius(), 16.0f );
+
 	l->col_diffuse = col;
 	l->col_ambient.Init();
-	l->flRadius = Max( src->GetRadius(), 16.0f );
 	l->flFalloffPower = 1.6f;
 
 	const bool bSpot = src->m_OuterAngle > 0.0f && src->m_Direction.LengthSqr() > 0.01f;
+	const uint8 iNewType = bSpot ? DEFLIGHTTYPE_SPOT : DEFLIGHTTYPE_POINT;
+	QAngle angNew = vec3_angle;
+	float flNewOuter = l->flSpotCone_Outer;
+	float flNewInner = l->flSpotCone_Inner;
 	if ( bSpot )
 	{
-		QAngle ang;
-		VectorAngles( src->m_Direction, ang );
-		l->ang = ang;
-		l->iLighttype = DEFLIGHTTYPE_SPOT;
+		VectorAngles( src->m_Direction, angNew );
+		normalizeAngles( angNew );
 		const float flOuter = clamp( src->m_OuterAngle * 2.0f, 2.0f, 175.0f );
 		const float flInner = clamp( Min( src->m_InnerAngle * 2.0f, flOuter - 1.0f ), 1.0f, flOuter );
-		l->flSpotCone_Outer = SPOT_DEGREE_TO_RAD( flOuter );
-		l->flSpotCone_Inner = SPOT_DEGREE_TO_RAD( flInner );
-	}
-	else
-	{
-		l->ang.Init();
-		l->iLighttype = DEFLIGHTTYPE_POINT;
+		flNewOuter = SPOT_DEGREE_TO_RAD( flOuter );
+		flNewInner = SPOT_DEGREE_TO_RAD( flInner );
 	}
 
-	const uint16 iVis = (uint16)Min( (int)( l->flRadius * 4.0f + 512.0f ), 0xFFFF );
+	const uint16 iVis = (uint16)Min( (int)( flNewRadius * 4.0f + 512.0f ), 0xFFFF );
+	const uint16 iVisRange = (uint16)Min( (int)( flNewRadius * 2.0f + 256.0f ), 0xFFFF );
+
+	const bool bTypeChanged = ( l->iLighttype != iNewType );
+	const bool bRadiusChanged = fabsf( l->flRadius - flNewRadius ) > 0.5f;
+	const bool bPosChanged = l->pos.DistToSqr( vecNewPos ) > 0.25f;
+	const bool bAngChanged = bSpot && ( fabsf( l->ang.x - angNew.x ) > 0.05f || fabsf( l->ang.y - angNew.y ) > 0.05f || fabsf( l->ang.z - angNew.z ) > 0.05f );
+	const bool bConeChanged = bSpot && ( fabsf( l->flSpotCone_Outer - flNewOuter ) > 1e-4f || fabsf( l->flSpotCone_Inner - flNewInner ) > 1e-4f );
+	const bool bVisChanged = ( l->iVisible_Dist != iVis || l->iVisible_Range != iVisRange );
+
+	l->pos = vecNewPos;
+	l->ang = angNew;
+	l->flRadius = flNewRadius;
+	l->iLighttype = iNewType;
+	l->flSpotCone_Outer = flNewOuter;
+	l->flSpotCone_Inner = flNewInner;
 	l->iVisible_Dist = iVis;
-	l->iVisible_Range = (uint16)Min( (int)( l->flRadius * 2.0f + 256.0f ), 0xFFFF );
+	l->iVisible_Range = iVisRange;
 	l->iShadow_Dist = 0;
 	l->iShadow_Range = 0;
 	l->iFlags &= ~( DEFLIGHT_SHADOW_ENABLED | DEFLIGHT_VOLUMETRICS_ENABLED | DEFLIGHT_COOKIE_ENABLED | DEFLIGHT_LIGHTSTYLE_ENABLED );
 	l->iFlags |= DEFLIGHT_ENABLED;
-	l->MakeDirtyAll();
+
+	// HL2RPM: don't run 14 world traces / rebuild static meshes when only color flickered
+	if ( bNew || bTypeChanged || bPosChanged || bRadiusChanged || bAngChanged || bConeChanged || bVisChanged )
+		l->MakeDirtyXForms();
+	if ( bNew || bTypeChanged || ( bSpot && ( bRadiusChanged || bConeChanged ) ) )
+		l->MakeDirtyRenderMesh();
 }
 
 void DeferredDLights_Update( const Vector &vecViewOrigin )
@@ -285,7 +303,8 @@ void DeferredDLights_Update( const Vector &vecViewOrigin )
 				break;
 			}
 		}
-		if ( iSlot < 0 )
+		const bool bNew = ( iSlot < 0 );
+		if ( bNew )
 		{
 			iSlot = s_Bridged.AddToTail();
 			s_Bridged[iSlot].pSource = c.pSource;
@@ -293,7 +312,7 @@ void DeferredDLights_Update( const Vector &vecViewOrigin )
 			GetLightingManager()->AddLight( s_Bridged[iSlot].pLight );
 		}
 		s_Bridged[iSlot].iFrame = iFrame;
-		UpdateBridgedLight( s_Bridged[iSlot].pLight, c.pSource, c.bElight );
+		UpdateBridgedLight( s_Bridged[iSlot].pLight, c.pSource, c.bElight, bNew );
 
 		if ( r_deferred_dlights_debug.GetBool() )
 		{

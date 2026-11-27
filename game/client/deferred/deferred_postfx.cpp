@@ -211,11 +211,29 @@ void InitPostFXRTs()
 	g_tex_LumCur.Init( materials->CreateNamedRenderTargetTextureEx2( "_rt_hl2rpm_lumcur", 1, 1,
 		RT_SIZE_NO_CHANGE, IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE, flags | TEXTUREFLAGS_POINTSAMPLE, 0 ) );
 
-	// bloom levels: 1, 3, 5 in A, 2, 4 in B (a level is read while the next one is written)
-	g_tex_BloomA.Init( materials->CreateNamedRenderTargetTextureEx2( "_rt_hl2rpm_bloomA", 128, 128,
-		RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP, IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE, flags, 0 ) );
-	g_tex_BloomB.Init( materials->CreateNamedRenderTargetTextureEx2( "_rt_hl2rpm_bloomB", 128, 128,
-		RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP, IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE, flags, 0 ) );
+	// bloom levels: 1, 3, 5 in A, 2, 4 in B (a level is read while the next one is written).
+	// HL2RPM: allocate A and B tightly for their packed mip rects instead of full-res RGBA16F
+	// (at 1080p: A = 964x683, B = 484x345 -> ~6.6 MB instead of ~33.2 MB, saving ~26.6 MB VRAM).
+	int bw = 0, bh = 0;
+	materials->GetBackBufferDimensions( bw, bh );
+	if ( bw > 0 && bh > 0 )
+	{
+		const int nBloomAW = Max( 64, ( bw + 1 ) / 2 + 4 );
+		const int nBloomAH = Max( 64, ( bh + 1 ) / 2 + Max( 1, bh >> 3 ) + 8 );
+		const int nBloomBW = Max( 32, ( bw >> 2 ) + 4 );
+		const int nBloomBH = Max( 32, ( bh >> 2 ) + Max( 1, bh >> 4 ) + 8 );
+		g_tex_BloomA.Init( materials->CreateNamedRenderTargetTextureEx2( "_rt_hl2rpm_bloomA", nBloomAW, nBloomAH,
+			RT_SIZE_LITERAL, IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE, flags, 0 ) );
+		g_tex_BloomB.Init( materials->CreateNamedRenderTargetTextureEx2( "_rt_hl2rpm_bloomB", nBloomBW, nBloomBH,
+			RT_SIZE_LITERAL, IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE, flags, 0 ) );
+	}
+	else
+	{
+		g_tex_BloomA.Init( materials->CreateNamedRenderTargetTextureEx2( "_rt_hl2rpm_bloomA", 128, 128,
+			RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP, IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE, flags, 0 ) );
+		g_tex_BloomB.Init( materials->CreateNamedRenderTargetTextureEx2( "_rt_hl2rpm_bloomB", 128, 128,
+			RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP, IMAGE_FORMAT_RGBA16161616F, MATERIAL_RT_DEPTH_NONE, flags, 0 ) );
+	}
 
 	// the render targets lost their content (device reset): the adaptation starts over
 	s_bResetAdaptation = true;
@@ -525,7 +543,7 @@ bool DeferredPostFX_IsActive()
 //-----------------------------------------------------------------------------
 // Frame
 //-----------------------------------------------------------------------------
-void DeferredPostFX_Draw( const CViewSetup &view, ITexture *pSourceScene, int nSrcW, int nSrcH )
+void DeferredPostFX_Draw( const CViewSetup &view, ITexture *pSourceScene, int nSrcW, int nSrcH, bool bFusedFXAA )
 {
 	if ( !IsPostFXActive() || !EnsureMaterials() )
 		return;
@@ -541,8 +559,8 @@ void DeferredPostFX_Draw( const CViewSetup &view, ITexture *pSourceScene, int nS
 	const int sw = bUseSource ? nSrcW : vw, sh = bUseSource ? nSrcH : vh;
 	const int fbw = pFrame->GetActualWidth(), fbh = pFrame->GetActualHeight();
 	const int aw = g_tex_BloomA->GetActualWidth(), ah = g_tex_BloomA->GetActualHeight();
+	const int bwTex = g_tex_BloomB->GetActualWidth(), bhTex = g_tex_BloomB->GetActualHeight();
 
-	const bool bBloom = r_hl2rpm_bloom.GetBool();
 	const bool bExposure = r_hl2rpm_exposure.GetBool();
 	const bool bGrade = r_hl2rpm_grade.GetBool();
 	const bool bLens = r_hl2rpm_lens.GetBool();
@@ -560,6 +578,10 @@ void DeferredPostFX_Draw( const CViewSetup &view, ITexture *pSourceScene, int nS
 	lx[3] = 0; ly[3] = lh[1] + 4;				// A, under level 1
 	lx[4] = 0; ly[4] = lh[2] + 4;				// B, under level 2
 	lx[5] = lw[3] + 4; ly[5] = lh[1] + 4;		// A, right of level 3
+
+	const bool bBloomFits = ( lw[1] <= aw && ly[3] + lh[3] <= ah && lx[5] + lw[5] <= aw && ly[5] + lh[5] <= ah
+		&& lw[2] <= bwTex && ly[4] + lh[4] <= bhTex );
+	const bool bBloom = r_hl2rpm_bloom.GetBool() && bBloomFits;
 
 	postfxData_t data;
 
@@ -666,12 +688,15 @@ void DeferredPostFX_Draw( const CViewSetup &view, ITexture *pSourceScene, int nS
 	const float flBx = (float)lw[1] / sw / aw, flBy = (float)lh[1] / sh / ah;
 	data.vecFrameToBloom.Init( fbw * flBx, fbh * flBy, -sx * flBx, -sy * flBy );
 
-	data.vecLevelTexel[0].Init( 1.0f / fbw, 1.0f / fbh, 1.0f, 1.0f );
+	// vecLevelTexel[0].z carries the fused FXAA flag for hl2rpm_postfx_ps30 (unused by bloom pass 0)
+	data.vecLevelTexel[0].Init( 1.0f / fbw, 1.0f / fbh, ( bFusedFXAA && !bUseSource ) ? 1.0f : 0.0f, 1.0f );
 	data.vecLevelRect[0].Init( ( sx + 0.5f ) / fbw, ( sy + 0.5f ) / fbh, ( sx + sw - 0.5f ) / fbw, ( sy + sh - 0.5f ) / fbh );
 	for ( int k = 1; k < POSTFX_LEVELS; k++ )
 	{
-		data.vecLevelTexel[k].Init( 1.0f / aw, 1.0f / ah, 1.0f, 1.0f );
-		data.vecLevelRect[k].Init( ( lx[k] + 0.5f ) / aw, ( ly[k] + 0.5f ) / ah, ( lx[k] + lw[k] - 0.5f ) / aw, ( ly[k] + lh[k] - 0.5f ) / ah );
+		const int tw = IsLevelInA( k ) ? aw : bwTex;
+		const int th = IsLevelInA( k ) ? ah : bhTex;
+		data.vecLevelTexel[k].Init( 1.0f / tw, 1.0f / th, 1.0f, 1.0f );
+		data.vecLevelRect[k].Init( ( lx[k] + 0.5f ) / tw, ( ly[k] + 0.5f ) / th, ( lx[k] + lw[k] - 0.5f ) / tw, ( ly[k] + lh[k] - 0.5f ) / th );
 	}
 
 	QUEUE_FIRE( CommitPostFXData, data );
@@ -718,17 +743,21 @@ void DeferredPostFX_Draw( const CViewSetup &view, ITexture *pSourceScene, int nS
 
 		for ( int k = 2; k < POSTFX_LEVELS; k++ )
 		{
+			const int srcW = IsLevelInA( k - 1 ) ? aw : bwTex;
+			const int srcH = IsLevelInA( k - 1 ) ? ah : bhTex;
 			pRenderContext->PushRenderTargetAndViewport( IsLevelInA( k ) ? g_tex_BloomA : g_tex_BloomB, lx[k], ly[k], lw[k], lh[k] );
 			pRenderContext->DrawScreenSpaceRectangle( g_pMatBloomDown[k], 0, 0, lw[k], lh[k],
-				lx[k - 1], ly[k - 1], lx[k - 1] + lw[k - 1] - 1, ly[k - 1] + lh[k - 1] - 1, aw, ah );
+				lx[k - 1], ly[k - 1], lx[k - 1] + lw[k - 1] - 1, ly[k - 1] + lh[k - 1] - 1, srcW, srcH );
 			pRenderContext->PopRenderTargetAndViewport();
 		}
 
 		for ( int k = POSTFX_LEVELS - 1; k >= 2; k-- )
 		{
+			const int srcW = IsLevelInA( k ) ? aw : bwTex;
+			const int srcH = IsLevelInA( k ) ? ah : bhTex;
 			pRenderContext->PushRenderTargetAndViewport( IsLevelInA( k - 1 ) ? g_tex_BloomA : g_tex_BloomB, lx[k - 1], ly[k - 1], lw[k - 1], lh[k - 1] );
 			pRenderContext->DrawScreenSpaceRectangle( g_pMatBloomUp[k], 0, 0, lw[k - 1], lh[k - 1],
-				lx[k], ly[k], lx[k] + lw[k] - 1, ly[k] + lh[k] - 1, aw, ah );
+				lx[k], ly[k], lx[k] + lw[k] - 1, ly[k] + lh[k] - 1, srcW, srcH );
 			pRenderContext->PopRenderTargetAndViewport();
 		}
 	}

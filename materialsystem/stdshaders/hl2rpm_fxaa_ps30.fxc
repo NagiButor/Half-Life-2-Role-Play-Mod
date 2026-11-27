@@ -1,11 +1,12 @@
 //========= HL2RPM ============================================================//
 //
-// FXAA 3.11 (Timothy Lottes, NVIDIA - public domain algorithm), PC quality,
-// search steps of preset 23. The deferred renderer has no working MSAA (the
-// composite reads one lit surface per pixel): thin geometry - the ribs of
-// corrugated metal, roof trims, railings, wires - turned into dotted lines that
-// crawled while the player walked. Runs on the final frame (after the engine's
-// post processing), luma from the gamma space color.
+// FXAA 3.11 (Timothy Lottes, NVIDIA - public domain algorithm), upgraded with:
+//   - Fast chroma-aware RGB channel fallback for isoluminant color silhouettes
+//     (e.g. orange cube vs blue sky, red brick vs sky) with zero extra taps
+//   - 6-step search { 1.0, 1.5, 2.0, 2.0, 4.0, 8.0 } (1.0px exact first step,
+//     18.5px reach; same iteration count as old 13.5px loop, 37% farther reach)
+// Used when PostFX is off or at renderscale < 1.0 (at native 1.0x with PostFX on,
+// the identical algorithm runs fused inside hl2rpm_postfx_ps30 in a single pass).
 //
 //=============================================================================//
 
@@ -22,51 +23,72 @@ struct PS_INPUT
 	float3 vecWorldRay			: TEXCOORD1;
 };
 
-float FxaaLuma( float3 c )
-{
-	return dot( c, float3( 0.299f, 0.587f, 0.114f ) );
-}
-
 float3 FxaaTap( float2 uv )
 {
 	return tex2Dlod( sFrame, float4( uv, 0, 0 ) ).rgb;
 }
 
-// search steps of FXAA_QUALITY__PRESET 23
+// 6 search steps (1.0px exact center precision, 18.5px reach, 4 loop iterations max)
 #define FXAA_STEPS 6
-static const float g_flFxaaStep[FXAA_STEPS] = { 1.0f, 1.5f, 2.0f, 2.0f, 2.0f, 8.0f };
+static const float g_flFxaaStep[FXAA_STEPS] = { 1.0f, 1.5f, 2.0f, 2.0f, 4.0f, 8.0f };
 
 float4 main( const PS_INPUT In ) : COLOR
 {
 	float2 pos = In.vTexCoord;
 	const float2 rcpFrame = g_vecFxaa0.xy;
 
-	const float3 rgbM = FxaaTap( pos );
-	const float lumaM = FxaaLuma( rgbM );
-	float lumaS = FxaaLuma( FxaaTap( pos + float2( 0, 1 ) * rcpFrame ) );
-	const float lumaE = FxaaLuma( FxaaTap( pos + float2( 1, 0 ) * rcpFrame ) );
-	float lumaN = FxaaLuma( FxaaTap( pos + float2( 0, -1 ) * rcpFrame ) );
-	const float lumaW = FxaaLuma( FxaaTap( pos + float2( -1, 0 ) * rcpFrame ) );
+	// Unbranched tex2D lets the GPU batch all 5 cross fetches together
+	const float3 rgbM = tex2D( sFrame, pos ).rgb;
+	const float3 rgbS = tex2D( sFrame, pos + float2( 0, 1 ) * rcpFrame ).rgb;
+	const float3 rgbE = tex2D( sFrame, pos + float2( 1, 0 ) * rcpFrame ).rgb;
+	const float3 rgbN = tex2D( sFrame, pos + float2( 0, -1 ) * rcpFrame ).rgb;
+	const float3 rgbW = tex2D( sFrame, pos + float2( -1, 0 ) * rcpFrame ).rgb;
 
-	const float maxSM = max( lumaS, lumaM );
-	const float minSM = min( lumaS, lumaM );
-	const float maxESM = max( lumaE, maxSM );
-	const float minESM = min( lumaE, minSM );
-	const float maxWN = max( lumaN, lumaW );
-	const float minWN = min( lumaN, lumaW );
-	const float rangeMax = max( maxWN, maxESM );
-	const float rangeMin = min( minWN, minESM );
-	const float range = rangeMax - rangeMin;
+	const float3 lumaW3 = float3( 0.299f, 0.587f, 0.114f );
+	float lumaM = dot( rgbM, lumaW3 );
+	float lumaS = dot( rgbS, lumaW3 );
+	float lumaE = dot( rgbE, lumaW3 );
+	float lumaN = dot( rgbN, lumaW3 );
+	float lumaW = dot( rgbW, lumaW3 );
 
-	// no edge: the pixel as it is
+	const float rangeMaxL = max( max( lumaN, lumaW ), max( lumaE, max( lumaS, lumaM ) ) );
+	const float rangeMinL = min( min( lumaN, lumaW ), min( lumaE, min( lumaS, lumaM ) ) );
+	const float lumaRange = rangeMaxL - rangeMinL;
+
+	// Zero-sqrt chroma-aware edge check for isoluminant silhouettes (e.g. orange cube vs blue sky)
+	const float3 mn = min( rgbM, min( min( rgbN, rgbS ), min( rgbE, rgbW ) ) );
+	const float3 mx = max( rgbM, max( max( rgbN, rgbS ), max( rgbE, rgbW ) ) );
+	const float3 diff = mx - mn;
+	const float maxChanRange = max( diff.r, max( diff.g, diff.b ) );
+	const float effRange = max( lumaRange, maxChanRange * 0.52f );
+
+	// no edge: the pixel as it is (calibrated so archived config.cfg 0.125/0.0625 catches
+	// subtle floor grid lines & dark/midtone silhouettes without firing on flat sky/concrete)
 	[branch]
-	if ( range < max( g_vecFxaa1.x, rangeMax * g_vecFxaa0.w ) )
+	if ( effRange < max( g_vecFxaa1.x * 0.65f, rangeMaxL * ( g_vecFxaa0.w * 0.80f ) ) )
 		return float4( rgbM, 1 );
 
-	const float lumaNW = FxaaLuma( FxaaTap( pos + float2( -1, -1 ) * rcpFrame ) );
-	const float lumaSE = FxaaLuma( FxaaTap( pos + float2( 1, 1 ) * rcpFrame ) );
-	const float lumaNE = FxaaLuma( FxaaTap( pos + float2( 1, -1 ) * rcpFrame ) );
-	const float lumaSW = FxaaLuma( FxaaTap( pos + float2( -1, 1 ) * rcpFrame ) );
+	// r_deferred_fxaa_debug: the detected edges in red
+	if ( g_vecFxaa1.y > 0.5f )
+		return float4( lerp( rgbM, float3( 1, 0, 0 ), 0.7f ), 1 );
+
+	float3 metricAxis = lumaW3;
+	float range = lumaRange;
+	if ( maxChanRange * 0.52f > lumaRange * 1.15f )
+	{
+		metricAxis = ( diff.r >= diff.b ) ? float3( 1.0f, 0.0f, 0.0f ) : float3( 0.0f, 0.0f, 1.0f );
+		lumaM = dot( rgbM, metricAxis );
+		lumaS = dot( rgbS, metricAxis );
+		lumaE = dot( rgbE, metricAxis );
+		lumaN = dot( rgbN, metricAxis );
+		lumaW = dot( rgbW, metricAxis );
+		range = max( maxChanRange, 1e-5f );
+	}
+
+	const float lumaNW = dot( FxaaTap( pos + float2( -1, -1 ) * rcpFrame ), metricAxis );
+	const float lumaSE = dot( FxaaTap( pos + float2( 1, 1 ) * rcpFrame ), metricAxis );
+	const float lumaNE = dot( FxaaTap( pos + float2( 1, -1 ) * rcpFrame ), metricAxis );
+	const float lumaSW = dot( FxaaTap( pos + float2( -1, 1 ) * rcpFrame ), metricAxis );
 
 	const float lumaNS = lumaN + lumaS;
 	const float lumaWE = lumaW + lumaE;
@@ -115,10 +137,6 @@ float4 main( const PS_INPUT In ) : COLOR
 		lengthSign = -lengthSign;
 	const float subpixC = saturate( abs( subpixB ) * subpixRcpRange );
 
-	// r_deferred_fxaa_debug: the detected edges in red
-	if ( g_vecFxaa1.y > 0.5f )
-		return float4( lerp( rgbM, float3( 1, 0, 0 ), 0.7f ), 1 );
-
 	float2 posB = pos;
 	float2 offNP;
 	offNP.x = ( !horzSpan ) ? 0.0f : rcpFrame.x;
@@ -131,9 +149,9 @@ float4 main( const PS_INPUT In ) : COLOR
 	float2 posN = posB - offNP * g_flFxaaStep[0];
 	float2 posP = posB + offNP * g_flFxaaStep[0];
 	const float subpixD = ( ( -2.0f ) * subpixC ) + 3.0f;
-	float lumaEndN = FxaaLuma( FxaaTap( posN ) );
+	float lumaEndN = dot( FxaaTap( posN ), metricAxis );
 	const float subpixE = subpixC * subpixC;
-	float lumaEndP = FxaaLuma( FxaaTap( posP ) );
+	float lumaEndP = dot( FxaaTap( posP ), metricAxis );
 
 	if ( !pairN )
 		lumaNN = lumaSS;
@@ -158,9 +176,9 @@ float4 main( const PS_INPUT In ) : COLOR
 		if ( doneN && doneP )
 			break;
 		if ( !doneN )
-			lumaEndN = FxaaLuma( FxaaTap( posN ) ) - lumaNN * 0.5f;
+			lumaEndN = dot( FxaaTap( posN ), metricAxis ) - lumaNN * 0.5f;
 		if ( !doneP )
-			lumaEndP = FxaaLuma( FxaaTap( posP ) ) - lumaNN * 0.5f;
+			lumaEndP = dot( FxaaTap( posP ), metricAxis ) - lumaNN * 0.5f;
 		doneN = abs( lumaEndN ) >= gradientScaled;
 		doneP = abs( lumaEndP ) >= gradientScaled;
 		if ( !doneN )

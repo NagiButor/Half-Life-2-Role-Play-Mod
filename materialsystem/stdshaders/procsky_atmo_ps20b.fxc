@@ -23,13 +23,13 @@ const float4 g_wMoon						: register( c10 );	// moon dir, w night factor
 const float4 g_wSun							: register( c11 );	// real sun dir, w sun altitude (deg)
 const float4 g_wLightning					: register( c12 );	// flash dir, w intensity
 const float4 g_wWind						: register( c13 );	// xy cloud offset (m)
-const float4 g_wSkyHorizon					: register( c14 );	// rgb horizon sky light
-const float4 g_wFlags						: register( c15 );	// x weather enabled, y clouds valid
+const float4 g_wSkyHorizon					: register( c14 );	// rgb horizon sky light, w aerial density /1000u
+const float4 g_wFlags						: register( c15 );	// x weather enabled, y clouds valid, z flSkyMatch, w flOvercastDim
 
 const float3 g_light_diffuse				: register( c16 );
 // HL2RPM: x 1 = the main view (the G-buffer has this screen's pixels): a pixel the G-buffer holds
 // geometry in is drawn over by it - nothing to compute (the sky goes first, without a depth test,
-// and used to run this whole shader for every pixel of the screen). zw 1 / G-buffer size
+// and used to run this whole shader for every pixel of the screen). y flFogSkyColor, zw 1 / G-buffer size
 const float4 g_wSkipCovered					: register( c19 );
 
 // HL2RPM: per-frame sky values moved from PS to CPU (ambient*factor, twilight colors/scales,
@@ -211,13 +211,16 @@ float4 main( const PS_INPUT In ) : COLOR
 	float3 sunDir = bWeather ? normalize( g_wSun.xyz ) : lightDir;
 	float3 rayDir = normalize( In.dir );
 
-	float hemi = saturate( rayDir.z * 0.5 + 0.5 );
+	bool bHitsGround = ( rayDir.z <= -0.00793033 );
+	// Clamp below-horizon rays to the horizon plane for atmospheric scattering lookup so
+	// the 2D skybox never drops into the virtual planet's dark ground sphere below rayDir.z = 0.
+	float3 lutDir = ( rayDir.z < 0.0 ) ? normalize( float3( rayDir.xy, 0.0 ) + float3( 1e-6, 0.0, 0.0 ) ) : rayDir;
+
+	float hemi = saturate( lutDir.z * 0.5 + 0.5 );
 	float3 ambientTerm = lerp( g_skyPre0.rgb, g_skyPre1.rgb, hemi );
 
-	bool bHitsGround = ( rayDir.z <= -0.00793033 );
-
 	// ---- clear-sky atmosphere (lit by the global light: the sun, or the moon at night)
-	float3 lum = tex2Dlod( sSkyViewLut, float4( SkyViewUV( rayDir, lightDir ), 0, 0 ) ).rgb;
+	float3 lum = tex2Dlod( sSkyViewLut, float4( SkyViewUV( lutDir, lightDir ), 0, 0 ) ).rgb;
 
 	// ---- sun disk (at night the global light is the moon, handled below)
 	float3 sunLum = 0.0;
@@ -239,12 +242,12 @@ float4 main( const PS_INPUT In ) : COLOR
 	[branch]
 	if ( g_skyPre1.w > 0.5 )
 	{
-		float hz = saturate( 1.0 - rayDir.z );
+		float hz = saturate( 1.0 - lutDir.z );
 		float horizonWide = pow( hz, 2.2 );
 		float hz2 = hz * hz;
 		float horizonTight = hz2 * hz2 * hz;
 
-		float2 rayH = normalize( rayDir.xy + float2( 0.0001, 0.0 ) );
+		float2 rayH = normalize( lutDir.xy + float2( 0.0001, 0.0 ) );
 		float dSun = dot( rayH, float2( g_skyPre2.w, g_skyPre3.w ) );
 		float rs = saturate( dSun );
 		float rs2 = rs * rs;
@@ -300,6 +303,8 @@ float4 main( const PS_INPUT In ) : COLOR
 	}
 
 	float3 moon = 0.0;
+	float3 clearSkyRaw = lum;
+	float aerialDens = bWeather ? max( g_wSkyHorizon.w, 0.0 ) : 0.0;
 	if ( bWeather )
 	{
 		// ---- weather greys out and darkens the clear sky behind the clouds
@@ -307,11 +312,14 @@ float4 main( const PS_INPUT In ) : COLOR
 		float skyLum = dot( lum, float3( 0.2126, 0.7152, 0.0722 ) );
 		lum = lerp( lum, skyLum * float3( 0.93, 0.97, 1.03 ), desat );
 		lum *= g_wAtmo.z;
+		skyLum *= g_wAtmo.z;
 
-		// haze brightens and whitens the horizon
-		float hazeK = saturate( ( g_wAtmo.x - 1.0 ) * 0.25 );
-		float horizon = pow( saturate( 1.0 - abs( rayDir.z ) ), 4.0 );
-		lum = lerp( lum, max( lum, skyLum * 1.15 ), hazeK * horizon );
+		// haze brightens and whitens the horizon (exact same formula as weather_post_ps30)
+		float hazeK = saturate( ( g_wAtmo.x - 1.0 ) * 0.25 + aerialDens * 1.4 );
+		float hzSky = saturate( 1.0 - lutDir.z );
+		float hzSky2 = hzSky * hzSky;
+		lum = lerp( lum, max( lum, skyLum * 1.15 ), hazeK * ( hzSky2 * hzSky2 ) );
+		clearSkyRaw = lum;
 
 		// ---- moon
 		if ( g_wMoon.z > -0.05 && !bHitsGround )
@@ -358,24 +366,53 @@ float4 main( const PS_INPUT In ) : COLOR
 	lum += sunLum + stars + moon;
 	lum = jodieReinhardTonemap( lum * exposure );
 
-	// ---- the horizon melts into the weather fog (same color the world fog uses)
-	if ( bWeather && g_wFog.x > 0.0 )
+	// ---- unified atmospheric aerial haze & weather height fog (matches weather_post_ps30)
+	// Applies BOTH height fog (tauSkyHeight) and aerial perspective (tauSkyAerial) to the 2D skybox
+	// and distant low-elevation clouds using the exact same luminous directional fogColor as 3D mountains.
+	if ( bWeather && ( g_wFog.x > 0.0 || aerialDens > 0.0 ) )
 	{
-		// optical depth of the (exponential height) fog along the ray: a dense fog hides the
-		// zenith too (the "fog" preset used to show clear sky and holes overhead), haze only
-		// the horizon
-		float fogDensity = g_wFog.x * 0.001;
-		float fogScaleH = 1000.0 / max( g_wFog.y, 0.05 );
-		float pathUp = fogScaleH / max( rayDir.z, 0.02 );
-		float pathToHorizon = 12000.0 / max( abs( rayDir.z ) + 0.03, 0.03 );
-		float fogSky = 1.0 - exp( -fogDensity * min( pathUp, pathToHorizon * 0.35 ) );
-		// half-way to the hue of the sky behind it: the fog color comes from the scene
-		// light and would otherwise show as a tinted band where it meets the clouds
-		float3 fogCol = g_wFogColor.rgb;
-		float fogLum = dot( fogCol, float3( 0.2126, 0.7152, 0.0722 ) );
-		float behindLum = dot( lum, float3( 0.2126, 0.7152, 0.0722 ) );
-		fogCol = lerp( fogCol, lum * ( fogLum / max( behindLum, 1e-4 ) ), 0.5 * saturate( behindLum * 20.0 ) );
-		lum = lerp( lum, fogCol, saturate( fogSky ) * g_wFogColor.a );
+		float zUp = max( rayDir.z, 0.0 );
+
+		float tauSkyHeight = 0.0;
+		if ( g_wFog.x > 0.0 )
+		{
+			float kH = max( g_wFog.y, 0.05 );
+			float camAtten = exp( -0.096 * kH );
+			float pathH = 1.0 / max( kH * zUp, 0.008 );
+			tauSkyHeight = g_wFog.x * camAtten * pathH;
+		}
+
+		float tauSkyAerial = 0.0;
+		if ( aerialDens > 0.0 )
+		{
+			// Dense near the horizon (veiling low distant clouds & matching fogged 3D mountains),
+			// tapering cleanly above ~15 deg so overhead clouds stay crisp and sculpted.
+			float pathA = ( 1.15 / ( zUp + 0.018 ) ) * exp( -zUp * 4.5 );
+			tauSkyAerial = aerialDens * pathA;
+		}
+
+		float tauTotal = tauSkyHeight + tauSkyAerial;
+		if ( tauTotal > 1e-5 )
+		{
+			float fogSky = ( 1.0 - exp( -tauTotal ) ) * g_wFogColor.a;
+
+			// Exact same aerialColor & heightColor formula as weather_post_ps30
+			float3 skyFogTM = jodieReinhardTonemap( clearSkyRaw * g_wFlags.w * exposure );
+			float3 aerialColor = lerp( g_wFogColor.rgb, skyFogTM, g_wFlags.z );
+
+			float aerialLum = dot( aerialColor, float3( 0.2126, 0.7152, 0.0722 ) );
+			float3 mistBase = lerp( aerialColor, aerialLum * float3( 0.96, 0.98, 1.02 ), 0.25 );
+			float3 heightBase = lerp( g_wFogColor.rgb, mistBase, lerp( 0.35, 0.92, g_wSkipCovered.y ) );
+
+			float cosTheta = dot( lutDir, lightDir );
+			float g = 0.50;
+			float phase = ( 1.0 - g * g ) / pow( max( 1.0 + g * g - 2.0 * g * cosTheta, 1e-3 ), 1.5 ) * 0.25;
+			float3 heightColor = heightBase + g_light_diffuse * phase * 0.14 * ( 1.0 - g_wMoon.w );
+
+			float wAerial = tauSkyAerial / tauTotal;
+			float3 fogCol = lerp( heightColor, aerialColor, wAerial );
+			lum = lerp( lum, fogCol, saturate( fogSky ) );
+		}
 	}
 
 	float alphaOut = 1.0;

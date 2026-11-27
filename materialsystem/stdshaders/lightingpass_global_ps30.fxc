@@ -160,18 +160,67 @@ float4 BSplineWeights( float4 t )
 // r_csm_bias_normal texels off the surface at grazing angles. That is a depth margin of as
 // many texels per unit of tan( angle to the sun ), but unlike a depth bias it doesn't let
 // the light through under the foot of a caster (the point only rises off the floor).
-float3 SunShadowUVZ( float3 worldPos, float3 flNormal, float NdotL, int c )
+// normalOffsetDir = flNormal * sqrt( saturate( 1 - max(NdotL, 0)^2 ) ), hoisted out of cascade search.
+float3 SunShadowUVZ( float3 worldPos, float3 normalOffsetDir, int c )
 {
 	// g_vecSlopeData[c].z = half a texel in world units
-	const float clN = max( NdotL, 0.0f );
-	const float sinA = sqrt( saturate( 1.0f - clN * clN ) );
-	worldPos += flNormal * ( sinA * 2.0f * g_vecSlopeData[c].z * g_vecAmbientCtrl.x );
+	worldPos += normalOffsetDir * ( 2.0f * g_vecSlopeData[c].z * g_vecAmbientCtrl.x );
 	return mul( float4( worldPos, 1 ), g_matOrtho[c] ).xyz;
 }
 
 bool InsideCascade( float3 uvz )
 {
 	return !any( floor( ( uvz.xy - 0.0015f ) * 1.003f ) );
+}
+
+// Exact texel-snapped 4-tap zero-gap hardware 2x2 PCF pre-screen for Cascade 1 (and scale <= 1.50).
+// Samples the 4 exact half-texel midpoints (i-0.5, j-0.5), (i+1.5, j-0.5), (i-0.5, j+1.5), (i+1.5, j+1.5),
+// reading all 16 texels {i-1..i+2} x {j-1..j+2} with exact 0.25 weight and zero gaps at any fractional f.
+// Returns 1.0 (fully lit), 0.0 (fully shadowed), or 0.5 (mixed / edge).
+float ProbeShadowSnap4( float2 atlasUV, float uvzZ, float2 dzdTexel, float2 atlasTexel, float2 tileMin, float2 tileMax )
+{
+	const float2 x = atlasUV / atlasTexel - 0.5f;
+	const float2 i = floor( x );
+	const float2 p0 = i - 0.5f;
+	const float2 p1 = i + 1.5f;
+	const float2 uv0 = clamp( i * atlasTexel, tileMin, tileMax );
+	const float2 uv1 = clamp( ( i + 2.0f ) * atlasTexel, tileMin, tileMax );
+	const float2 z0 = ( p0 - x ) * dzdTexel;
+	const float2 z1 = ( p1 - x ) * dzdTexel;
+	float s = tex2Dlod( sShadowDepth, float4( uv0.x, uv0.y, uvzZ + z0.x + z0.y, 0 ) ).x;
+	s += tex2Dlod( sShadowDepth, float4( uv1.x, uv0.y, uvzZ + z1.x + z0.y, 0 ) ).x;
+	s += tex2Dlod( sShadowDepth, float4( uv0.x, uv1.y, uvzZ + z0.x + z1.y, 0 ) ).x;
+	s += tex2Dlod( sShadowDepth, float4( uv1.x, uv1.y, uvzZ + z1.x + z1.y, 0 ) ).x;
+	if ( s > 3.995f )
+		return 1.0f;
+	if ( s < 0.005f )
+		return 0.0f;
+	return 0.5f;
+}
+
+// Two-stage 8-tap zero-gap hardware 2x2 PCF pre-screen for Cascade 0 (maxScale <= 2.0):
+// Stage 1: 4 inner corners at (+-0.95, +-0.95) cover the entire solid [-1.95, +1.95]^2 square
+// (including center (0,0), so no redundant 5th center tap is needed; penumbra cores exit in 4 taps).
+// Stage 2: only when all 4 agree, 4 outer cardinals at (+-1.9, 0) and (0, +-1.9) cover out to +-2.9
+// texels with zero blind holes inside the B-spline support (eliminates 1-2px thin-branch speckles).
+// Returns 1.0 (fully lit), 0.0 (fully shadowed), or 0.5 (mixed / penumbra).
+float ProbeShadowPreScreen8( float2 atlasUV, float uvzZ, float2 dzdTexel, float2 atlasTexel, float2 tileMin, float2 tileMax )
+{
+	float s = tex2Dlod( sShadowDepth, float4( clamp( atlasUV + float2( -0.95f, -0.95f ) * atlasTexel, tileMin, tileMax ), uvzZ + dot( float2( -0.95f, -0.95f ), dzdTexel ), 0 ) ).x;
+	s += tex2Dlod( sShadowDepth, float4( clamp( atlasUV + float2(  0.95f, -0.95f ) * atlasTexel, tileMin, tileMax ), uvzZ + dot( float2(  0.95f, -0.95f ), dzdTexel ), 0 ) ).x;
+	s += tex2Dlod( sShadowDepth, float4( clamp( atlasUV + float2( -0.95f,  0.95f ) * atlasTexel, tileMin, tileMax ), uvzZ + dot( float2( -0.95f,  0.95f ), dzdTexel ), 0 ) ).x;
+	s += tex2Dlod( sShadowDepth, float4( clamp( atlasUV + float2(  0.95f,  0.95f ) * atlasTexel, tileMin, tileMax ), uvzZ + dot( float2(  0.95f,  0.95f ), dzdTexel ), 0 ) ).x;
+	if ( s > 0.005f && s < 3.995f )
+		return 0.5f;
+	s += tex2Dlod( sShadowDepth, float4( clamp( atlasUV + float2( -1.90f, 0.0f ) * atlasTexel, tileMin, tileMax ), uvzZ - 1.90f * dzdTexel.x, 0 ) ).x;
+	s += tex2Dlod( sShadowDepth, float4( clamp( atlasUV + float2(  1.90f, 0.0f ) * atlasTexel, tileMin, tileMax ), uvzZ + 1.90f * dzdTexel.x, 0 ) ).x;
+	s += tex2Dlod( sShadowDepth, float4( clamp( atlasUV + float2( 0.0f, -1.90f ) * atlasTexel, tileMin, tileMax ), uvzZ - 1.90f * dzdTexel.y, 0 ) ).x;
+	s += tex2Dlod( sShadowDepth, float4( clamp( atlasUV + float2( 0.0f,  1.90f ) * atlasTexel, tileMin, tileMax ), uvzZ + 1.90f * dzdTexel.y, 0 ) ).x;
+	if ( s > 7.995f )
+		return 1.0f;
+	if ( s < 0.005f )
+		return 0.0f;
+	return 0.5f;
 }
 
 // filtered sun shadow from cascade c
@@ -226,16 +275,35 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 	float scale = 1.0f;
 	// HL2RPM: the light that comes through leaves (see the end)
 	float leak = 0.0f;
+	const bool bNormalPCSS = ( g_vecPCSS.w < 1.5f || g_vecPCSS.w > 4.5f );
+	float preState = 0.5f;
 	[branch]
-	if ( maxScale > 1.15f && g_vecPCSS.w > 0.5f )
+	if ( bNormalPCSS && c <= 1 )
 	{
-		// blockers: the mean depth of what is between the point and the sun, searched over
-		// the reach of the widest kernel
+		// HL2RPM: zero-gap hardware 2x2 PCF early-out BEFORE blocker search / footprint / B-spline:
+		//   - c == 1: exact texel-snapped 4-tap {i-1..i+2}x{j-1..j+2} (~85% of c1 exits in 4 taps!)
+		//   - c == 0: 8-tap two-stage (4 inner corners -> 4 outer cardinals; penumbra cores exit in 4 taps,
+		//     uniform pixels exit in 8 taps with zero blind holes -> zero speckles).
+		if ( c == 1 )
+			preState = ProbeShadowSnap4( atlasUV, uvz.z, dzdTexel, atlasTexel, tileMin, tileMax );
+		else
+			preState = ProbeShadowPreScreen8( atlasUV, uvz.z, dzdTexel, atlasTexel, tileMin, tileMax );
+		if ( preState > 0.99f )
+			return 1.0f;
+		if ( preState < 0.01f && flFoliage < 0.01f )
+			return 0.0f;
+	}
+
+	// Blocker search: run for c == 0, foliage (crown translucency), or PCSS debug mode 2.
+	// Skip on non-foliage c >= 1 (saves 16 R32F fetches per Cascade-1 shadow edge pixel!).
+	[branch]
+	if ( maxScale > 1.15f && g_vecPCSS.w > 0.5f && ( c == 0 || flFoliage >= 0.01f || !bNormalPCSS ) )
+	{
 		const float searchRadius = 1.5f * maxScale + 1.0f;
 		float blockers = 0.0f;
 		float blockerSum = 0.0f;
 		float leafBlockers = 0.0f;	// (x 2)
-		[unroll]
+		[loop]
 		for ( int b = 0; b < 16; b++ )
 		{
 			float2 o = g_vecPCSSBlockerDisk[b].xy * searchRadius;
@@ -250,13 +318,7 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 		}
 		if ( bDebug && abs( g_vecPCSS.w - 2.0f ) < 0.5f )
 			return blockers / 10.0f;	// r_csm_pcss 2: how many blockers the search found
-		if ( blockers < 0.01f )
-		{
-			// Skip early-out on close cascade 0 / viewmodel when magnification smoothing is enabled
-			if ( ( c > 0 || ( minScale < 1.02f && g_vecWeatherFlags.w < 1.02f ) ) && tex2Dlod( sShadowDepth, float4( atlasUV, uvz.z, 0 ) ).x > 0.99f )
-				return 1.0f;
-		}
-		else
+		if ( blockers > 0.01f )
 		{
 			// penumbra radius (texels) from the caster distance: the sun's angular radius
 			const float casterDistance = uvz.z - blockerSum / blockers;
@@ -266,6 +328,9 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 			// less the deeper in - by how far the casters are, in world units - and only as much of it
 			// as the blockers are leaves: a wall, a roof, a trunk stop it)
 			leak = flFoliage * ( 0.5f * leafBlockers / blockers ) * exp2( -casterDistance * ( g_vecSlopeData[c].z / g_vecSlopeData[c].x ) * g_vecFoliage.x );
+			// Full umbra for foliage: skip B-spline and return exact crown leak
+			if ( blockers > 9.9f && preState < 0.01f )
+				return leak * g_vecFoliage.y;
 		}
 	}
 	else if ( bDebug && abs( g_vecPCSS.w - 2.0f ) < 0.5f )
@@ -281,7 +346,18 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 		const float fy2 = dot( fy, fy );
 		const float footprint = sqrt( max( fx2, fy2 ) );
 		const float minFoot = sqrt( min( fx2, fy2 ) );
-		const float magScale = ( c == 0 ) ? lerp( g_vecWeatherFlags.w, 1.0f, saturate( ( minFoot - 0.10f ) * ( 1.0f / 0.40f ) ) ) : 1.0f;
+		float magScale = 1.0f;
+		if ( c == 0 )
+		{
+			magScale = ( minFoot < 0.45f )
+				? lerp( g_vecWeatherFlags.w, 1.45f, saturate( ( minFoot - 0.10f ) * ( 1.0f / 0.35f ) ) )
+				: lerp( 1.45f, 1.0f, saturate( ( minFoot - 0.45f ) * ( 1.0f / 0.50f ) ) );
+		}
+		else if ( c == 1 )
+		{
+			// <= 1.42 stays inside fast 9-tap 3x3 B-spline with < 2.4% tail outside 4-tap Snap4 pre-screen
+			magScale = lerp( 1.42f, 1.08f, saturate( ( minFoot - 0.35f ) * ( 1.0f / 0.65f ) ) );
+		}
 		scale = max( scale, max( minScale, max( magScale, min( footprint * g_vecShadowExtra.z, 2.0f ) ) ) );
 	}
 
@@ -297,10 +373,10 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 	{
 		// texels i-1 .. i+2, a pair of them per bilinear compare and axis
 		const float4 wx = BSplineWeights( f.x - float4( -1, 0, 1, 2 ) );
-		const float4 wy = BSplineWeights( f.y - float4( -1, 0, 1, 2 ) );
 		const float2 Wx = wx.xz + wx.yw;
-		const float2 Wy = wy.xz + wy.yw;
 		const float2 Px = i.x + float2( -1, 1 ) + wx.yw / Wx;
+		const float4 wy = BSplineWeights( f.y - float4( -1, 0, 1, 2 ) );
+		const float2 Wy = wy.xz + wy.yw;
 		const float2 Py = i.y + float2( -1, 1 ) + wy.yw / Wy;
 		[unroll]
 		for ( int a = 0; a < 2; a++ )
@@ -316,28 +392,58 @@ float SunShadowCascade( float3 uvz, float3 flNormal, float NdotL, float extraBia
 	}
 	else
 	{
-		// texels i-3 .. i+4: the kernel scaled up to twice the width
+		// Unified branchless-setup cubic B-spline for scale in (1.0, 2.0]:
+		//   scale <= 1.505 (sh=1): texels i-2..i+3 -> exact 3x3 (9 hardware taps, Wx.w=Wy.w=0, skips 7 outer taps)
+		//   scale >  1.505 (sh=0): texels i-3..i+4 -> exact 4x4 (9 + 7 = 16 hardware taps)
+		// Computing X->(Ux,Zx) before Y->(Uy,Zy) kills all coordinate/clamp/plane regs before any tap.
 		const float rs = 1.0f / scale;
-		const float4 wx0 = BSplineWeights( ( f.x - float4( -3, -2, -1, 0 ) ) * rs );
-		const float4 wx1 = BSplineWeights( ( f.x - float4( 1, 2, 3, 4 ) ) * rs );
-		const float4 wy0 = BSplineWeights( ( f.y - float4( -3, -2, -1, 0 ) ) * rs );
-		const float4 wy1 = BSplineWeights( ( f.y - float4( 1, 2, 3, 4 ) ) * rs );
-		const float4 Wx = float4( wx0.xz + wx0.yw, wx1.xz + wx1.yw );
-		const float4 Wy = float4( wy0.xz + wy0.yw, wy1.xz + wy1.yw );
-		const float4 Px = i.x + float4( -3, -1, 1, 3 ) + float4( wx0.yw, wx1.yw ) / max( Wx, 1e-6f );
-		const float4 Py = i.y + float4( -3, -1, 1, 3 ) + float4( wy0.yw, wy1.yw ) / max( Wy, 1e-6f );
-		[unroll]
-		for ( int a = 0; a < 4; a++ )
+		const bool b3x3 = ( scale <= 1.505f );
+		const float sh = b3x3 ? 1.0f : 0.0f;
+		const float4 o0 = float4( -3, -2, -1, 0 ) + sh;
+		const float4 o1 = float4( 1, 2, 3, 4 ) + ( b3x3 ? float4( 1, 1, 6, 5 ) : 0 );
+
+		float4 Wx, Ux, Zx;
 		{
-			[unroll]
-			for ( int b = 0; b < 4; b++ )
-			{
-				float2 p = float2( Px[a], Py[b] );
-				float2 uv = clamp( ( p + 0.5f ) * atlasTexel, tileMin, tileMax );
-				shadow += Wx[a] * Wy[b] * tex2Dlod( sShadowDepth, float4( uv, uvz.z + dot( p - x, dzdTexel ), 0 ) ).x;
-			}
+			const float4 wx0 = BSplineWeights( ( f.x - o0 ) * rs );
+			const float4 wx1 = BSplineWeights( ( f.x - o1 ) * rs );
+			Wx = float4( wx0.xz + wx0.yw, wx1.xz + wx1.yw );
+			const float4 Px = i.x + float4( -3, -1, 1, 3 ) + sh + float4( wx0.yw, wx1.yw ) / max( Wx, 1e-6f );
+			Ux = clamp( ( Px + 0.5f ) * atlasTexel.x, tileMin.x, tileMax.x );
+			Zx = ( Px - x.x ) * dzdTexel.x + uvz.z;
+			Wx /= dot( Wx, 1.0f );
 		}
-		shadow /= dot( Wx, 1.0f ) * dot( Wy, 1.0f );
+
+		float4 Wy, Uy, Zy;
+		{
+			const float4 wy0 = BSplineWeights( ( f.y - o0 ) * rs );
+			const float4 wy1 = BSplineWeights( ( f.y - o1 ) * rs );
+			Wy = float4( wy0.xz + wy0.yw, wy1.xz + wy1.yw );
+			const float4 Py = i.y + float4( -3, -1, 1, 3 ) + sh + float4( wy0.yw, wy1.yw ) / max( Wy, 1e-6f );
+			Uy = clamp( ( Py + 0.5f ) * atlasTexel.y, tileMin.y, tileMax.y );
+			Zy = ( Py - x.y ) * dzdTexel.y;
+			Wy /= dot( Wy, 1.0f );
+		}
+
+		[unroll]
+		for ( int a = 0; a < 3; a++ )
+		{
+			float row = Wy.x * tex2Dlod( sShadowDepth, float4( Ux[a], Uy.x, Zx[a] + Zy.x, 0 ) ).x
+			          + Wy.y * tex2Dlod( sShadowDepth, float4( Ux[a], Uy.y, Zx[a] + Zy.y, 0 ) ).x
+			          + Wy.z * tex2Dlod( sShadowDepth, float4( Ux[a], Uy.z, Zx[a] + Zy.z, 0 ) ).x;
+			shadow += Wx[a] * row;
+		}
+		[branch]
+		if ( !b3x3 )
+		{
+			shadow += Wx.x * Wy.w * tex2Dlod( sShadowDepth, float4( Ux.x, Uy.w, Zx.x + Zy.w, 0 ) ).x
+			        + Wx.y * Wy.w * tex2Dlod( sShadowDepth, float4( Ux.y, Uy.w, Zx.y + Zy.w, 0 ) ).x
+			        + Wx.z * Wy.w * tex2Dlod( sShadowDepth, float4( Ux.z, Uy.w, Zx.z + Zy.w, 0 ) ).x;
+			float row3 = Wy.x * tex2Dlod( sShadowDepth, float4( Ux.w, Uy.x, Zx.w + Zy.x, 0 ) ).x
+			           + Wy.y * tex2Dlod( sShadowDepth, float4( Ux.w, Uy.y, Zx.w + Zy.y, 0 ) ).x
+			           + Wy.z * tex2Dlod( sShadowDepth, float4( Ux.w, Uy.z, Zx.w + Zy.z, 0 ) ).x
+			           + Wy.w * tex2Dlod( sShadowDepth, float4( Ux.w, Uy.w, Zx.w + Zy.w, 0 ) ).x;
+			shadow += Wx.w * row3;
+		}
 	}
 	// (what the leaves let through lights the shaded part)
 	return shadow + ( 1.0f - shadow ) * leak * g_vecFoliage.y;
@@ -353,15 +459,19 @@ float SunShadowPCSS( float3 worldPos, float3 flNormal, float NdotL, float extraB
 {
 	int c = -1;
 	float3 uvz = 0;
-	[unroll]
-	for ( int i = 0; i < SUN_SHADOW_CASCADES; i++ )
 	{
-		float3 cand = SunShadowUVZ( worldPos, flNormal, NdotL, i );
-		if ( InsideCascade( cand ) )
+		const float clN = max( NdotL, 0.0f );
+		const float3 normalOffsetDir = flNormal * sqrt( saturate( 1.0f - clN * clN ) );
+		[unroll]
+		for ( int i = 0; i < SUN_SHADOW_CASCADES; i++ )
 		{
-			c = i;
-			uvz = cand;
-			break;
+			float3 cand = SunShadowUVZ( worldPos, normalOffsetDir, i );
+			if ( InsideCascade( cand ) )
+			{
+				c = i;
+				uvz = cand;
+				break;
+			}
 		}
 	}
 	outCascade = c;
@@ -376,7 +486,9 @@ float SunShadowPCSS( float3 worldPos, float3 flNormal, float NdotL, float extraB
 	[branch]
 	if ( blendFactor > 0.0f && c < ( SUN_SHADOW_CASCADES - 1 ) && ( g_vecPCSS.w < 1.5f || g_vecPCSS.w > 4.5f ) )
 	{
-		float3 uvzNext = SunShadowUVZ( worldPos, flNormal, NdotL, c + 1 );
+		const float clN = max( NdotL, 0.0f );
+		const float3 normalOffsetDir = flNormal * sqrt( saturate( 1.0f - clN * clN ) );
+		float3 uvzNext = SunShadowUVZ( worldPos, normalOffsetDir, c + 1 );
 		if ( InsideCascade( uvzNext ) )
 			shadow = lerp( shadow, SunShadowCascade( uvzNext, flNormal, NdotL, extraBias, footX, footY, c + 1, false, flFoliage, minScale ), blendFactor );
 	}
@@ -502,26 +614,48 @@ PS_OUTPUT main( const PS_INPUT In )
 			[branch]
 			if ( g_vecShadowExtra.y > 1.5f && !bViewmodel && !half_lambert )
 			{
+				// HL2RPM: adaptive 4-tap planarity fast path. On a planar surface 1/z is exact
+				// linear in screen space, so |1/dL1 + 1/dR1 - 2/d0| ~= 0; fetch the 2nd-order
+				// taps (dL2/dR2, dU2/dD2) only on creases and silhouettes (~5% of pixels).
 				const float2 uv = In.vTexCoord;
-				const float2 dx = float2( vecTexelUV.x, 0 );
-				const float2 dy = float2( 0, vecTexelUV.y );
 				const float iz0 = 1.0f / flDepth;
-				const float dL1 = max( tex2Dlod( sDepth, float4( uv - dx, 0, 0 ) ).x, 0.1f );
-				const float dL2 = max( tex2Dlod( sDepth, float4( uv - 2.0f * dx, 0, 0 ) ).x, 0.1f );
-				const float dR1 = max( tex2Dlod( sDepth, float4( uv + dx, 0, 0 ) ).x, 0.1f );
-				const float dR2 = max( tex2Dlod( sDepth, float4( uv + 2.0f * dx, 0, 0 ) ).x, 0.1f );
-				const float dU1 = max( tex2Dlod( sDepth, float4( uv - dy, 0, 0 ) ).x, 0.1f );
-				const float dU2 = max( tex2Dlod( sDepth, float4( uv - 2.0f * dy, 0, 0 ) ).x, 0.1f );
-				const float dD1 = max( tex2Dlod( sDepth, float4( uv + dy, 0, 0 ) ).x, 0.1f );
-				const float dD2 = max( tex2Dlod( sDepth, float4( uv + 2.0f * dy, 0, 0 ) ).x, 0.1f );
-				const float errL = abs( 2.0f / dL1 - 1.0f / dL2 - iz0 );
-				const float errR = abs( 2.0f / dR1 - 1.0f / dR2 - iz0 );
-				const float errU = abs( 2.0f / dU1 - 1.0f / dU2 - iz0 );
-				const float errD = abs( 2.0f / dD1 - 1.0f / dD2 - iz0 );
-				const float3 tx = ( errR < errL ) ? ( ( In.vecWorldRay + vecRayDx ) * dR1 - vecRayPos )
-					: ( vecRayPos - ( In.vecWorldRay - vecRayDx ) * dL1 );
-				const float3 ty = ( errD < errU ) ? ( ( In.vecWorldRay + vecRayDy ) * dD1 - vecRayPos )
-					: ( vecRayPos - ( In.vecWorldRay - vecRayDy ) * dU1 );
+				const float eps = iz0 * 0.002f + 1e-6f;
+				float3 tx;
+				{
+					const float2 dx = float2( vecTexelUV.x, 0 );
+					const float dL1 = max( tex2Dlod( sDepth, float4( uv - dx, 0, 0 ) ).x, 0.1f );
+					const float dR1 = max( tex2Dlod( sDepth, float4( uv + dx, 0, 0 ) ).x, 0.1f );
+					const float izL1 = 1.0f / dL1;
+					const float izR1 = 1.0f / dR1;
+					bool useR = true;
+					[branch]
+					if ( abs( izL1 + izR1 - 2.0f * iz0 ) > eps )
+					{
+						const float dL2 = max( tex2Dlod( sDepth, float4( uv - 2.0f * dx, 0, 0 ) ).x, 0.1f );
+						const float dR2 = max( tex2Dlod( sDepth, float4( uv + 2.0f * dx, 0, 0 ) ).x, 0.1f );
+						useR = abs( 2.0f * izR1 - 1.0f / dR2 - iz0 ) < abs( 2.0f * izL1 - 1.0f / dL2 - iz0 );
+					}
+					tx = useR ? ( ( In.vecWorldRay + vecRayDx ) * dR1 - vecRayPos )
+						: ( vecRayPos - ( In.vecWorldRay - vecRayDx ) * dL1 );
+				}
+				float3 ty;
+				{
+					const float2 dy = float2( 0, vecTexelUV.y );
+					const float dU1 = max( tex2Dlod( sDepth, float4( uv - dy, 0, 0 ) ).x, 0.1f );
+					const float dD1 = max( tex2Dlod( sDepth, float4( uv + dy, 0, 0 ) ).x, 0.1f );
+					const float izU1 = 1.0f / dU1;
+					const float izD1 = 1.0f / dD1;
+					bool useD = true;
+					[branch]
+					if ( abs( izU1 + izD1 - 2.0f * iz0 ) > eps )
+					{
+						const float dU2 = max( tex2Dlod( sDepth, float4( uv - 2.0f * dy, 0, 0 ) ).x, 0.1f );
+						const float dD2 = max( tex2Dlod( sDepth, float4( uv + 2.0f * dy, 0, 0 ) ).x, 0.1f );
+						useD = abs( 2.0f * izD1 - 1.0f / dD2 - iz0 ) < abs( 2.0f * izU1 - 1.0f / dU2 - iz0 );
+					}
+					ty = useD ? ( ( In.vecWorldRay + vecRayDy ) * dD1 - vecRayPos )
+						: ( vecRayPos - ( In.vecWorldRay - vecRayDy ) * dU1 );
+				}
 				geoCross = cross( tx, ty );
 				footX = tx;
 				footY = ty;
@@ -586,50 +720,60 @@ PS_OUTPUT main( const PS_INPUT In )
 			if ( csmCascadeIndex == 2 ) contactTexel = g_vecSlopeData[2].z;
 			if ( csmCascadeIndex == 3 ) contactTexel = g_vecSlopeData[3].z;
 			// (g_vecSlopeData z: half a texel in world units)
+			// Skip micro-march in sharp Cascade 0 where contactLen <= 1.5u (2048^2 shadow map is already sub-quarter-inch sharp)
 			const float contactLen = min( g_vecContact.x, 2.0f * contactTexel * g_vecWeatherFlags.z );
-			const float contactStrength = g_vecContact.w * saturate( contactLen * 0.25f );
+			const float contactStrength = g_vecContact.w * saturate( ( contactLen - 1.5f ) * 0.25f );
 			[branch]
-			if ( !bViewmodel && contactStrength > 0.01f && lightAmount > 0.001f && flDepth * length( In.vecWorldRay ) < g_vecContact.z )
+			if ( !bViewmodel && contactStrength > 0.01f && lightAmount > 0.001f && shadowMult > 0.01f && viewFwdDot > 0.04f && flDepth < g_vecContact.z )
 			{
-				const float3 p0 = worldPos + shadowNormal * min( 1.0f, contactLen * 0.125f );
-				// The start of the march is offset per pixel: 10 steps would band otherwise. The offsets
-				// used to be the same every frame - a stipple pattern TAA can't average away, plain to
-				// see wherever only part of the march is occluded (the rim of every contact shadow, "a
-				// strange grainy piece at the edge of the shadows"). With TAA the pattern moves by the
-				// frame's phase (g_vecShadowExtra.w, golden ratio steps) and the history sums it up into
-				// a smooth penumbra; without TAA no offsets at all (w < 0): faint bands instead of grain.
-				const float dither = ( g_vecShadowExtra.w < 0.0f ) ? 0.5f
-					: frac( 52.9829189f * frac( dot( In.vScreenPos, float2( 0.06711056f, 0.00583715f ) ) ) + g_vecShadowExtra.w );
-				float occ = 0.0f;
-				[loop]
-				for ( int i = 0; i < 10; i++ )
+				const float rayLen = length( In.vecWorldRay );
+				[branch]
+				if ( flDepth * rayLen < g_vecContact.z )
 				{
-					const float t = contactLen * ( ( i + dither ) * 0.1f ) + min( 1.0f, contactLen * 0.125f );
-					const float4 q = float4( p0 + g_vecLightVec_Forward * t, 1.0f );
-					const float w = dot( g_matWorldToScreen[3], q );
-					if ( w <= 1.0f )
-						break;
-					const float2 uvq = float2( dot( g_matWorldToScreen[0], q ), dot( g_matWorldToScreen[1], q ) ) / w;
-					if ( any( uvq < 0.0f ) || any( uvq > 1.0f ) )
-						break;
-					const float dScene = tex2Dlod( sDepth, float4( uvq, 0, 0 ) ).x;
-					if ( dScene < 0.1f )
-						continue;
-					// distances from the eye along the same view ray (the ray is linear in screen space)
-					const float3 rayQ = In.vecWorldRay + vecRayDx * ( ( uvq.x - In.vTexCoord.x ) / vecTexelUV.x ) + vecRayDy * ( ( uvq.y - In.vTexCoord.y ) / vecTexelUV.y );
-					const float distScene = dScene * length( rayQ );
-					const float distQ = length( q.xyz - g_vecViewOrigin );
-					const float behind = distQ - distScene;
-					occ = max( occ, saturate( ( behind - 0.5f ) * 0.5f ) * saturate( ( g_vecContact.y - behind ) / 4.0f ) );
-					if ( occ >= 0.99f )
-						break;
-				}
-				lightAmount *= 1.0f - occ * contactStrength;
+					const float biasStep = min( 1.0f, contactLen * 0.125f );
+					const float4 p0 = float4( worldPos + shadowNormal * biasStep, 1.0f );
+					const float dither = ( g_vecShadowExtra.w < 0.0f ) ? 0.5f
+						: frac( 52.9829189f * frac( dot( In.vScreenPos, float2( 0.06711056f, 0.00583715f ) ) ) + g_vecShadowExtra.w );
+					// HL2RPM: hoist world->screen projection out of the march loop and compare linear
+					// view-forward depth (clip.z == w_clip) directly instead of reconstructing rayQ + 2 sqrts per step.
+					const float3 clip0 = float3( dot( g_matWorldToScreen[0], p0 ), dot( g_matWorldToScreen[1], p0 ), dot( g_matWorldToScreen[3], p0 ) );
+					const float3 clipDir = float3( dot( g_matWorldToScreen[0].xyz, g_vecLightVec_Forward ), dot( g_matWorldToScreen[1].xyz, g_vecLightVec_Forward ), dot( g_matWorldToScreen[3].xyz, g_vecLightVec_Forward ) );
+					const int nSteps = ( contactLen < 4.0f ) ? 6 : 8;
+					const float invSteps = ( contactLen < 4.0f ) ? ( 1.0f / 6.0f ) : 0.125f;
+					const float dt = contactLen * invSteps;
+					float3 clip = clip0 + clipDir * ( dither * dt + biasStep );
+					const float3 dClip = clipDir * dt;
+					float occ = 0.0f;
+					[loop]
+					for ( int i = 0; i < nSteps; i++ )
+					{
+						if ( clip.z <= 1.0f )
+							break;
+						const float2 uvq = clip.xy / clip.z;
+						if ( any( uvq < 0.0f ) || any( uvq > 1.0f ) )
+							break;
+						const float dScene = tex2Dlod( sDepth, float4( uvq, 0, 0 ) ).x;
+						if ( dScene >= 0.1f )
+						{
+							const float behind = ( clip.z - dScene ) * rayLen;
+							occ = max( occ, saturate( ( behind - 0.5f ) * 0.5f ) * saturate( ( g_vecContact.y - behind ) / 4.0f ) );
+							if ( occ >= 0.99f )
+								break;
+						}
+						clip += dClip;
+					}
+					lightAmount *= 1.0f - occ * contactStrength;
 
-				// r_deferred_contact_shadows_debug: red = occlusion found, green = strength
-				if ( g_vecGIApply.z > 0.5f )
+					// r_deferred_contact_shadows_debug: red = occlusion found, green = strength
+					if ( g_vecGIApply.z > 0.5f )
+					{
+						Out.vColor_0 = WriteLighting( float4( occ, contactStrength, 0.25f, 0 ) );
+						return Out;
+					}
+				}
+				else if ( g_vecGIApply.z > 0.5f )
 				{
-					Out.vColor_0 = WriteLighting( float4( occ, contactStrength, 0.25f, 0 ) );
+					Out.vColor_0 = WriteLighting( float4( 0, g_vecContact.w, ( lightAmount > 0.001f ) ? 1.0f : 0.0f, 0 ) );
 					return Out;
 				}
 			}

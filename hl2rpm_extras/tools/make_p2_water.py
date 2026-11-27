@@ -25,7 +25,7 @@ from csgo_weapons import csgo_core as C  # noqa: E402
 
 MOD = r"E:\Steam\steamapps\sourcemods\hl2rpm"
 PORTAL2_ROOT = r"E:\Steam\steamapps\common\Portal 2"
-MAPSRC_TEST = r"E:\XBLAH's modding tool\content\Mapbase\hl2rpm\mapsrc\test"
+MAPSRC_TEST = r"E:\SourceModding\HL2RPMSOURCE\Mapping\mapsrc\test"
 COMPILE_PS1 = os.path.normpath(os.path.join(HAMMER_SCRIPTS, "compile_map.ps1"))
 
 FONT_BOLD = r"C:\Windows\Fonts\arialbd.ttf"

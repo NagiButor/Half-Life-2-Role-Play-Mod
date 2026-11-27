@@ -155,7 +155,12 @@ BEGIN_VS_SHADER( SkyAtmoProc, "" )
 			pShaderAPI->SetPixelShaderConstant( 12, w.vecLightning.Base(), 1, true );
 			pShaderAPI->SetPixelShaderConstant( 13, w.vecWind.Base(), 1, true );
 			pShaderAPI->SetPixelShaderConstant( 14, w.vecSkyHorizon.Base(), 1, true );
-			float flFlags[4] = { w.bEnabled ? 1.0f : 0.0f, bCloudsValid ? 1.0f : 0.0f, 0.0f, 0.0f };
+			const float flFogSkyColor = SkyClamp01( w.vecSkyLight.w );
+			const float flOvercast = SkySmooth01( SkyRemap01( SkyClamp01( w.vecCloudParams0.x ), 0.65f, 0.96f ) );
+			const float flOvercastDim = 1.0f - flOvercast * SkyClamp01( w.vecCloudParams0.w ) * 0.42f;
+			const float flOpenSky = SkyClamp01( ( 1.0f - flOvercast * 0.82f ) * ( flFogSkyColor / 0.85f ) );
+			const float flSkyMatch = 0.55f + flOpenSky * 0.45f;
+			float flFlags[4] = { w.bEnabled ? 1.0f : 0.0f, bCloudsValid ? 1.0f : 0.0f, flSkyMatch, flOvercastDim };
 			pShaderAPI->SetPixelShaderConstant( 15, flFlags, 1, true );
 
 			// HL2RPM: precompute frame-invariant twilight, ambient, sun transmittance, wind & moon constants
@@ -317,7 +322,8 @@ BEGIN_VS_SHADER( SkyAtmoProc, "" )
 
 			// HL2RPM: the main view - drawn to the back buffer or scaled scene RT over the whole
 			// G-buffer (not reflections, refractions, glass, monitors or item previews).
-			float flSkip[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			// y carries flFogSkyColor (unused slot in c19) for unified horizon fog color matching weather_post.
+			float flSkip[4] = { 0.0f, flFogSkyColor, 0.0f, 0.0f };
 			ITexture *pGBufferDepth = GetDeferredExt()->GetTexture_Depth();
 			if ( r_deferred_sky_skip_covered.GetBool() && pGBufferDepth && !GetDeferredExt()->IsReflectionView()
 				&& GetDeferredExt()->IsMainViewSkySkip() )

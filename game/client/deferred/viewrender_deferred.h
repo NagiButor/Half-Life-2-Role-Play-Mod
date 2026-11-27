@@ -62,6 +62,9 @@ private:
 	Vector m_vecRadiosityOrigin[2];
 	IMesh *m_pMesh_RadiosityScreenGrid[2];
 	CUtlVector< IMesh* > m_hRadiosityDebugMeshList[2];
+
+	// HL2RPM: tracks whether a sub-view (3D skybox, rainmap, non-leaflist shadow) clobbered engine vis
+	bool m_bMainViewVisDirty;
 };
 
 

@@ -430,6 +430,16 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 				fl6[0] = PARM_FLOAT( info.iEnvmapSaturation );
 				fl6[1] = PARM_FLOAT( info.iEnvmapContrast );
 				tmpBuf.SetPixelShaderConstant( 6, fl6 );
+
+				// HL2RPM: cache whether the envmap is missing/defaultcubemap once on material init/var change
+				// instead of calling V_stristr(..., "defaultcubemap") on every draw call.
+				ITexture *pEnvmapTex = ( !bModel && params[ info.iEnvmap ]->IsTexture() ) ? params[ info.iEnvmap ]->GetTextureValue() : NULL;
+				const bool bEnvDefault = bModel || !pEnvmapTex || pEnvmapTex->IsError() || V_stristr( pEnvmapTex->GetName(), "defaultcubemap" ) != NULL;
+				pDeferredContext->SetEnvmapIsDefault( bEnvDefault );
+			}
+			else
+			{
+				pDeferredContext->SetEnvmapIsDefault( false );
 			}
 
 			if ( bNeedsFresnel )
@@ -564,7 +574,7 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 			ShaderViewport_t viewport;
 			pShaderAPI->GetViewports( &viewport, 1 );
 			float fl1[4] = { 1.0f / Max( viewport.m_nWidth, 1 ), 1.0f / Max( viewport.m_nHeight, 1 ), 0, 0 };
-			pShaderAPI->SetPixelShaderConstant( 1, fl1, 1, true );
+			pShaderAPI->SetPixelShaderConstant( 1, fl1, 1, false );
 			pShaderAPI->SetPixelShaderFogParams( 2 );
 		}
 
@@ -580,7 +590,7 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 			const bool bViewmodel = pShaderAPI->GetIntRenderingParameter( INT_RENDERPARM_DEFERRED_LOCAL_BODY ) == 2;
 			const bool bLookup = bReflectView || ( r_deferred_msaa_light.GetBool() && !bTranslucent && !bViewmodel );
 			float flFwd[4] = { pFwd[0], pFwd[1], pFwd[2], bLookup ? GetDeferredExt()->GetZScale() : 0.0f };
-			pShaderAPI->SetPixelShaderConstant( 21, flFwd, 1, true );
+			pShaderAPI->SetPixelShaderConstant( 21, flFwd, 1, false );
 			pShader->BindTexture( SHADER_SAMPLER11, GetDeferredExt()->GetTexture_Depth() );
 		}
 
@@ -593,23 +603,16 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 				bPBROn ? 0.04f * clamp( PARM_FLOAT( info.iSpecular ), 0.0f, 4.0f ) : 0.0f,
 				bGlassMask ? 0.0f : r_deferred_pbr_cavity.GetFloat(), bPBROn ? 1.0f + clamp( r_deferred_pbr_debug.GetInt(), 0, 2 ) : 0.0f };
 			// (the cubemap of $envmap: a model's is never bound; a brush's may be the engine's
-			// default one - the patch of a map without built cubemaps, or a missing texture)
-			bool bEnvFallback = false;
-			if ( bEnvmap && r_deferred_envmap_fallback.GetFloat() > 0.0f )
-			{
-				bEnvFallback = bModel || !mat_hl2rpm_map_cubemaps.GetBool();
-				if ( !bEnvFallback )
-				{
-					ITexture *pEnvmap = params[ info.iEnvmap ]->IsTexture() ? params[ info.iEnvmap ]->GetTextureValue() : NULL;
-					bEnvFallback = !pEnvmap || pEnvmap->IsError() || V_stristr( pEnvmap->GetName(), "defaultcubemap" ) != NULL;
-				}
-			}
+			// default one - cached in pDeferredContext during DEFSTAGE_COMPOSITE command build)
+			const float flEnvFallbackVal = r_deferred_envmap_fallback.GetFloat();
+			const bool bEnvFallback = bEnvmap && flEnvFallbackVal > 0.0f
+				&& ( !mat_hl2rpm_map_cubemaps.GetBool() || pDeferredContext->IsEnvmapDefault() );
 			const float flPBR2[4] = { 1.0f / r_deferred_pbr_cavity_white.GetFloat(), r_deferred_pbr_metal_diffuse.GetFloat(),
-				r_deferred_pbr_specular.GetFloat(), bEnvFallback ? r_deferred_envmap_fallback.GetFloat() : 0.0f };
-			pShaderAPI->SetPixelShaderConstant( 26, flPBR, 1, true );
-			pShaderAPI->SetPixelShaderConstant( 27, flPBR2, 1, true );
+				r_deferred_pbr_specular.GetFloat(), bEnvFallback ? flEnvFallbackVal : 0.0f };
+			pShaderAPI->SetPixelShaderConstant( 26, flPBR, 1, false );
+			pShaderAPI->SetPixelShaderConstant( 27, flPBR2, 1, false );
 			const float flLimit[4] = { r_deferred_light_limit.GetFloat(), r_deferred_light_limit_specular.GetFloat(), 0.0f, 0.0f };
-			pShaderAPI->SetPixelShaderConstant( 28, flLimit, 1, true );
+			pShaderAPI->SetPixelShaderConstant( 28, flLimit, 1, false );
 		}
 
 		// HL2RPM: the relief of the material (the same constant as the G-buffer pass's) and the
@@ -618,20 +621,20 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 			float flPOM[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 			if ( bPOM )
 				PBR_GetReliefConstants( PARM_VALID( info.iPomScale ) ? PARM_FLOAT( info.iPomScale ) : 0.0f, bReflectView, flPOM );
-			pShaderAPI->SetPixelShaderConstant( 32, flPOM, 1, true );
+			pShaderAPI->SetPixelShaderConstant( 32, flPOM, 1, false );
 
 			float flTransmit[4], flTransmitSun[4];
 			PBR_GetTransmissionConstants( ( !bTranslucent && PARM_VALID( info.iTransmission ) && PARM_DEFINED( info.iTransmission ) )
 				? PARM_FLOAT( info.iTransmission ) : 0.0f, flTransmit, flTransmitSun );
-			pShaderAPI->SetPixelShaderConstant( 33, flTransmit, 1, true );
-			pShaderAPI->SetPixelShaderConstant( 34, flTransmitSun, 1, true );
+			pShaderAPI->SetPixelShaderConstant( 33, flTransmit, 1, false );
+			pShaderAPI->SetPixelShaderConstant( 34, flTransmitSun, 1, false );
 
 			// where the envmap mask comes from (composite_ps30 c35): x, y scale and bias of the base
 			// alpha, z the mask texture's alpha instead of its red
 			float flEnvMask[4] = { 0.0f, 1.0f, bNormalAlphaEnvmapMask ? 1.0f : 0.0f, 0.0f };
 			if ( !bEnvmapMask && IS_FLAG_SET( MATERIAL_VAR_BASEALPHAENVMAPMASK ) )
 				flEnvMask[0] = -1.0f;
-			pShaderAPI->SetPixelShaderConstant( 35, flEnvMask, 1, true );
+			pShaderAPI->SetPixelShaderConstant( 35, flEnvMask, 1, false );
 
 			// the light of the open sky (c36): the most a missing cubemap's stand-in shows
 			{
@@ -640,10 +643,11 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 				float flSky[4] = { 1.0f, 1.0f, 1.0f, 0.0f };
 				if ( light.bEnabled )
 				{
+					const float flScale = flSkyBoost * r_deferred_envmap_fallback_sky.GetFloat();
 					for ( int i = 0; i < 3; i++ )
-						flSky[i] = ( light.ambh[i] * 0.75f + light.ambl[i] * 0.25f ) * flSkyBoost * r_deferred_envmap_fallback_sky.GetFloat();
+						flSky[i] = ( light.ambh[i] * 0.75f + light.ambl[i] * 0.25f ) * flScale;
 				}
-				pShaderAPI->SetPixelShaderConstant( 36, flSky, 1, true );
+				pShaderAPI->SetPixelShaderConstant( 36, flSky, 1, false );
 			}
 
 			// the detail texture (c37): x its repeats per repeat of the base texture, y how much
@@ -654,15 +658,15 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 				flDetail[1] = ( ( PARM_VALID( info.iDetailBlendFactor ) && PARM_DEFINED( info.iDetailBlendFactor ) ) ? PARM_FLOAT( info.iDetailBlendFactor ) : 1.0f )
 					* r_deferred_detail_scale.GetFloat();
 			}
-			pShaderAPI->SetPixelShaderConstant( 37, flDetail, 1, true );
+			pShaderAPI->SetPixelShaderConstant( 37, flDetail, 1, false );
 		}
 		if ( iTreeSway > 0 )
 			PBR_SetTreeSwayConstants( pShaderAPI, iTreeSway );
 
 		if ( bReflectView )
 		{
-			pShaderAPI->SetPixelShaderConstant( 16, GetDeferredExt()->GetMainViewToScreenTexBase(), 4, true );
-			pShaderAPI->SetPixelShaderConstant( 20, GetDeferredExt()->GetOriginBase(), 1, true );
+			pShaderAPI->SetPixelShaderConstant( 16, GetDeferredExt()->GetMainViewToScreenTexBase(), 4, false );
+			pShaderAPI->SetPixelShaderConstant( 20, GetDeferredExt()->GetOriginBase(), 1, false );
 
 			// what the main view doesn't see gets the sky's light (as strong as the global light
 			// pass makes it, see GetGISkyBoost) plus the sun's by the facing of the surface - a part
@@ -679,34 +683,28 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 			flFallback[3] = r_deferred_reflect_debug.GetBool() ? 1.0f : 0.0f;
 			flFallbackSun[3] = 0.0f;
 			const float flFallbackDir[4] = { light.vecLight.x, light.vecLight.y, light.vecLight.z, 0.0f };
-			pShaderAPI->SetPixelShaderConstant( 22, flFallback, 1, true );
-			pShaderAPI->SetPixelShaderConstant( 24, flFallbackDir, 1, true );
-			pShaderAPI->SetPixelShaderConstant( 25, flFallbackSun, 1, true );
+			pShaderAPI->SetPixelShaderConstant( 22, flFallback, 1, false );
+			pShaderAPI->SetPixelShaderConstant( 24, flFallbackDir, 1, false );
+			pShaderAPI->SetPixelShaderConstant( 25, flFallbackSun, 1, false );
 		}
 
-		// HL2RPM: the fog distance is measured from the camera of the view being drawn. The
-		// deferred origin is the main view's: in the 3D skybox (its own coordinates, fog
-		// distances / skybox scale) the skybox city was ~16000 units "away" from it and
-		// drowned in the fog completely - flat fog-colored silhouettes.
-		{
-			float vCameraPos[4] = { 0, 0, 0, 1 };
-			pShaderAPI->GetWorldSpaceCameraPosition( vCameraPos );
-			vCameraPos[3] = 1.0f;
-			pShaderAPI->SetPixelShaderConstant( 3, vCameraPos, 1, true );
-		}
+		// HL2RPM: the fog distance is measured from the camera of the view being drawn.
+		float vCameraPos[4] = { 0, 0, 0, 1 };
+		pShaderAPI->GetWorldSpaceCameraPosition( vCameraPos );
+		vCameraPos[3] = 1.0f;
+		pShaderAPI->SetPixelShaderConstant( 3, vCameraPos, 1, false );
 
 		// HL2RPM: caustics under the water (refraction view, see composite_ps30)
 		{
 			const float flStrength = r_deferred_water_caustics.GetFloat();
 			float flCaustics[4] = { flStrength, pShaderAPI->CurrentTime() * 0.6f, 1.0f / 48.0f, 0.0f };
-			pShaderAPI->SetPixelShaderConstant( 23, flCaustics, 1, true );
+			pShaderAPI->SetPixelShaderConstant( 23, flCaustics, 1, false );
 		}
 
 		if ( bWorldEyeVec )
 		{
-			float vEyepos[4] = {0,0,0,0};
-			pShaderAPI->GetWorldSpaceCameraPosition( vEyepos );
-			pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_0, vEyepos );
+			vCameraPos[3] = 0.0f;
+			pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_0, vCameraPos );
 		}
 
 		if ( bRimLight )
@@ -736,7 +734,7 @@ void DrawPassComposite( const defParms_composite &info, CBaseVSShader *pShader, 
 				flEnvScale = 0.0f;
 			const float *pTint = params[ info.iEnvmapTint ]->GetVecValue();
 			float flTint[4] = { pTint[0] * flEnvScale, pTint[1] * flEnvScale, pTint[2] * flEnvScale, 0.0f };
-			pShaderAPI->SetPixelShaderConstant( 5, flTint, 1, true );
+			pShaderAPI->SetPixelShaderConstant( 5, flTint, 1, false );
 		}
 
 		// FIX: Engine's cLightScale lives in pixel shader register c30

@@ -1,10 +1,12 @@
+// DYNAMIC: "WET" "0..1"
+
 //========= HL2RPM ============================================================//
 //
 // Weather applied to the lit opaque scene (before translucents):
-//   - wet surfaces: darker + sky reflection (Fresnel), only where rain can fall
-//     (top-down rain occlusion map), walls a bit, floors fully
-//   - puddles on flat ground with raindrop ripples
-//   - exponential height fog with sun in-scattering
+//   - WET == 1: wet surfaces (darker + Fresnel sky reflection via top-down rain
+//     occlusion map), puddles with raindrop ripples and SSR, and debug views
+//   - WET == 0: lean dry-frame path (zero ddx/ddy, zero SSR/rainmap/normals
+//     outdoors) for exponential height fog + directional aerial perspective
 //
 // Blend: ONE, SRC_ALPHA  ->  result = src.rgb + scene * src.a
 //
@@ -12,19 +14,22 @@
 
 #include "common_ps_fxc.h"
 #include "common_deferred_fxc.h"
+#include "hl2rpm_sky_fxc.h"
 
 sampler sNormals		: register( s0 );
 sampler sDepth			: register( s1 );
 sampler sRainMap		: register( s2 );	// hardware depth compare
 sampler sWeatherMap		: register( s3 );
 sampler sScene			: register( s4 );	// HL2RPM: the lit opaque scene (copied before this pass), screen space reflections
+sampler sSkyView		: register( s5 );	// HL2RPM: procedural sky-view LUT (192x108 RGBA16F) for directional aerial perspective
+sampler sSSAO			: register( s6 );	// HL2RPM: half-res SSAO + SkyVisibility (g channel) for indoor aerial protection
 
 const float3 g_vecViewOrigin	: register( c0 );
 const float4 g_vecRain			: register( c1 );	// rain, wetness, puddles, time
 const float4 g_vecFog			: register( c2 );	// density /1000u, falloff /1000u, base z, volumetric
 const float4 g_vecFogColor		: register( c3 );	// rgb, max opacity
-const float4 g_vecSkyZenith		: register( c4 );
-const float4 g_vecSkyHorizon	: register( c5 );
+const float4 g_vecSkyZenith		: register( c4 );	// rgb skyZenith, w flFogSkyColor
+const float4 g_vecSkyHorizon	: register( c5 );	// rgb skyHorizon, w flOvercastDim
 const float4 g_vecLightDir		: register( c6 );
 const float4 g_vecLightColor	: register( c7 );
 const float4 g_matRainMap[3]	: register( c8 );	// rows of world -> rain map texture
@@ -32,6 +37,16 @@ const float4 g_vecRainMap		: register( c11 );	// depth bias, size, texel size, v
 const float4 g_vecFlags			: register( c12 );	// x fog on, y wet on, z night, w debug view
 const float4 g_matWorldToScreen[4]	: register( c13 );	// HL2RPM: world -> screen texture coords of this view (rows, c13 - c16)
 const float4 g_vecSSR			: register( c17 );	// x steps (0 = off), y strength on puddles, z strength on wet surfaces, w thickness scale
+const float4 g_vecAerialParams	: register( c18 );	// x aerial density /1000u, y falloff /1000u, z start dist (u), w 1 / ramp dist (u)
+const float4 g_vecAerialCtrl	: register( c19 );	// x camSky (0..1), y ssaoUVScale (0 if off), z flSkyMatch (0..1), w indoorFloor (0..1)
+const float4 g_vecSkyAtmo0		: register( c20 );	// xy lightH (normalized horizontal), z skyExposure, w skyViewValid (0/1)
+const float4 g_vecSkyAtmo1		: register( c21 );	// rgb skyColorScale (blue hour / night), w flSkyDesaturation
+const float4 g_vecSkyAtmo2		: register( c22 );	// rgb skyAmbientHorizon, w flSkyBrightness
+const float4 g_vecSkyAtmo3		: register( c23 );	// rgb twilWideBase, w twilightActive (0/1)
+const float4 g_vecSkyAtmo4		: register( c24 );	// rgb twilWideSun, w sunH.x
+const float4 g_vecSkyAtmo5		: register( c25 );	// rgb twilTightBase, w sunH.y
+const float4 g_vecSkyAtmo6		: register( c26 );	// rgb twilTightSun, w flHazeK
+const float4 g_vecSkyAtmo7		: register( c27 );	// rgb twilTightAnti, w unused
 
 struct PS_INPUT
 {
@@ -39,6 +54,7 @@ struct PS_INPUT
 	float3 vecWorldRay			: TEXCOORD1;
 };
 
+#if WET
 // HL2RPM: screen space reflection. March along R in world space (steps growing with the
 // distance), compare each sample with the depth buffer along the same view ray (linear in screen
 // space), refine the first hit by bisection and take the scene's color there. conf fades out
@@ -146,9 +162,11 @@ float3 RippleNormal( float2 p, float time, float strength )
 	n.xy += dir * ring * strength;
 	return normalize( n );
 }
+#endif
 
 float4 main( const PS_INPUT In ) : COLOR
 {
+#if WET
 	if ( g_vecFlags.w > 1.5 )
 	{
 		// debug: the rain occlusion map seen from above (brighter = lower occluder)
@@ -168,35 +186,40 @@ float4 main( const PS_INPUT In ) : COLOR
 		return float4( h, h, h, 0.0 );
 	}
 
-	// HL2RPM: screen space steps of the view ray (the ray is linear in screen space), ahead of
-	// any branch
+	// HL2RPM: screen space steps of the view ray and surface slope ahead of any branch
 	const float3 dRdu = ddx( In.vecWorldRay ) / ddx( In.vTexCoord.x );
 	const float3 dRdv = ddy( In.vecWorldRay ) / ddy( In.vTexCoord.y );
 
 	float depth = tex2D( sDepth, In.vTexCoord ).x;
-	// HL2RPM: the slope of the surface itself (its depth across the neighbouring pixels), ahead
-	// of any branch too: the detail sprites - grass, drawn with the opaque scene now - carry an
-	// "up" normal for their lighting, and a puddle is no place for a mirror standing on its edge
 	const float3 dPdx = ddx( In.vecWorldRay ) * depth + In.vecWorldRay * ddx( depth );
 	const float3 dPdy = ddy( In.vecWorldRay ) * depth + In.vecWorldRay * ddy( depth );
 	const float flDepthStep = max( abs( ddx( depth ) ), abs( ddy( depth ) ) );
-	if ( depth < 0.1 )
-		return float4( 0, 0, 0, 1 );	// sky: handled by the sky shader
+	const bool bDebug = ( g_vecFlags.w > 0.5 );
+	if ( depth < ( bDebug ? 0.1 : 2.5 ) )
+		return float4( 0, 0, 0, 1 );
+#else
+	// Lean dry-frame path: zero derivatives, skip sky (< 0.1) and viewmodel ([0.25, 2.4]).
+	float depth = tex2D( sDepth, In.vTexCoord ).x;
+	if ( depth < 2.5 )
+		return float4( 0, 0, 0, 1 );
+#endif
 
-	float3 worldPos = g_vecViewOrigin + In.vecWorldRay * depth;
-	float3 toPoint = worldPos - g_vecViewOrigin;
+	float3 toPoint = In.vecWorldRay * depth;
 	float dist = length( toPoint );
 	float3 rd = toPoint / max( dist, 1e-3 );
 
-	float4 vecNormalCtrl = tex2D( sNormals, In.vTexCoord );
+	float4 result = float4( 0, 0, 0, 1 );
+	bool bSkybox = false;
+
+#if WET
+	float3 worldPos = g_vecViewOrigin + toPoint;
+	float4 vecNormalCtrl = tex2Dlod( sNormals, float4( In.vTexCoord, 0, 0 ) );
 	float3 N = normalize( vecNormalCtrl.xyz * 2.0 - 1.0 );
 	// HL2RPM: lighting controls 1.0 = the 3D skybox (gbuffer_ps30): the rain map holds the
 	// map's roofs at its reconstructed position, not the skybox's - it is under the open sky
-	const bool bSkybox = vecNormalCtrl.a > ( 254.5 / 255.0 );
+	bSkybox = vecNormalCtrl.a > ( 254.5 / 255.0 );
 
-	float4 result = float4( 0, 0, 0, 1 );
-
-	if ( g_vecFlags.w > 0.5 )
+	if ( bDebug )
 	{
 		// debug: rain exposure (red = open sky, blue = covered), green = outside the map
 		float e = RainExposure( worldPos, N );
@@ -260,28 +283,132 @@ float4 main( const PS_INPUT In ) : COLOR
 		result.rgb += reflWet * wet * ( 1.0 - puddle ) + reflPuddle * puddle;
 		result.a *= 1.0 - ( wet * 0.40 + puddle * 0.25 );
 	}
-
-	// ---------------- height fog
-	if ( g_vecFlags.x > 0.5 && g_vecFog.x > 0.0 )
+#else
+	// Dry path: only sample sNormals.a for bSkybox when indoors (zero sNormals fetches outdoors!)
+	[branch]
+	if ( g_vecAerialCtrl.x < 0.995 && g_vecAerialParams.x > 0.0 )
 	{
-		float d0 = g_vecFog.x * 0.001;
-		float k = max( g_vecFog.y * 0.001, 1e-6 );
-		float camH = g_vecViewOrigin.z - g_vecFog.z;
-		float dz = toPoint.z;
-		float kdz = k * dz;
-		float shape = ( abs( kdz ) > 1e-4 ) ? ( 1.0 - exp( -kdz ) ) / kdz : 1.0;
-		float opticalDepth = d0 * dist * exp( -k * camH ) * shape;
-		float fog = ( 1.0 - exp( -opticalDepth ) ) * g_vecFogColor.a;
+		bSkybox = tex2Dlod( sNormals, float4( In.vTexCoord, 0, 0 ) ).a > ( 254.5 / 255.0 );
+	}
+#endif
 
-		// sunlight scattered toward the camera (gentle forward lobe, only over long paths so
-		// nearby ceilings and walls blocking the sun don't get a glowing halo in mist or fog)
-		float cosTheta = dot( rd, g_vecLightDir.xyz );
-		float g = 0.50;
-		float phase = ( 1.0 - g * g ) / pow( max( 1.0 + g * g - 2.0 * g * cosTheta, 1e-3 ), 1.5 ) * 0.25;
-		float3 fogColor = g_vecFogColor.rgb + g_vecLightColor.rgb * phase * 0.18 * ( 1.0 - g_vecFlags.z ) * smoothstep( 500.0, 2500.0, dist );
+	// ---------------- height fog + atmospheric aerial perspective
+	[branch]
+	if ( g_vecFlags.x > 0.5 && ( g_vecFog.x > 0.0 || g_vecAerialParams.x > 0.0 ) )
+	{
+		// 1. Weather height fog (ground mist / overcast / rain / fog presets)
+		float tauHeight = 0.0;
+		if ( g_vecFog.x > 0.0 )
+		{
+			float d0 = g_vecFog.x * 0.001;
+			float k = max( g_vecFog.y * 0.001, 1e-6 );
+			float camH = g_vecViewOrigin.z - g_vecFog.z;
+			float kdz = clamp( k * toPoint.z, -4.0, 12.0 );
+			float shape = ( abs( kdz ) > 1e-4 ) ? ( 1.0 - exp( -kdz ) ) / kdz : 1.0;
+			tauHeight = d0 * dist * exp( -k * camH ) * shape;
+		}
 
-		result.rgb = result.rgb * ( 1.0 - fog ) + fogColor * fog;
-		result.a *= 1.0 - fog;
+		// 2. Atmospheric aerial perspective (subtle Rayleigh/Mie depth haze across all weather)
+		float tauAerial = 0.0;
+		if ( g_vecAerialParams.x > 0.0 )
+		{
+			// Smooth C1 near-field clear zone keeps foreground props, NPCs and rooms crisp
+			float nearT = saturate( ( dist - g_vecAerialParams.z ) * g_vecAerialParams.w );
+			float nearRamp = nearT * nearT * ( 3.0 - 2.0 * nearT );
+			float dEff = dist * nearRamp;
+
+			// Gentle atmospheric scale height (valleys slightly richer, tall buildings still fade)
+			float ka = max( g_vecAerialParams.y * 0.001, 1e-6 );
+			float kadz = clamp( ka * toPoint.z, -2.0, 8.0 );
+			float shapeA = ( abs( kadz ) > 1e-4 ) ? ( 1.0 - exp( -kadz ) ) / kadz : 1.0;
+			tauAerial = ( g_vecAerialParams.x * 0.001 ) * dEff * shapeA;
+
+			// Indoor protection: only runs when camera is indoors/under roof (0 extra fetches outdoors)
+			[branch]
+			if ( g_vecAerialCtrl.x < 0.995 )
+			{
+				float pixSky = 1.0;
+				if ( !bSkybox )
+				{
+					pixSky = ( g_vecAerialCtrl.y > 0.0 )
+						? tex2Dlod( sSSAO, float4( In.vTexCoord * g_vecAerialCtrl.y, 0, 0 ) ).g
+						: smoothstep( 800.0, 2000.0, dist );
+				}
+				float indoorMask = ( 1.0 - g_vecAerialCtrl.x ) * ( 1.0 - pixSky );
+				tauAerial *= lerp( 1.0, g_vecAerialCtrl.w, indoorMask );
+			}
+		}
+
+		float tauTotal = tauHeight + tauAerial;
+		if ( tauTotal > 1e-5 )
+		{
+			float fog = ( 1.0 - exp( -tauTotal ) ) * g_vecFogColor.a;
+
+			// Distance-gated directionality: prevents nearby ceilings/overhangs from getting a solar halo
+			float dirGate = smoothstep( 500.0, 2500.0, dist );
+
+			// Directional horizon sky color from procedural SkyView LUT (1 L1-cached 192x108 tap),
+			// matching procsky_atmo_ps20b bit-for-bit at the horizon so 3D skybox mountains and 2D skybox fuse seamlessly.
+			float3 aerialColor = g_vecFogColor.rgb;
+			if ( g_vecSkyAtmo0.w > 0.5 && g_vecAerialCtrl.z > 0.001 )
+			{
+				float2 rayH = rd.xy * rsqrt( max( dot( rd.xy, rd.xy ), 1e-6 ) );
+				float cosAz = dot( rayH, g_vecSkyAtmo0.xy );
+				// Close surfaces sample neutral 90-deg azimuth (u ~ 0.707); distant silhouettes match directional sky.
+				// Keep u >= 0.14 on map rooftops (< 3500u) to prevent solar halo, relax to 0.06 on distant 3D skybox mountains.
+				float uMin = lerp( 0.14, 0.06, smoothstep( 3500.0, 9000.0, dist ) );
+				float u = max( sqrt( saturate( 0.5 - 0.5 * cosAz * dirGate ) ), uMin );
+				// Clamp below-horizon rays to the horizon plane (v = 0.5, safely inside atmosphere) and match up to 26 deg.
+				float zClamped = clamp( rd.z, 0.0, 0.45 );
+				float elev = asin( zClamped );
+				float v = 0.5 + 0.5 * sqrt( elev * ( 2.0 / 3.14159265 ) );
+
+				float3 skyRaw = tex2Dlod( sSkyView, float4( u, v, 0, 0 ) ).rgb + g_vecSkyAtmo2.rgb;
+				float hz = saturate( 1.0 - zClamped );
+				float hz2 = hz * hz;
+				[branch]
+				if ( g_vecSkyAtmo3.w > 0.5 )
+				{
+					float horizonWide = pow( hz, 2.2 );
+					float horizonTight = hz2 * hz2 * hz;
+					float dSun = dot( rayH, float2( g_vecSkyAtmo4.w, g_vecSkyAtmo5.w ) ) * dirGate;
+					float rs = saturate( dSun );
+					float rs2 = rs * rs;
+					float sunSide = rs2 * rs2 * rs2 * rs;
+					float as = saturate( -dSun );
+					float as2 = as * as;
+					float antiSunSide = as2 * as2 * as2 * as;
+					skyRaw += horizonWide * ( g_vecSkyAtmo3.rgb + sunSide * g_vecSkyAtmo4.rgb )
+					        + horizonTight * ( g_vecSkyAtmo5.rgb + sunSide * g_vecSkyAtmo6.rgb + antiSunSide * g_vecSkyAtmo7.rgb );
+				}
+				skyRaw *= g_vecSkyAtmo1.rgb;
+
+				float skyLum = dot( skyRaw, float3( 0.2126, 0.7152, 0.0722 ) );
+				skyRaw = lerp( skyRaw, skyLum * float3( 0.93, 0.97, 1.03 ), g_vecSkyAtmo1.w );
+				skyRaw *= g_vecSkyAtmo2.w;
+				skyLum *= g_vecSkyAtmo2.w;
+				skyRaw = lerp( skyRaw, max( skyRaw, skyLum * 1.15 ), g_vecSkyAtmo6.w * ( hz2 * hz2 ) );
+
+				float3 aerialSky = HL2RPM_SkyTonemap( skyRaw * g_vecSkyHorizon.w * g_vecSkyAtmo0.z );
+				aerialColor = lerp( g_vecFogColor.rgb, aerialSky, g_vecAerialCtrl.z );
+			}
+
+			// Weather height fog color: unified luminous mist-softened sky + distance-gated forward sun lobe
+			// (exact same formula as procsky_atmo_ps20b so misty/overcast/fog/rain mountains and 2D skybox match!)
+			float aerialLum = dot( aerialColor, float3( 0.2126, 0.7152, 0.0722 ) );
+			float3 mistBase = lerp( aerialColor, aerialLum * float3( 0.96, 0.98, 1.02 ), 0.25 );
+			float3 heightBase = lerp( g_vecFogColor.rgb, mistBase, lerp( 0.35, 0.92, g_vecSkyZenith.w ) );
+			float cosTheta = dot( rd, g_vecLightDir.xyz );
+			float g = 0.50;
+			float phase = ( 1.0 - g * g ) / pow( max( 1.0 + g * g - 2.0 * g * cosTheta, 1e-3 ), 1.5 ) * 0.25;
+			float3 heightColor = heightBase + g_vecLightColor.rgb * phase * 0.14 * ( 1.0 - g_vecFlags.z ) * dirGate;
+
+			float wAerial = tauAerial / tauTotal;
+			float3 fogColor = lerp( heightColor, aerialColor, wAerial );
+
+			result.rgb = result.rgb * ( 1.0 - fog ) + fogColor * fog;
+			result.a *= 1.0 - fog;
+		}
 	}
 
 	return result;

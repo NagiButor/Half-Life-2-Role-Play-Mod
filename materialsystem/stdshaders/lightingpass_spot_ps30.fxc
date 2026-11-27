@@ -85,12 +85,21 @@ struct PS_OUTPUT
 	float4 vColor_0				:	COLOR0;
 };
 
-float SpotReceiverPlaneDepthBias( float3 shadowProj )
+// HL2RPM: analytical screen-space Jacobian of shadowProj from pre-branch ddx/ddy(worldPos),
+// allowing the entire spot shadow setup + RPDB to sit safely inside radius/cone [branch]es
+// with zero X4121 gradient errors or 2x2 quad boundary artifacts at cone edges.
+float SpotReceiverPlaneDepthBias( float3 shadowProj, float clipW, float4x4 spotWorldToTexture, float3 vecPosDx, float3 vecPosDy )
 {
-	float2 dUVdx = ddx( shadowProj.xy );
-	float2 dUVdy = ddy( shadowProj.xy );
-	float  dZdx  = ddx( shadowProj.z );
-	float  dZdy  = ddy( shadowProj.z );
+	float4 dClipDx = mul( float4( vecPosDx, 0.0f ), spotWorldToTexture );
+	float4 dClipDy = mul( float4( vecPosDy, 0.0f ), spotWorldToTexture );
+	float invW = 1.0f / max( clipW, 1e-5f );
+	float3 dProjDx = ( dClipDx.xyz - shadowProj * dClipDx.w ) * invW;
+	float3 dProjDy = ( dClipDy.xyz - shadowProj * dClipDy.w ) * invW;
+
+	float2 dUVdx = dProjDx.xy;
+	float2 dUVdy = dProjDy.xy;
+	float  dZdx  = dProjDx.z;
+	float  dZdy  = dProjDy.z;
 
 	float det    = dUVdx.x * dUVdy.y - dUVdx.y * dUVdy.x;
 	float absDet = abs( det );
@@ -105,11 +114,6 @@ float SpotReceiverPlaneDepthBias( float3 shadowProj )
 
 		float rawBias = ( abs( dZduv.x ) + abs( dZduv.y ) ) * g_vecShadowMappingTweaks_0.z;
 
-		// Smoothly fade RPDB when the screen-space Jacobian determinant is
-		// very small (camera close to surface).  The 1/det amplifies FP
-		// noise in that regime, creating per-pixel bias fluctuations that
-		// manifest as shadow-acne stripes.  Fading prevents the binary
-		// RPDB on/off pattern at the old hard 1e-7 threshold.
 		float rpdbConfidence = smoothstep( 1e-6f, 1e-4f, absDet );
 		bias = rawBias * rpdbConfidence;
 	}
@@ -117,7 +121,8 @@ float SpotReceiverPlaneDepthBias( float3 shadowProj )
 	return bias;
 }
 
-float ApplySpotReceiverDepthBias( float shadowDepth, float viewFwdDot, float viewZ, float3 shadowProj, float4 spotBias )
+float ApplySpotReceiverDepthBias( float shadowDepth, float viewFwdDot, float viewZ, float3 shadowProj, float clipW,
+	float4x4 spotWorldToTexture, float3 vecPosDx, float3 vecPosDy, float4 spotBias )
 {
 	viewZ = max( viewZ, spotBias.z );
 
@@ -127,25 +132,19 @@ float ApplySpotReceiverDepthBias( float shadowDepth, float viewFwdDot, float vie
 	float tanA = sqrt( 1.0f - cosA * cosA ) / cosA;
 	tanA = min( tanA, 10.0f );
 
-	// Constant raised from 0.5 to 0.75 texels (Reduced to 0.1 for Bias Free fwidth mapping)
-	// The extra quarter-texel covers the perspective depth margin that linear (CSM) does not need.
-	// Close-range stabiliser: +0.25 * cosA adds another quarter-texel on
-	// face-on surfaces (where normal-offset is near-zero and the constant
-	// bias is the only defence).  At grazing angles the slope term already
-	// dominates, so the stabiliser tapers to near-zero via cosA weighting.
-	// Update V3: Increased base to 0.25 and reduced slope to 0.2 to match Point Light fix
 	float biasTexels = 0.25f + cosA * 0.1f + 0.2f * tanA;
 
-	float rpdbDepth = SpotReceiverPlaneDepthBias( shadowProj );
+	float rpdbDepth = SpotReceiverPlaneDepthBias( shadowProj, clipW, spotWorldToTexture, vecPosDx, vecPosDy );
 	float rpdbTexels = rpdbDepth / max( oneTexelDepth, 1e-7f );
 	biasTexels = max( biasTexels, rpdbTexels );
-	biasTexels = min( biasTexels, 6.0f ); // Reduced from 12.0f
+	biasTexels = min( biasTexels, 6.0f );
 
 	return shadowDepth - oneTexelDepth * biasTexels;
 }
 
 // Debug variant: also outputs per-component bias info for visualisation
-float ApplySpotReceiverDepthBias_Debug( float shadowDepth, float viewFwdDot, float viewZ, float3 shadowProj, float4 spotBias,
+float ApplySpotReceiverDepthBias_Debug( float shadowDepth, float viewFwdDot, float viewZ, float3 shadowProj, float clipW,
+	float4x4 spotWorldToTexture, float3 vecPosDx, float3 vecPosDy, float4 spotBias,
 	out float3 dbgComponents )  // R=constant, G=slope, B=rpdb  (in texels, /12 normalised)
 {
 	viewZ = max( viewZ, spotBias.z );
@@ -159,7 +158,7 @@ float ApplySpotReceiverDepthBias_Debug( float shadowDepth, float viewFwdDot, flo
 	float slopeTerm = 3.0f * tanA;
 	float biasTexels = constTerm + slopeTerm;
 
-	float rpdbDepth  = SpotReceiverPlaneDepthBias( shadowProj );
+	float rpdbDepth  = SpotReceiverPlaneDepthBias( shadowProj, clipW, spotWorldToTexture, vecPosDx, vecPosDy );
 	float rpdbTexels = rpdbDepth / max( oneTexelDepth, 1e-7f );
 	float rpdbUsed   = max( rpdbTexels - biasTexels, 0.0f );  // extra from rpdb
 	biasTexels = max( biasTexels, rpdbTexels );
@@ -170,7 +169,7 @@ float ApplySpotReceiverDepthBias_Debug( float shadowDepth, float viewFwdDot, flo
 	return shadowDepth - oneTexelDepth * biasTexels;
 }
 
-float3 ToShadowSpace_Spot( float3 worldPos, float viewFwdDot, float3 vecNormal, float4 spotBias, float4x4 spotWorldToTexture, out float outViewZ )
+float3 ToShadowSpace_Spot( float3 worldPos, float viewFwdDot, float3 vecNormal, float4 spotBias, float4x4 spotWorldToTexture, out float outViewZ, out float outClipW )
 {
 	float4 clip0 = mul( float4( worldPos, 1 ), spotWorldToTexture );
 	float viewZ = max( clip0.w, spotBias.z );
@@ -180,6 +179,7 @@ float3 ToShadowSpace_Spot( float3 worldPos, float viewFwdDot, float3 vecNormal, 
 	worldPos += vecNormal * ( sinAngle * ( viewZ * spotBias.y ) );
 
 	float4 clip = mul( float4( worldPos, 1 ), spotWorldToTexture );
+	outClipW = clip.w;
 	outViewZ = max( clip.w, spotBias.z );
 	clip.xyz /= clip.w;
 	return clip.xyz;
@@ -207,21 +207,25 @@ float4 DoSpotLightBasic( const int index, float3 normal,
 
 	return float4( 0, saturate( litDot ) * fade, 0, 0 );
 #else
-	float3 normalizedLightVec = vecWorldToLight / lightToWorldDist;
+	float3 normalizedLightVec = vecWorldToLight / max( lightToWorldDist, 1e-4f );
 	float3 flLitNormal = lerp( normal, dot( normal, normalizedLightVec ) * normal, litface );
-
-#if DEFCFG_BLINN_PHONG
-	// HL2RPM (PBR): phong_exp is the roughness of the surface (UnpackLightingControls)
-	float flSpecular = SpecularGGX( normal, vecWorldRayInv, normalizedLightVec, phong_exp );
-#else
-	float flSpecular = dot( reflect( -normalizedLightVec, flLitNormal ), vecWorldRayInv );
-	flSpecular = pow( flSpecular, phong_exp );
-#endif
 
 	float viewFwdDot = dot( normalizedLightVec, flLitNormal );
 	float litDot = lerp( viewFwdDot, viewFwdDot * 0.5f + 0.5f, half_lambert );
 
 	float lightAmount = saturate( litDot );
+
+	float flSpecular = 0.0f;
+	if ( lightAmount > 0.0f )
+	{
+#if DEFCFG_BLINN_PHONG
+		// HL2RPM (PBR): phong_exp is the roughness of the surface (UnpackLightingControls)
+		flSpecular = SpecularGGX( normal, vecWorldRayInv, normalizedLightVec, phong_exp );
+#else
+		flSpecular = dot( reflect( -normalizedLightVec, flLitNormal ), vecWorldRayInv );
+		flSpecular = pow( flSpecular, phong_exp );
+#endif
+	}
 
 	// (HL2RPM: the curve of the light, or the engine's attenuation of a converted lamp - common_lighting_fxc.h)
 	float fade = DeferredLightFalloff( lightToWorldDist, g_flMixedData[ index ].w, g_flMixedData[ index + 1 ].w );
@@ -266,6 +270,9 @@ PS_OUTPUT main( const PS_INPUT In )
 #endif
 
 	float3 worldPos = g_vecViewOrigin + vecWorldRay * flDepth;
+	// Screen-space world position derivatives computed ahead of any flow control (used for analytical RPDB)
+	const float3 vecPosDx = ddx( worldPos );
+	const float3 vecPosDy = ddy( worldPos );
 
 	float4 flNormalCtrl = tex2D( sNormals, vecTexcoords );
 	float3 flNormal = normalize( flNormalCtrl.xyz * 2.0f - 1.0f );
@@ -297,51 +304,63 @@ PS_OUTPUT main( const PS_INPUT In )
 		int iSamplerIndex = i * 2;
 
 		float3 vecDelta = worldPos - g_flMixedData[ iDataIndex ].xyz;
-		float dist = length( vecDelta );
-
-		float4x4 spotWorldToTexture = float4x4( g_flMixedData[ iDataIndex + 5 ],
-			g_flMixedData[ iDataIndex + 6 ],
-			g_flMixedData[ iDataIndex + 7 ],
-			g_flMixedData[ iDataIndex + 8 ] );
-
-		float3 normalizedLightVec = (-vecDelta) / max( dist, 1e-4f );
-		float viewFwdDot = abs( dot( normalizedLightVec, flNormal ) );
-		float4 spotBias = g_flMixedData[ iDataIndex + 9 ];
-
-		// Normal Offset Bias for Spot Light (Multiply by 2.0 texels approx)
-		float sinAngle = sqrt( saturate( 1.0f - viewFwdDot * viewFwdDot ) );
-		float3 vecDeltaOffset = vecDelta + flNormal * ( sinAngle * 2.0f );
-
-		float spotViewZ;
-		float3 depthPos = ToShadowSpace_Spot( worldPos + (vecDeltaOffset - vecDelta), viewFwdDot, flNormal, spotBias, spotWorldToTexture, spotViewZ );
-		float depthBiased = ApplySpotReceiverDepthBias( depthPos.z, viewFwdDot, spotViewZ, depthPos, spotBias );
-
-		float4 localLight = DoSpotLightBasic( iDataIndex, flNormal,
-									-vecDelta, dist, worldRayInv,
-									litface, half_lambert, phong_exp, false );
-
-		// HL2RPM: no light reaches the point (outside the cone or the radius, turned away): the
-		// shadow can't change the result - its filter (25 compares) is skipped
-		float flShadow = 1.0f;
+		float flRadius = g_flMixedData[ iDataIndex ].w;
+		float distSqr = dot( vecDelta, vecDelta );
 		[branch]
-		if ( localLight.y * localLight.w > 0.0f )
-			flShadow = PerformProjectedShadow( sMixedSampler[ iSamplerIndex ],
-			float3( depthPos.xy, depthBiased ), g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
-			g_flMixedData[ iDataIndex + 4 ].x );
-		localLight.y *= flShadow;
+		if ( distSqr < flRadius * flRadius )
+		{
+			float dist = sqrt( distSqr );
+			float3 normalizedLightVec = (-vecDelta) / max( dist, 1e-4f );
+			float4x4 spotWorldToTexture = float4x4( g_flMixedData[ iDataIndex + 5 ],
+				g_flMixedData[ iDataIndex + 6 ],
+				g_flMixedData[ iDataIndex + 7 ],
+				g_flMixedData[ iDataIndex + 8 ] );
+
+			float4 clipCheck = mul( float4( worldPos, 1 ), spotWorldToTexture );
+			[branch]
+			if ( clipCheck.w > 0.0f && all( clipCheck.xy >= -0.05f * clipCheck.w ) && all( clipCheck.xy <= 1.05f * clipCheck.w ) )
+			{
+				float4 localLight = DoSpotLightBasic( iDataIndex, flNormal,
+											-vecDelta, dist, worldRayInv,
+											litface, half_lambert, phong_exp, false );
+
+				float viewFwdDot = abs( dot( normalizedLightVec, flNormal ) );
+				float4 spotBias = g_flMixedData[ iDataIndex + 9 ];
+				float sinAngle = sqrt( saturate( 1.0f - viewFwdDot * viewFwdDot ) );
+				float3 vecDeltaOffset = vecDelta + flNormal * ( sinAngle * 2.0f );
+
+				float spotViewZ, spotClipW;
+				float3 depthPos = ToShadowSpace_Spot( worldPos + (vecDeltaOffset - vecDelta), viewFwdDot, flNormal, spotBias, spotWorldToTexture, spotViewZ, spotClipW );
 
 #if VENDOR == VENDOR_FXC_AMD
-		float3 AMDVec = abs( floor( depthPos.xyz ) );
-		float AMDAmt = AMDVec.x + AMDVec.y + AMDVec.z;
-		int AMDScale = step( AMDAmt, 0.0001f );
-		localLight.w *= AMDScale;
+				float3 AMDVec = abs( floor( depthPos.xyz ) );
+				float AMDAmt = AMDVec.x + AMDVec.y + AMDVec.z;
+				int AMDScale = step( AMDAmt, 0.0001f );
+				localLight.w *= AMDScale;
 #else
-		localLight.w *= 1.0f - any( floor( depthPos.xyz ) );
+				localLight.w *= 1.0f - any( floor( depthPos.xyz ) );
 #endif
 
-		flLight += DoLightFinalCookied( g_flMixedData[ iDataIndex + 1 ].xyz,
-			g_flMixedData[ iDataIndex + 2 ].xyz,
-			localLight, DoStandardCookie( sMixedSampler[ iSamplerIndex + 1 ], depthPos.xy ) );
+				[branch]
+				if ( localLight.w > 0.0f )
+				{
+					float flShadow = 1.0f;
+					[branch]
+					if ( localLight.y > 0.0f )
+					{
+						float depthBiased = ApplySpotReceiverDepthBias( depthPos.z, viewFwdDot, spotViewZ, depthPos, spotClipW, spotWorldToTexture, vecPosDx, vecPosDy, spotBias );
+						flShadow = PerformProjectedShadow( sMixedSampler[ iSamplerIndex ],
+							float3( depthPos.xy, depthBiased ), g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
+							g_flMixedData[ iDataIndex + 4 ].x );
+					}
+					localLight.y *= flShadow;
+
+					flLight += DoLightFinalCookied( g_flMixedData[ iDataIndex + 1 ].xyz,
+						g_flMixedData[ iDataIndex + 2 ].xyz,
+						localLight, tex2Dlod( sMixedSampler[ iSamplerIndex + 1 ], float4( depthPos.xy, 0, 0 ) ).rgb );
+				}
+			}
+		}
 	}
 
 	for ( int i = 0; i < NUM_SHADOWED; i++ )
@@ -351,54 +370,65 @@ PS_OUTPUT main( const PS_INPUT In )
 		int iSamplerIndex = NUM_SHADOWED_COOKIE * 2 + i;
 
 		float3 vecDelta = worldPos - g_flMixedData[ iDataIndex ].xyz;
-		float dist = length( vecDelta );
-
-		float4x4 spotWorldToTexture = float4x4( g_flMixedData[ iDataIndex + 5 ],
-			g_flMixedData[ iDataIndex + 6 ],
-			g_flMixedData[ iDataIndex + 7 ],
-			g_flMixedData[ iDataIndex + 8 ] );
-
-		float3 normalizedLightVec = (-vecDelta) / max( dist, 1e-4f );
-		float viewFwdDot = abs( dot( normalizedLightVec, flNormal ) );
-		float4 spotBias = g_flMixedData[ iDataIndex + 9 ];
-
-		// Normal Offset Bias for Spot Light
-		float sinAngle = sqrt( saturate( 1.0f - viewFwdDot * viewFwdDot ) );
-		float3 vecDeltaOffset = vecDelta + flNormal * ( sinAngle * 2.0f );
-
-		float spotViewZ;
-		float3 depthPos = ToShadowSpace_Spot( worldPos + (vecDeltaOffset - vecDelta), viewFwdDot, flNormal, spotBias, spotWorldToTexture, spotViewZ );
-
-		float depthBiased;
-		if ( i == 0 && g_vecSpotBiasDebug.x > 0.5f )
-		{
-			float3 dbgComp;
-			depthBiased = ApplySpotReceiverDepthBias_Debug( depthPos.z, viewFwdDot, spotViewZ, depthPos, spotBias, dbgComp );
-			dbgBiasComponents = dbgComp;
-			dbgBiasTotal = ( depthPos.z - depthBiased ) / max( spotBias.x / max( spotViewZ, 0.001f ), 1e-7f ) / 12.0f;
-		}
-		else
-		{
-			depthBiased = ApplySpotReceiverDepthBias( depthPos.z, viewFwdDot, spotViewZ, depthPos, spotBias );
-		}
-
-		float4 localLight = DoSpotLightBasic( iDataIndex, flNormal,
-									-vecDelta, dist, worldRayInv,
-									litface, half_lambert, phong_exp, true );
-
-		// HL2RPM: no light reaches the point (outside the cone or the radius, turned away): the
-		// shadow can't change the result - its filter (25 compares) is skipped
-		float flShadow = 1.0f;
+		float flRadius = g_flMixedData[ iDataIndex ].w;
+		float distSqr = dot( vecDelta, vecDelta );
+		const bool bDebug0 = ( i == 0 && g_vecSpotBiasDebug.x > 0.5f );
 		[branch]
-		if ( localLight.y * localLight.w > 0.0f )
-			flShadow = PerformProjectedShadow( sMixedSampler[ iSamplerIndex ],
-			float3( depthPos.xy, depthBiased ), g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
-			g_flMixedData[ iDataIndex + 4 ].x );
-		localLight.y *= flShadow;
+		if ( distSqr < flRadius * flRadius || bDebug0 )
+		{
+			float dist = sqrt( distSqr );
+			float3 normalizedLightVec = (-vecDelta) / max( dist, 1e-4f );
+			float spotDot = dot( g_flMixedData[ iDataIndex + 3 ].xyz, normalizedLightVec );
+			[branch]
+			if ( spotDot > g_flMixedData[ iDataIndex + 2 ].w || bDebug0 )
+			{
+				float4 localLight = DoSpotLightBasic( iDataIndex, flNormal,
+											-vecDelta, dist, worldRayInv,
+											litface, half_lambert, phong_exp, true );
 
-		flLight += DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,
-			g_flMixedData[ iDataIndex + 2 ].xyz,
-			localLight );
+				float flShadow = 1.0f;
+				[branch]
+				if ( localLight.y * localLight.w > 0.0f || bDebug0 )
+				{
+					float4x4 spotWorldToTexture = float4x4( g_flMixedData[ iDataIndex + 5 ],
+						g_flMixedData[ iDataIndex + 6 ],
+						g_flMixedData[ iDataIndex + 7 ],
+						g_flMixedData[ iDataIndex + 8 ] );
+
+					float viewFwdDot = abs( dot( normalizedLightVec, flNormal ) );
+					float4 spotBias = g_flMixedData[ iDataIndex + 9 ];
+
+					float sinAngle = sqrt( saturate( 1.0f - viewFwdDot * viewFwdDot ) );
+					float3 vecDeltaOffset = vecDelta + flNormal * ( sinAngle * 2.0f );
+
+					float spotViewZ, spotClipW;
+					float3 depthPos = ToShadowSpace_Spot( worldPos + (vecDeltaOffset - vecDelta), viewFwdDot, flNormal, spotBias, spotWorldToTexture, spotViewZ, spotClipW );
+
+					float depthBiased;
+					if ( bDebug0 )
+					{
+						float3 dbgComp;
+						depthBiased = ApplySpotReceiverDepthBias_Debug( depthPos.z, viewFwdDot, spotViewZ, depthPos, spotClipW, spotWorldToTexture, vecPosDx, vecPosDy, spotBias, dbgComp );
+						dbgBiasComponents = dbgComp;
+						dbgBiasTotal = ( depthPos.z - depthBiased ) / max( spotBias.x / max( spotViewZ, 0.001f ), 1e-7f ) / 12.0f;
+					}
+					else
+					{
+						depthBiased = ApplySpotReceiverDepthBias( depthPos.z, viewFwdDot, spotViewZ, depthPos, spotClipW, spotWorldToTexture, vecPosDx, vecPosDy, spotBias );
+					}
+
+					if ( localLight.y * localLight.w > 0.0f )
+						flShadow = PerformProjectedShadow( sMixedSampler[ iSamplerIndex ],
+							float3( depthPos.xy, depthBiased ), g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
+							g_flMixedData[ iDataIndex + 4 ].x );
+				}
+				localLight.y *= flShadow;
+
+				flLight += DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,
+					g_flMixedData[ iDataIndex + 2 ].xyz,
+					localLight );
+			}
+		}
 	}
 
 	for ( int i = 0; i < NUM_COOKIE; i++ )
@@ -409,32 +439,43 @@ PS_OUTPUT main( const PS_INPUT In )
 		int iSamplerIndex = NUM_SHADOWED_COOKIE * 2 + NUM_SHADOWED + i;
 
 		float3 vecDelta = worldPos - g_flMixedData[ iDataIndex ].xyz;
-		float dist = length( vecDelta );
+		float flRadius = g_flMixedData[ iDataIndex ].w;
+		float distSqr = dot( vecDelta, vecDelta );
+		[branch]
+		if ( distSqr < flRadius * flRadius )
+		{
+			float4x4 spotWorldToTexture = float4x4( g_flMixedData[ iDataIndex + 5 ],
+				g_flMixedData[ iDataIndex + 6 ],
+				g_flMixedData[ iDataIndex + 7 ],
+				g_flMixedData[ iDataIndex + 8 ] );
 
-		float4x4 spotWorldToTexture = float4x4( g_flMixedData[ iDataIndex + 5 ],
-			g_flMixedData[ iDataIndex + 6 ],
-			g_flMixedData[ iDataIndex + 7 ],
-			g_flMixedData[ iDataIndex + 8 ] );
-
-		float4 depthPos = mul( float4( worldPos, 1 ), spotWorldToTexture );
-		depthPos.xyz /= depthPos.w;
-
-		float4 localLight = DoSpotLightBasic( iDataIndex, flNormal,
-									-vecDelta, dist, worldRayInv,
-									litface, half_lambert, phong_exp, false );
-
+			float4 depthPos = mul( float4( worldPos, 1 ), spotWorldToTexture );
+			[branch]
+			if ( depthPos.w > 0.0f )
+			{
+				depthPos.xyz /= depthPos.w;
 #if VENDOR == VENDOR_FXC_AMD
-		float3 AMDVec = abs( floor( depthPos.xyz ) );
-		float AMDAmt = AMDVec.x + AMDVec.y + AMDVec.z;
-		int AMDScale = step( AMDAmt, 0.0001f );
-		localLight.w *= AMDScale;
+				float3 AMDVec = abs( floor( depthPos.xyz ) );
+				float AMDAmt = AMDVec.x + AMDVec.y + AMDVec.z;
+				float inside = step( AMDAmt, 0.0001f );
 #else
-		localLight.w *= 1.0f - any( floor( depthPos.xyz ) );
+				float inside = 1.0f - any( floor( depthPos.xyz ) );
 #endif
+				[branch]
+				if ( inside > 0.5f )
+				{
+					float dist = sqrt( distSqr );
+					float4 localLight = DoSpotLightBasic( iDataIndex, flNormal,
+												-vecDelta, dist, worldRayInv,
+												litface, half_lambert, phong_exp, false );
+					localLight.w *= inside;
 
-		flLight += DoLightFinalCookied( g_flMixedData[ iDataIndex + 1 ].xyz,
-			g_flMixedData[ iDataIndex + 2 ].xyz,
-			localLight, DoStandardCookie( sMixedSampler[ iSamplerIndex ], depthPos.xy ) );
+					flLight += DoLightFinalCookied( g_flMixedData[ iDataIndex + 1 ].xyz,
+						g_flMixedData[ iDataIndex + 2 ].xyz,
+						localLight, tex2Dlod( sMixedSampler[ iSamplerIndex ], float4( depthPos.xy, 0, 0 ) ).rgb );
+				}
+			}
+		}
 	}
 
 	for ( int i = 0; i < NUM_SIMPLE; i++ )
@@ -445,15 +486,25 @@ PS_OUTPUT main( const PS_INPUT In )
 			+ i * NUM_CONSTS_SPOT_SIMPLE;
 
 		float3 vecDelta = worldPos - g_flMixedData[ iDataIndex ].xyz;
-		float dist = length( vecDelta );
+		float flRadius = g_flMixedData[ iDataIndex ].w;
+		float distSqr = dot( vecDelta, vecDelta );
+		[branch]
+		if ( distSqr < flRadius * flRadius )
+		{
+			float dist = sqrt( distSqr );
+			float spotDot = dot( g_flMixedData[ iDataIndex + 3 ].xyz, (-vecDelta) / max( dist, 1e-4f ) );
+			[branch]
+			if ( spotDot > g_flMixedData[ iDataIndex + 2 ].w )
+			{
+				float4 localLight = DoSpotLightBasic( iDataIndex, flNormal,
+											-vecDelta, dist, worldRayInv,
+											litface, half_lambert, phong_exp, true );
 
-		float4 localLight = DoSpotLightBasic( iDataIndex, flNormal,
-									-vecDelta, dist, worldRayInv,
-									litface, half_lambert, phong_exp, true );
-
-		flLight += DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,
-			g_flMixedData[ iDataIndex + 2 ].xyz,
-			localLight );
+				flLight += DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,
+					g_flMixedData[ iDataIndex + 2 ].xyz,
+					localLight );
+			}
+		}
 	}
 
 	PS_OUTPUT Out;

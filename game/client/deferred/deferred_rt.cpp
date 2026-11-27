@@ -53,6 +53,12 @@ static CTextureReference g_tex_ShadowDepth_Proj_LOD2[ MAX_SHADOW_PROJ ];
 #endif
 static CTextureReference g_tex_ShadowColor_DP[ MAX_SHADOW_DP ];
 static CTextureReference g_tex_ShadowDepth_DP[ MAX_SHADOW_DP ];
+// HL2RPM: point-light cube shadow atlases kept between frames (deferred_shadowcache.cpp)
+static CTextureReference g_tex_ShadowCache_DP[ MAX_SHADOW_CACHE_DP ];
+static int g_nShadowCacheDP = 0;
+static ConVar r_deferred_shadow_cache_points( "r_deferred_shadow_cache_points", "6", FCVAR_NONE,
+	"HL2RPM: point lamps whose 3x2 cube shadow atlas is kept between frames (1024^2 x 6 x 16 bit = 12 MB on Ultra; 0 = none)",
+	true, 0, true, MAX_SHADOW_CACHE_DP, OnShadowCacheCountChanged );
 
 static CTextureReference g_tex_RadiosityBuffer[ 2 ];
 static CTextureReference g_tex_RadiosityNormal[ 2 ];
@@ -87,8 +93,10 @@ static ConVar r_hl2rpm_renderscale( "r_hl2rpm_renderscale", "0.75", FCVAR_ARCHIV
 	"(1 = native). Takes effect with the render targets (outside a map / the next start)",
 	true, 0.5f, true, 1.0f, OnRenderScaleChanged );
 static bool g_bRenderScaled = false;
+static bool g_bScreenRTsScaled = false;
 static int g_iFrameW = 0, g_iFrameH = 0;
-static int g_iScreenRTsW = -2, g_iScreenRTsH = -2;	// the frame the screen-sized targets were made for (-1 = full size)
+static int g_iScreenRTsW = -2, g_iScreenRTsH = -2;	// the frame the screen-sized targets were made for
+static int g_iScreenRTsBackW = -2, g_iScreenRTsBackH = -2;	// backbuffer size (for literal backbuffer-sized RTs like Bloom)
 static CTextureReference g_tex_Scene;
 static CTextureReference g_tex_SceneCopy;
 
@@ -129,7 +137,9 @@ ITexture *GetDefRT_SceneCopy()
 
 ITexture *CreateFrameSizedRT( const char *pszName, int iDivisor, int iFormat, int iDepth, unsigned int nFlags )
 {
-	if ( g_bRenderScaled )
+	// HL2RPM: Source has no RT_SIZE_HALF_FRAME_BUFFER, so iDivisor == 2 uses an exact literal half-res RT
+	// both when render-scaled and at native 1.0 resolution (rebuilt cleanly on mode changes in InitDeferredRTs).
+	if ( g_bRenderScaled || ( iDivisor == 2 && g_iFrameW > 0 && g_iFrameH > 0 ) )
 		return materials->CreateNamedRenderTargetTextureEx2( pszName,
 			Max( 1, g_iFrameW / iDivisor ), Max( 1, g_iFrameH / iDivisor ), RT_SIZE_LITERAL,
 			(ImageFormat)iFormat, (MaterialRenderTargetDepth_t)iDepth, nFlags, 0 );
@@ -151,12 +161,12 @@ static void LatchRenderScale()
 	g_iFrameH = g_bRenderScaled ? Max( 64, (int)( bh * s + 0.5f ) & ~1 ) : bh;
 }
 static int g_iShadowSpotResActive = 2048;
-static int g_iShadowPointResActive = 2048;
+static int g_iShadowPointResActive = 1024;
 #if DEFCFG_ADAPTIVE_SHADOWMAP_LOD
 static int g_iShadowSpotResLod1Active = 1024;
 static int g_iShadowSpotResLod2Active = 512;
-static int g_iShadowPointResLod1Active = 1024;
-static int g_iShadowPointResLod2Active = 512;
+static int g_iShadowPointResLod1Active = 512;
+static int g_iShadowPointResLod2Active = 256;
 #endif
 
 static void LatchShadowResolutionsFromConVars()
@@ -227,14 +237,17 @@ void InitDeferredRTs( bool bInitial )
 {
 	g_bInDeferredRTInit = true;
 
-	// HL2RPM: the screen-sized targets are made at the first init and follow the frame buffer's size
-	// by themselves; with a render scale they have a literal size - made again when it changes
+	// HL2RPM: the screen-sized targets are made at the first init and rebuilt whenever the
+	// 3D frame size, render-scale mode, or backbuffer dimensions change (literal half-res RTs
+	// such as SSAO, clouds and packed Bloom need recreation on video mode changes too).
 	LatchRenderScale();
-	const int iWantW = g_bRenderScaled ? g_iFrameW : -1;
-	const int iWantH = g_bRenderScaled ? g_iFrameH : -1;
-	const bool bScreenRTs = bInitial || iWantW != g_iScreenRTsW || iWantH != g_iScreenRTsH;
+	int iBackW = 0, iBackH = 0;
+	materials->GetBackBufferDimensions( iBackW, iBackH );
+	const bool bScreenRTs = bInitial || g_iFrameW != g_iScreenRTsW || g_iFrameH != g_iScreenRTsH
+		|| g_bRenderScaled != g_bScreenRTsScaled || iBackW != g_iScreenRTsBackW || iBackH != g_iScreenRTsBackH;
 	if ( !bInitial && bScreenRTs )
-		DevMsg( "[deferred] render scale: the screen-sized targets are made again for %d x %d\n", g_iFrameW, g_iFrameH );
+		DevMsg( "[deferred] screen render targets rebuilt for %d x %d (backbuffer %d x %d, scaled %d)\n",
+			g_iFrameW, g_iFrameH, iBackW, iBackH, g_bRenderScaled ? 1 : 0 );
 	EnsurePointSpotShadowQualityInitialized();
 	LatchShadowResolutionsFromConVars();
 
@@ -326,8 +339,11 @@ const ImageFormat fmt_gbuffer0 =
 
 	if ( bScreenRTs )
 	{
-		g_iScreenRTsW = iWantW;
-		g_iScreenRTsH = iWantH;
+		g_iScreenRTsW = g_iFrameW;
+		g_iScreenRTsH = g_iFrameH;
+		g_bScreenRTsScaled = g_bRenderScaled;
+		g_iScreenRTsBackW = iBackW;
+		g_iScreenRTsBackH = iBackH;
 
 		// HL2RPM: the 3D frame itself when scaled (the depth-stencil of the screen is shared: it is
 		// bigger, the frame uses its top left) and a copy of it for the passes that look at the frame
@@ -646,7 +662,6 @@ const ImageFormat fmt_gbuffer0 =
 		}
 		g_nShadowCacheProj = nCache;
 		g_bShadowSampleUsesColor = bShadowUseColor;
-		DeferredShadowCache_InvalidateAll();
 	}
 
 	for ( int i = 0; i < MAX_SHADOW_DP; i++ )
@@ -686,6 +701,30 @@ const ImageFormat fmt_gbuffer0 =
 		Assert( res_y == g_tex_ShadowColor_DP[i]->GetActualHeight() );
 		Assert( res_x == g_tex_ShadowDepth_DP[i]->GetActualWidth() );
 		Assert( res_x == g_tex_ShadowColor_DP[i]->GetActualWidth() );
+	}
+
+	// HL2RPM: point-light cube shadow atlas cache (hardware depth cube-atlas path only)
+	{
+		const int nCacheDP = ( bShadowUseColor || bPointShadowLegacy )
+			? 0 : Clamp( r_deferred_shadow_cache_points.GetInt(), 0, MAX_SHADOW_CACHE_DP );
+		const int res_face = GetShadowResolution_Point();
+		const int res_x = res_face * 3;
+		const int res_y = res_face * 2;
+		for ( int i = 0; i < MAX_SHADOW_CACHE_DP; i++ )
+		{
+			if ( i < nCacheDP )
+				g_tex_ShadowCache_DP[i].Init( materials->CreateNamedRenderTargetTextureEx2(
+					VarArgs( "_rt_defShadowCacheDP%02i", i ),
+					res_x, res_y,
+					RT_SIZE_NO_CHANGE,
+					fmt_depth,
+					MATERIAL_RT_DEPTH_NONE,
+					depthFlags, 0 ) );
+			else
+				g_tex_ShadowCache_DP[i].Shutdown();
+		}
+		g_nShadowCacheDP = nCacheDP;
+		DeferredShadowCache_InvalidateAll();
 	}
 
 
@@ -906,6 +945,22 @@ ITexture *GetShadowDepthRT_DP( int index )
 	Assert( index >= 0 && index < MAX_SHADOW_DP );
 	Assert( g_tex_ShadowDepth_DP[ index ].IsValid() );
 	return g_tex_ShadowDepth_DP[ index ];
+}
+
+ITexture *GetShadowSampleRT_DP( int index )
+{
+	return g_bShadowSampleUsesColor ? GetShadowColorRT_DP( index ) : GetShadowDepthRT_DP( index );
+}
+
+int GetNumShadowCacheRT_DP()
+{
+	return g_nShadowCacheDP;
+}
+
+ITexture *GetShadowCacheRT_DP( int index )
+{
+	Assert( index >= 0 && index < g_nShadowCacheDP );
+	return g_tex_ShadowCache_DP[ index ];
 }
 ITexture *GetProjectableVguiRT( int index )
 {

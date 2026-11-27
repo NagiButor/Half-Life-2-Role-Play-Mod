@@ -155,8 +155,9 @@ BEGIN_VS_SHADER( LIGHTING_GLOBAL, "" )
 				// penumbra radius per unit of caster distance: tan( half the sun's angular size )
 				const float flSunRadius = tanf( DEG2RAD( 0.533f * 0.5f ) ) * Max( r_csm_pcss_sunsize.GetFloat(), 0.0f );
 				const float flMax = clamp( r_csm_pcss_penumbra.GetFloat(), 0.0f, 3.0f );
-				// the same widest penumbra in world units for every cascade: what the first one allows
-				const float flMaxWorld = flMax * 2.0f * GetDeferredExt()->GetShadowData_Ortho( 0 ).vecSlopeSettings.z;
+				// the same widest penumbra in world units for every cascade (what the first one allows)
+				const float flTexel0 = 2.0f * GetDeferredExt()->GetShadowData_Ortho( 0 ).vecSlopeSettings.z;
+				const float flMaxWorld = flMax * flTexel0;
 				float flPCSS[4] = { flSunRadius, flMax, flMaxWorld, bPCSS ? (float)r_csm_pcss.GetInt() : 0.0f };
 				pShaderAPI->SetPixelShaderConstant( CSM_PSREG_LIGHTDATA + 13, flPCSS, 1, true );
 

@@ -31,6 +31,7 @@
 //=============================================================================//
 
 #include "cbase.h"
+#include "c_baseplayer.h"
 #include "deferred/deferred_shared_common.h"
 #include "deferred/deferred_occlusion.h"
 #include "deferred/deferred_worldmesh.h"
@@ -365,6 +366,11 @@ void DeferredOcclusion_Setup( const CViewSetup &view )
 	static CUtlVector< OccPick_t > s_Picks;
 	s_Picks.RemoveAll();
 	const float flMaxDist = r_deferred_occlusion_distance.GetFloat();
+	const float flMaxDistSqr = flMaxDist * flMaxDist;
+	const float flAspect = ( view.m_flAspectRatio > 0.0f ) ? view.m_flAspectRatio
+		: ( ( view.height > 0 ) ? (float)view.width / (float)view.height : 1.0f );
+	Frustum_t viewFrustum;
+	GeneratePerspectiveFrustum( view.origin, view.angles, OCC_NEAR, Max( flMaxDist, OCC_NEAR + 1.0f ), view.fov, flAspect, viewFrustum );
 	for ( int i = 0; i < nOccluders; i++ )
 	{
 		const WorldOccluder_t &o = pOccluders[i];
@@ -373,14 +379,18 @@ void DeferredOcclusion_Setup( const CViewSetup &view )
 		if ( flFacing <= 4.0f )
 			continue;
 		const float flDistSqr = vecTo.LengthSqr();
-		if ( flDistSqr > flMaxDist * flMaxDist )
+		if ( flDistSqr > flMaxDistSqr )
 			continue;
-		// (the solid angle it takes up, roughly)
-		const float flScore = o.flArea * flFacing / ( flDistSqr * sqrtf( flDistSqr ) + 1.0f );
-		if ( flScore < 0.0015f )
+		if ( R_CullBox( o.vecMins, o.vecMaxs, viewFrustum ) )
+			continue;
+		// (squared solid angle proxy: avoids sqrtf per occluder; 0.0015^2 = 2.25e-6)
+		const float flAF = o.flArea * flFacing;
+		const float flD2 = Max( flDistSqr, 1.0f );
+		const float flScoreSqr = ( flAF * flAF ) / ( flD2 * flD2 * flD2 );
+		if ( flScoreSqr < 2.25e-6f )
 			continue;
 		OccPick_t &pick = s_Picks[ s_Picks.AddToTail() ];
-		pick.flScore = flScore;
+		pick.flScore = flScoreSqr;
 		pick.iOccluder = i;
 	}
 	const int nMax = r_deferred_occlusion_max.GetInt();
@@ -519,9 +529,13 @@ struct OccWorldLeaf_t
 	Vector	vecDrawnMaxs;
 	int		nContents;
 	short	nCluster;
+	short	nArea;
 };
 static CUtlVector< OccWorldLeaf_t > s_WorldLeaves;
 static int s_nLeavesReadState = 0;		// the leaves of the .bsp: 0 = not read on this map yet, 1 = read, -1 = can't be
+static bool s_bPlayableBoundsValid = false;
+static int s_iPlayableBoundsSkyArea = -2;
+static Vector s_vecPlayableMins, s_vecPlayableMaxs;
 static unsigned char *s_pEngineLeaves = NULL;
 static int s_nWorldLeavesState = 0;		// the engine's leaves: 0 = not looked for on this map yet, 1 = found, -1 = not to be used
 static CUtlVector< int > s_HiddenLeaves;
@@ -657,6 +671,7 @@ static bool ReadWorldLeaves( const char *pszLevel, int &nModels, int &nPlanes )
 		leaf.vecDrawnMaxs.Init( -FLT_MAX, -FLT_MAX, -FLT_MAX );
 		leaf.nContents = pIn->contents;
 		leaf.nCluster = pIn->cluster;
+		leaf.nArea = pIn->area;
 		for ( int j = 0; j < pIn->numleaffaces; j++ )
 		{
 			const int iLeafFace = pIn->firstleafface + j;
@@ -781,6 +796,66 @@ bool DeferredOcclusion_GetLeafBounds( int iLeaf, Vector &vecMins, Vector &vecMax
 	return true;
 }
 
+bool DeferredOcclusion_GetPlayableWorldBounds( Vector &vecMins, Vector &vecMaxs )
+{
+	int iSkyArea = 255;
+	C_BasePlayer *pLocal = C_BasePlayer::GetLocalPlayer();
+	if ( pLocal )
+		iSkyArea = pLocal->m_Local.m_skybox3d.area;
+
+	if ( !s_bPlayableBoundsValid || s_iPlayableBoundsSkyArea != iSkyArea )
+	{
+		if ( !EnsureWorldLeaves() )
+			return false;
+
+		Vector vecDrawnMin( FLT_MAX, FLT_MAX, FLT_MAX );
+		Vector vecDrawnMax( -FLT_MAX, -FLT_MAX, -FLT_MAX );
+		Vector vecLeafMin( FLT_MAX, FLT_MAX, FLT_MAX );
+		Vector vecLeafMax( -FLT_MAX, -FLT_MAX, -FLT_MAX );
+
+		const int nLeaves = s_WorldLeaves.Count();
+		for ( int i = 0; i < nLeaves; i++ )
+		{
+			const OccWorldLeaf_t &leaf = s_WorldLeaves[i];
+			if ( leaf.nCluster < 0 )
+				continue;
+			if ( iSkyArea != 255 && leaf.nArea == iSkyArea )
+				continue;
+
+			VectorMin( vecLeafMin, leaf.vecMins, vecLeafMin );
+			VectorMax( vecLeafMax, leaf.vecMaxs, vecLeafMax );
+			if ( leaf.vecDrawnMins.x <= leaf.vecDrawnMaxs.x )
+			{
+				VectorMin( vecDrawnMin, leaf.vecDrawnMins, vecDrawnMin );
+				VectorMax( vecDrawnMax, leaf.vecDrawnMaxs, vecDrawnMax );
+			}
+		}
+
+		if ( vecDrawnMin.x <= vecDrawnMax.x )
+		{
+			s_vecPlayableMins = vecDrawnMin;
+			s_vecPlayableMaxs = vecDrawnMax;
+			s_bPlayableBoundsValid = true;
+		}
+		else if ( vecLeafMin.x <= vecLeafMax.x )
+		{
+			s_vecPlayableMins = vecLeafMin;
+			s_vecPlayableMaxs = vecLeafMax;
+			s_bPlayableBoundsValid = true;
+		}
+		else
+		{
+			s_bPlayableBoundsValid = false;
+			return false;
+		}
+		s_iPlayableBoundsSkyArea = iSkyArea;
+	}
+
+	vecMins = s_vecPlayableMins;
+	vecMaxs = s_vecPlayableMaxs;
+	return true;
+}
+
 void DeferredOcclusion_HideWorldLeaves( const Vector &vecOrigin, const QAngle &angles )
 {
 	s_HiddenLeaves.RemoveAll();
@@ -881,6 +956,8 @@ private:
 		s_WorldLeaves.Purge();
 		s_HiddenLeaves.Purge();
 		s_nLeavesReadState = 0;
+		s_bPlayableBoundsValid = false;
+		s_iPlayableBoundsSkyArea = -2;
 		s_pEngineLeaves = NULL;
 		s_nWorldLeavesState = 0;
 		s_bValid = false;

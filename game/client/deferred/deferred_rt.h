@@ -65,6 +65,13 @@ ITexture *GetShadowCacheRT_Proj( int index );
 
 ITexture *GetShadowColorRT_DP( int index );
 ITexture *GetShadowDepthRT_DP( int index );
+// HL2RPM: what the light pass reads from a point shadow slot unless a lamp's own cached atlas is bound
+ITexture *GetShadowSampleRT_DP( int index );
+
+// HL2RPM: the pool of point-light cube shadow atlases kept between frames (deferred_shadowcache.cpp)
+#define MAX_SHADOW_CACHE_DP		8
+int GetNumShadowCacheRT_DP();
+ITexture *GetShadowCacheRT_DP( int index );
 
 ITexture *GetProjectableVguiRT( int index );
 

@@ -6,7 +6,7 @@
 
 ## Где результат
 
-- Рабочая VMF: `E:\XBLAH's modding tool\content\Mapbase\hl2rpm\mapsrc\test\city27_test.vmf`.
+- Рабочая VMF: `E:\SourceModding\HL2RPMSOURCE\Mapping\mapsrc\test\city27_test.vmf`.
 - Контрольная копия этой VMF в исходниках: `hl2rpm_extras/mapsrc/city27_test.vmf`.
 - Игровой BSP: `E:\Steam\steamapps\sourcemods\hl2rpm\testmaps\maps\city27_test.bsp`.
 - Исходник-референс, только чтение: `E:\Google Map 3D Exporter v3.0\city-26-prototype.fbx` (SHA-256 `5002efb805249c74a47e59d2bfe70fa63d0bd866a85f96030c7659ceb42e3c22`, 33 598 732 байта).

@@ -1,6 +1,7 @@
 
 #include "cbase.h"
 #include "deferred/deferred_shared_common.h"
+#include "deferred/deferred_occlusion.h"
 
 #include "tier0/memdbgon.h"
 
@@ -49,8 +50,8 @@ static const csm_quality_preset_t g_CSMPresets[] =
 	// a still camera doesn't need the second one every frame: moving, turning and the
 	// sun moving force an update anyway, see ShouldUpdateCascade)
 	{ 4,        2048,  7000.0f,  0.95f, { 1, 2, 3, 6 } },	// High
-	{ 4,        2048,  9000.0f,  0.96f, { 1, 2, 2, 4 } },	// Very High
-	{ 4,        2048, 12000.0f,  0.97f, { 1, 1, 1, 2 } },	// Ultra
+	{ 4,        2048,  9000.0f,  0.96f, { 1, 2, 3, 6 } },	// Very High
+	{ 4,        2048, 12000.0f,  0.97f, { 1, 2, 3, 6 } },	// Ultra
 };
 
 COMPILE_TIME_ASSERT( SHADOW_NUM_CASCADES >= 4 );
@@ -107,6 +108,9 @@ static ConVar r_csm_distance_scale( "r_csm_distance_scale", "1.0", FCVAR_ARCHIVE
 static ConVar r_csm_split_lambda( "r_csm_split_lambda", "-1", 0,
 	"Dev: cascade split distribution (0 = uniform, 1 = logarithmic), -1 = the r_csm_quality preset", true, -1.0f, true, 1.0f );
 
+static ConVar r_csm_clamp_worldbounds( "r_csm_clamp_worldbounds", "1", FCVAR_ARCHIVE,
+	"HL2RPM: clamp CSM far distance to the loaded map's playable bounds diagonal (sharper cascades and skips wasted far cascades on small maps)" );
+
 static void OnCSMQualityChanged( IConVar *var, const char *pOldValue, float flOldValue )
 {
 	ConVar *pConVar = static_cast<ConVar *>( var );
@@ -149,10 +153,34 @@ void UpdateCascadeSplits( float flZNear, float flFov, float flAspect )
 	EnsureCascadesInitialized();
 
 	const csm_quality_preset_t &preset = g_CSMPresets[g_iCSMQuality];
-	const int iCount = g_iActiveCascades;
+	const int iPresetCount = clamp( preset.iNumCascades, 1, 4 );
 	const float flNear = Max( flZNear, 4.0f );
-	const float flFar = Max( GetCascadeShadowDistance(), flNear + 64.0f );
-	const float flLambda = ( r_csm_split_lambda.GetFloat() >= 0.0f ) ? r_csm_split_lambda.GetFloat() : preset.flSplitLambda;
+	float flFar = Max( GetCascadeShadowDistance(), flNear + 64.0f );
+	int iCount = iPresetCount;
+	float flLambda = ( r_csm_split_lambda.GetFloat() >= 0.0f ) ? r_csm_split_lambda.GetFloat() : preset.flSplitLambda;
+
+	if ( r_csm_clamp_worldbounds.GetBool() )
+	{
+		Vector vecWorldMins, vecWorldMaxs;
+		if ( DeferredOcclusion_GetPlayableWorldBounds( vecWorldMins, vecWorldMaxs ) )
+		{
+			// Quantized per map (256u steps) so flSplitFar stays constant and never busts cascade staggering.
+			const float flDiag = ( vecWorldMaxs - vecWorldMins ).Length();
+			const float flMapMax = Max( 1024.0f, ceilf( ( flDiag + 256.0f ) / 256.0f ) * 256.0f );
+			if ( flMapMax < flFar )
+			{
+				flFar = Max( flMapMax, flNear + 64.0f );
+				// Small maps don't need Cascade 3 stretching into empty void: 3 cascades cover <= 4608u
+				// at equal or sharper texel density while saving an entire cascade pass.
+				if ( iCount == 4 && flFar <= 4608.0f )
+				{
+					iCount = 3;
+					if ( r_csm_split_lambda.GetFloat() < 0.0f )
+						flLambda = Min( flLambda, 0.93f );
+				}
+			}
+		}
+	}
 
 	float flSplits[5];
 	flSplits[0] = flNear;
@@ -164,6 +192,11 @@ void UpdateCascadeSplits( float flZNear, float flFov, float flAspect )
 		flSplits[i] = Lerp( flLambda, flUniform, flLog );
 	}
 	flSplits[iCount] = flFar;
+
+	// Never keep a degenerate cascade whose near split reaches/exceeds flFar.
+	while ( iCount > 1 && flSplits[ iCount - 1 ] >= flFar - 1.0f )
+		iCount--;
+	g_iActiveCascades = iCount;
 
 	for ( int i = 0; i < SHADOW_NUM_CASCADES; i++ )
 	{

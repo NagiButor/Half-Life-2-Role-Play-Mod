@@ -1,20 +1,26 @@
 //========= HL2RPM ============================================================//
 //
-// Final post-processing of the frame (deferred_postfx.cpp in the client), after
-// FXAA, before the HUD:
-//   chromatic aberration toward the edges, contrast adaptive sharpening,
-//   eye adaptation (exposure from the adapted average luminance), bloom and lens
-//   dirt, a soft shoulder (the highlights an exposure above 1 pushes past white
-//   roll off instead of clipping flat), saturation / color balance, vignette,
-//   an S-curve of contrast, film grain.
+// Final post-processing of the frame (deferred_postfx.cpp in the client),
+// before the HUD:
+//   - Optional fused single-pass FXAA 3.11 Preset 39 (DYNAMIC "FXAA" "0..1") at
+//     native render scale: exposure-aware perceptual luma + chroma-aware RGB edge
+//     axis, sharing its 5-tap cross with CAS and eliminating an entire full-res
+//     RT pass + bandwidth write/read.
+//   - Chromatic aberration toward the corners (follows the AA offset on edges).
+//   - Edge-protected, ring-free AMD CAS sharpening: keeps fine interior textures
+//     crisp without re-jagging or ringing anti-aliased edges and silhouettes.
+//   - Eye adaptation, bloom & lens dirt, sun lens flare & glare, soft shoulder,
+//     saturation / color balance, vignette, S-curve contrast, film grain.
 // Every effect at 0 leaves the frame as it was.
 //
 //=============================================================================//
 
+// DYNAMIC:		"FXAA"		"0..1"
+
 #include "common_ps_fxc.h"
 #include "hl2rpm_post_common.h"
 
-sampler sFrame			: register( s0 );	// the frame (after FXAA), gamma space
+sampler sFrame			: register( s0 );	// the frame, gamma space
 sampler sBloom			: register( s1 );	// bloom, half resolution (top left of its target)
 sampler sLum			: register( s2 );	// adapted log luminance (1x1): r; b how much of the sun is in sight
 sampler sDirt			: register( s3 );	// lens dirt (r)
@@ -28,6 +34,9 @@ const float4 g_vecTint		: register( c5 );	// rgb color balance, w aspect ratio
 const float4 g_vecUV		: register( c6 );	// xy bloom uv offset, zw frame texture size (pixels)
 const float4 g_vecFlare		: register( c7 );	// lens flare of the sun: xy its place (uv), z strength (0 = off), w bloom brightness it starts at
 const float4 g_vecGlare		: register( c8 );	// glare of the sun: rgb its light x strength (0 = off) - x what is in sight of it (sLum b)
+#if FXAA
+const float4 g_vecFxaa		: register( c9 );	// x subpix, y edge threshold, z edge threshold min, w debug
+#endif
 
 struct PS_INPUT
 {
@@ -43,36 +52,254 @@ float Hash12( float2 p )
 	return frac( ( p3.x + p3.y ) * p3.z );
 }
 
+#if FXAA
+// 6 search steps (1.0px exact center precision, 18.5px reach, 4 loop iterations max)
+#define FXAA_STEPS 6
+static const float g_flFxaaStep[FXAA_STEPS] = { 1.0f, 1.5f, 2.0f, 2.0f, 4.0f, 8.0f };
+#endif
+
 float4 main( const PS_INPUT In ) : COLOR
 {
 	const float2 uv = In.vTexCoord;
 	const float2 t = g_vecTexel.xy;
 	const float2 dc = uv - 0.5;
+	const float dc2 = dot( dc, dc );
+	const float2 ca = dc * ( dc2 * ( 4.0 * g_vecLens.z ) ) * t;
 
-	// chromatic aberration: red and blue drift apart toward the corners
-	const float2 ca = dc * dot( dc, dc ) * ( 4.0 * g_vecLens.z ) * t;
+	float3 c;
+#if FXAA
+	// Unbranched tex2D batches all 5 cross fetches together and shares them between
+	// fused FXAA (edge pixels) and ring-free edge-protected CAS (non-edge pixels).
 	const float3 center = tex2D( sFrame, uv ).rgb;
-	float3 c = center;
-	if ( g_vecLens.z > 0.0 )
+	const float3 n = tex2D( sFrame, uv + float2( 0, -t.y ) ).rgb;
+	const float3 s = tex2D( sFrame, uv + float2( 0,  t.y ) ).rgb;
+	const float3 e = tex2D( sFrame, uv + float2(  t.x, 0 ) ).rgb;
+	const float3 w = tex2D( sFrame, uv + float2( -t.x, 0 ) ).rgb;
+
+	const float3 lumaW3 = float3( 0.299f, 0.587f, 0.114f );
+	float lumaM = dot( center, lumaW3 );
+	float lumaS = dot( s, lumaW3 );
+	float lumaE = dot( e, lumaW3 );
+	float lumaN = dot( n, lumaW3 );
+	float lumaW = dot( w, lumaW3 );
+
+	const float rangeMaxL = max( max( lumaN, lumaW ), max( lumaE, max( lumaS, lumaM ) ) );
+	const float rangeMinL = min( min( lumaN, lumaW ), min( lumaE, min( lumaS, lumaM ) ) );
+	const float lumaRange = rangeMaxL - rangeMinL;
+
+	// Shared min/max range for BOTH chroma-aware FXAA (isoluminant edges like orange
+	// cube vs blue sky) and ring-free edge-protected CAS (0 extra taps, 0 sqrt/rsqrt).
+	const float3 mn = min( center, min( min( n, s ), min( e, w ) ) );
+	const float3 mx = max( center, max( max( n, s ), max( e, w ) ) );
+	const float3 diff = mx - mn;
+	const float maxChanRange = max( diff.r, max( diff.g, diff.b ) );
+	const float effRange = max( lumaRange, maxChanRange * 0.52f );
+
+	// Mutually exclusive FXAA vs CAS (calibrated so archived config.cfg 0.125/0.0625 catches
+	// subtle floor grid lines & dark/midtone silhouettes without firing on flat sky/concrete):
+	//   - Edge pixels: kill center/n/s/e/w/mn/mx BEFORE the FXAA loop (huge GPR savings!)
+	//     and skip CAS so anti-aliased edges are never re-jagged or ringed.
+	//   - Non-edge pixels: skip FXAA completely and sharpen fine textures with zero extra fetches.
+	[branch]
+	if ( effRange >= max( g_vecFxaa.z * 0.65f, rangeMaxL * ( g_vecFxaa.y * 0.80f ) ) )
 	{
-		c.r = tex2D( sFrame, uv - ca ).r;
-		c.b = tex2D( sFrame, uv + ca ).b;
+		if ( g_vecFxaa.w > 0.5f )
+			return float4( lerp( center, float3( 1, 0, 0 ), 0.7f ), 1 );
+
+		float3 metricAxis = lumaW3;
+		float range = lumaRange;
+		if ( maxChanRange * 0.52f > lumaRange * 1.15f )
+		{
+			metricAxis = ( diff.r >= diff.b ) ? float3( 1.0f, 0.0f, 0.0f ) : float3( 0.0f, 0.0f, 1.0f );
+			lumaM = dot( center, metricAxis );
+			lumaS = dot( s, metricAxis );
+			lumaE = dot( e, metricAxis );
+			lumaN = dot( n, metricAxis );
+			lumaW = dot( w, metricAxis );
+			range = max( maxChanRange, 1e-5f );
+		}
+
+		const float lumaNW = dot( tex2Dlod( sFrame, float4( uv + float2( -t.x, -t.y ), 0, 0 ) ).rgb, metricAxis );
+		const float lumaSE = dot( tex2Dlod( sFrame, float4( uv + float2(  t.x,  t.y ), 0, 0 ) ).rgb, metricAxis );
+		const float lumaNE = dot( tex2Dlod( sFrame, float4( uv + float2(  t.x, -t.y ), 0, 0 ) ).rgb, metricAxis );
+		const float lumaSW = dot( tex2Dlod( sFrame, float4( uv + float2( -t.x,  t.y ), 0, 0 ) ).rgb, metricAxis );
+
+		const float lumaNS = lumaN + lumaS;
+		const float lumaWE = lumaW + lumaE;
+		const float subpixRcpRange = 1.0f / range;
+		const float subpixNSWE = lumaNS + lumaWE;
+		const float edgeHorz1 = ( -2.0f * lumaM ) + lumaNS;
+		const float edgeVert1 = ( -2.0f * lumaM ) + lumaWE;
+
+		const float lumaNESE = lumaNE + lumaSE;
+		const float lumaNWNE = lumaNW + lumaNE;
+		const float edgeHorz2 = ( -2.0f * lumaE ) + lumaNESE;
+		const float edgeVert2 = ( -2.0f * lumaN ) + lumaNWNE;
+
+		const float lumaNWSW = lumaNW + lumaSW;
+		const float lumaSWSE = lumaSW + lumaSE;
+		const float edgeHorz4 = ( abs( edgeHorz1 ) * 2.0f ) + abs( edgeHorz2 );
+		const float edgeVert4 = ( abs( edgeVert1 ) * 2.0f ) + abs( edgeVert2 );
+		const float edgeHorz3 = ( -2.0f * lumaW ) + lumaNWSW;
+		const float edgeVert3 = ( -2.0f * lumaS ) + lumaSWSE;
+		const float edgeHorz = abs( edgeHorz3 ) + edgeHorz4;
+		const float edgeVert = abs( edgeVert3 ) + edgeVert4;
+
+		const float subpixNWSWNESE = lumaNWSW + lumaNESE;
+		float lengthSign = t.x;
+		const bool horzSpan = edgeHorz >= edgeVert;
+		const float subpixA = subpixNSWE * 2.0f + subpixNWSWNESE;
+
+		if ( !horzSpan )
+		{
+			lumaN = lumaW;
+			lumaS = lumaE;
+		}
+		else
+		{
+			lengthSign = t.y;
+		}
+		const float subpixB = ( subpixA * ( 1.0f / 12.0f ) ) - lumaM;
+
+		const float gradientN = lumaN - lumaM;
+		const float gradientS = lumaS - lumaM;
+		float lumaNN = lumaN + lumaM;
+		const float lumaSS = lumaS + lumaM;
+		const bool pairN = abs( gradientN ) >= abs( gradientS );
+		const float gradient = max( abs( gradientN ), abs( gradientS ) );
+		if ( pairN )
+			lengthSign = -lengthSign;
+		const float subpixC = saturate( abs( subpixB ) * subpixRcpRange );
+
+		float2 posB = uv;
+		float2 offNP;
+		offNP.x = ( !horzSpan ) ? 0.0f : t.x;
+		offNP.y = ( horzSpan ) ? 0.0f : t.y;
+		if ( !horzSpan )
+			posB.x += lengthSign * 0.5f;
+		else
+			posB.y += lengthSign * 0.5f;
+
+		float2 posN = posB - offNP * g_flFxaaStep[0];
+		float2 posP = posB + offNP * g_flFxaaStep[0];
+		const float subpixD = ( ( -2.0f ) * subpixC ) + 3.0f;
+		float lumaEndN = dot( tex2Dlod( sFrame, float4( posN, 0, 0 ) ).rgb, metricAxis );
+		const float subpixE = subpixC * subpixC;
+		float lumaEndP = dot( tex2Dlod( sFrame, float4( posP, 0, 0 ) ).rgb, metricAxis );
+
+		if ( !pairN )
+			lumaNN = lumaSS;
+		const float gradientScaled = gradient * ( 1.0f / 4.0f );
+		const float lumaMM = lumaM - lumaNN * 0.5f;
+		const float subpixF = subpixD * subpixE;
+		const bool lumaMLTZero = lumaMM < 0.0f;
+
+		lumaEndN -= lumaNN * 0.5f;
+		lumaEndP -= lumaNN * 0.5f;
+		bool doneN = abs( lumaEndN ) >= gradientScaled;
+		bool doneP = abs( lumaEndP ) >= gradientScaled;
+		if ( !doneN )
+			posN -= offNP * g_flFxaaStep[1];
+		if ( !doneP )
+			posP += offNP * g_flFxaaStep[1];
+
+		[loop]
+		for ( int i = 2; i < FXAA_STEPS; i++ )
+		{
+			if ( doneN && doneP )
+				break;
+			if ( !doneN )
+				lumaEndN = dot( tex2Dlod( sFrame, float4( posN, 0, 0 ) ).rgb, metricAxis ) - lumaNN * 0.5f;
+			if ( !doneP )
+				lumaEndP = dot( tex2Dlod( sFrame, float4( posP, 0, 0 ) ).rgb, metricAxis ) - lumaNN * 0.5f;
+			doneN = abs( lumaEndN ) >= gradientScaled;
+			doneP = abs( lumaEndP ) >= gradientScaled;
+			if ( !doneN )
+				posN -= offNP * g_flFxaaStep[i];
+			if ( !doneP )
+				posP += offNP * g_flFxaaStep[i];
+		}
+
+		float dstN = uv.x - posN.x;
+		float dstP = posP.x - uv.x;
+		if ( !horzSpan )
+		{
+			dstN = uv.y - posN.y;
+			dstP = posP.y - uv.y;
+		}
+
+		const bool goodSpanN = ( lumaEndN < 0.0f ) != lumaMLTZero;
+		const float spanLength = ( dstP + dstN );
+		const bool goodSpanP = ( lumaEndP < 0.0f ) != lumaMLTZero;
+		const float spanLengthRcp = 1.0f / spanLength;
+
+		const bool directionN = dstN < dstP;
+		const float dst = min( dstN, dstP );
+		const bool goodSpan = directionN ? goodSpanN : goodSpanP;
+		const float subpixG = subpixF * subpixF;
+		const float pixelOffset = ( dst * ( -spanLengthRcp ) ) + 0.5f;
+		const float subpixH = subpixG * g_vecFxaa.x;
+
+		const float pixelOffsetGood = goodSpan ? pixelOffset : 0.0f;
+		const float pixelOffsetSubpix = max( pixelOffsetGood, subpixH );
+		float2 aaUV = uv;
+		if ( !horzSpan )
+			aaUV.x += pixelOffsetSubpix * lengthSign;
+		else
+			aaUV.y += pixelOffsetSubpix * lengthSign;
+
+		c = tex2Dlod( sFrame, float4( aaUV, 0, 0 ) ).rgb;
+		[branch]
+		if ( g_vecLens.z > 0.0f && dc2 > 0.04f )
+		{
+			c.r = tex2Dlod( sFrame, float4( aaUV - ca, 0, 0 ) ).r;
+			c.b = tex2Dlod( sFrame, float4( aaUV + ca, 0, 0 ) ).b;
+		}
+	}
+	else
+	{
+		c = center;
+		[branch]
+		if ( g_vecLens.z > 0.0f && dc2 > 0.04f )
+		{
+			c.r = tex2Dlod( sFrame, float4( uv - ca, 0, 0 ) ).r;
+			c.b = tex2Dlod( sFrame, float4( uv + ca, 0, 0 ) ).b;
+		}
+		if ( g_vecGrade.w > 0.0 )
+		{
+			const float edgeDamp = 1.0f - saturate( ( maxChanRange - 0.07f ) * ( 1.0f / 0.11f ) );
+			const float3 amp = sqrt( saturate( min( mn, 2.0 - mx ) / max( mx, 1e-4 ) ) );
+			const float3 wgt = -amp * ( g_vecGrade.w * 0.2 * edgeDamp );
+			c = saturate( clamp( ( c + ( n + s + e + w ) * wgt ) / ( 1.0 + 4.0 * wgt ), mn - 0.015f, mx + 0.015f ) );
+		}
+	}
+#else
+	// Standalone PostFX (FXAA=0: renderscale < 1.0 or r_deferred_aa 0).
+	// Unbranched tex2D keeps full texture latency hiding while skipping wasted center CA fetches.
+	const float3 center = tex2D( sFrame, uv ).rgb;
+	c = center;
+	[branch]
+	if ( g_vecLens.z > 0.0f && dc2 > 0.04f )
+	{
+		c.r = tex2Dlod( sFrame, float4( uv - ca, 0, 0 ) ).r;
+		c.b = tex2Dlod( sFrame, float4( uv + ca, 0, 0 ) ).b;
 	}
 
-	// contrast adaptive sharpening (AMD CAS, the cross): FXAA and the bilinear stretch of
-	// the GPU soften the image a little
 	if ( g_vecGrade.w > 0.0 )
 	{
 		const float3 n = tex2D( sFrame, uv + float2( 0, -t.y ) ).rgb;
-		const float3 s = tex2D( sFrame, uv + float2( 0, t.y ) ).rgb;
-		const float3 e = tex2D( sFrame, uv + float2( t.x, 0 ) ).rgb;
+		const float3 s = tex2D( sFrame, uv + float2( 0,  t.y ) ).rgb;
+		const float3 e = tex2D( sFrame, uv + float2(  t.x, 0 ) ).rgb;
 		const float3 w = tex2D( sFrame, uv + float2( -t.x, 0 ) ).rgb;
 		const float3 mn = min( center, min( min( n, s ), min( e, w ) ) );
 		const float3 mx = max( center, max( max( n, s ), max( e, w ) ) );
+		const float3 diff = mx - mn;
+		const float edgeDamp = 1.0f - saturate( ( max( diff.r, max( diff.g, diff.b ) ) - 0.07f ) * ( 1.0f / 0.11f ) );
 		const float3 amp = sqrt( saturate( min( mn, 2.0 - mx ) / max( mx, 1e-4 ) ) );
-		const float3 wgt = -amp * ( g_vecGrade.w * 0.2 );
-		c = saturate( ( c + ( n + s + e + w ) * wgt ) / ( 1.0 + 4.0 * wgt ) );
+		const float3 wgt = -amp * ( g_vecGrade.w * 0.2 * edgeDamp );
+		c = saturate( clamp( ( c + ( n + s + e + w ) * wgt ) / ( 1.0 + 4.0 * wgt ), mn - 0.015f, mx + 0.015f ) );
 	}
+#endif
 
 	// eye adaptation (r), and how much of the sun is in sight (b, hl2rpm_lum_ps30)
 	float3 lin = PostToLinear( c );
@@ -136,12 +363,7 @@ float4 main( const PS_INPUT In ) : COLOR
 	}
 
 	// The glare of the sun: its light scattered in the lens and in the eye - a soft glow around
-	// the disk that lies over whatever stands in front of it. Without it the edge of a roof or a
-	// tree crown cut the sun's light off as with a knife: the shafts in the air (the volumetric
-	// passes) have a foot of air to scatter in before a near wall and a street's length before
-	// the far one - "the light isn't there at the edge". It is as strong as the disk and the sky
-	// right around it are in sight (counted in the depth buffer, hl2rpm_lum_ps30): it fades as the
-	// sun goes behind something - a crown, a trunk, a wall - and is gone behind it.
+	// the disk that lies over whatever stands in front of it.
 	[branch]
 	if ( dot( g_vecGlare.rgb, 1.0 ) * sunSeen > 0.002 )
 	{
@@ -175,9 +397,9 @@ float4 main( const PS_INPUT In ) : COLOR
 	o = lerp( o, o * o * ( 3.0 - 2.0 * o ), g_vecGrade.x );
 
 	// film grain: luminance noise, mostly in the mid tones
-	const float n = Hash12( floor( uv * g_vecUV.zw ) + g_vecLens.w * float2( 37.0, 17.0 ) );
+	const float nGrain = Hash12( floor( uv * g_vecUV.zw ) + g_vecLens.w * float2( 37.0, 17.0 ) );
 	const float lum = dot( o, g_vecLumWeights );
-	o += ( n - 0.5 ) * g_vecLens.y * ( 0.35 + 2.6 * lum * ( 1.0 - lum ) );
+	o += ( nGrain - 0.5 ) * g_vecLens.y * ( 0.35 + 2.6 * lum * ( 1.0 - lum ) );
 
 	return float4( o, 1.0 );
 }

@@ -27,16 +27,34 @@ public:
 
 class hl2rpm_postfx_ps30_Dynamic_Index
 {
+	unsigned int m_nFXAA : 2;
+#ifdef _DEBUG
+	bool m_bFXAA : 1;
+#endif	// _DEBUG
 public:
+	void SetFXAA( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nFXAA = i;
+#ifdef _DEBUG
+		m_bFXAA = true;
+#endif	// _DEBUG
+	}
+
 	hl2rpm_postfx_ps30_Dynamic_Index( IShaderDynamicAPI* pShaderAPI )
 	{
+		m_nFXAA = 0;
+#ifdef _DEBUG
+		m_bFXAA = false;
+#endif	// _DEBUG
 	}
 
 	int GetIndex() const
 	{
-		return 0;
+		Assert( m_bFXAA );
+		return ( 1 * m_nFXAA ) + 0;
 	}
 };
 
-#define shaderDynamicTest_hl2rpm_postfx_ps30 1
+#define shaderDynamicTest_hl2rpm_postfx_ps30 psh_forgot_to_set_dynamic_FXAA
 

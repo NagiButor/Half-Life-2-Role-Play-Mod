@@ -45,6 +45,7 @@
 #include "c_func_reflective_glass.h"
 #include "hl2rpm_vitals.h"
 #include "hl2rpm_itempreview.h"
+#include "particles_new.h"
 
 #include "vgui_int.h"
 #include "vgui/IPanel.h"
@@ -64,6 +65,7 @@ extern ConVar r_entityclips;
 extern ConVar mat_viewportupscale;
 extern ConVar mat_viewportscale;
 extern ConVar mat_motion_blur_enabled;
+extern ConVar r_depthoverlay;
 
 extern void MaybeInvalidateLocalPlayerAnimation();
 extern bool DoesViewPlaneIntersectWater( float waterZ, int leafWaterDataID );
@@ -127,6 +129,23 @@ static lightData_Global_t s_csmLightState;
 static bool s_bCsmLightStateValid = false;
 static bool s_bGlobalLightSmoothed = false;
 static bool s_bMainViewSkySkipActive = false;
+
+// HL2RPM: smart sun-angle quantization for CSM stability (eliminates crawling shadow-edge
+// stairs while the timecycle continuously rotates the sun; sky/atmosphere stay continuous).
+static ConVar r_csm_sun_snap_deg( "r_csm_sun_snap_deg", "0.35", FCVAR_ARCHIVE,
+	"HL2RPM: hold sun shadow direction fixed until the sun moves by this many degrees (0 = continuous, eliminates crawling shadow edges)", true, 0.0f, true, 5.0f );
+static ConVar r_csm_sun_snap_move( "r_csm_sun_snap_move", "1", FCVAR_ARCHIVE,
+	"HL2RPM: quietly catch up quantized sun shadow direction while the camera or player is moving" );
+static ConVar r_csm_sun_snap_move_deg( "r_csm_sun_snap_move_deg", "0.08", FCVAR_ARCHIVE,
+	"HL2RPM: minimum sun angle drift (degrees) before catching up during camera/player motion", true, 0.01f, true, 2.0f );
+static ConVar r_csm_sun_snap_debug( "r_csm_sun_snap_debug", "0", 0,
+	"Dev: log when the quantized CSM sun direction steps" );
+
+static Vector s_vecCsmSunSnapDir( 0, 0, 1 );
+static bool s_bCsmSunSnapValid = false;
+static Vector s_vecSunSnapCamPos( 0, 0, 0 );
+static Vector s_vecSunSnapCamFwd( 1, 0, 0 );
+static bool s_bSunSnapCamValid = false;
 
 static void UpdateSkyAtmoLUT()
 {
@@ -869,9 +888,9 @@ float COrthoShadowView::GetShadowCasterCullRatio()
 	return ( iCascadeIndex > 0 ) ? r_csm_caster_cull.GetFloat() : 0.0f;
 }
 
-// HL2RPM: the grass of the detail props casts its shadow into the nearest cascades (their texels are
-// a fraction of a blade; farther the shadow of a tuft is a speck nobody sees)
-static ConVar r_deferred_detail_shadows( "r_deferred_detail_shadows", "2", FCVAR_ARCHIVE,
+// HL2RPM: the grass of the detail props casts its shadow into the nearest cascade (Cascade 0
+// keeps crisp close-up grass shadows; farther cascades skip sub-texel detail casters by default)
+static ConVar r_deferred_detail_shadows( "r_deferred_detail_shadows", "1", FCVAR_ARCHIVE,
 	"Grass and the other detail sprites cast sun shadows: into this many of the nearest cascades (0 = none)", true, 0.0f, true, 4.0f );
 static ConVar r_deferred_detail_shadows_dist( "r_deferred_detail_shadows_dist", "1200", 0,
 	"Grass shadows: the sprites within this distance of the eye cast them", true, 64.0f, true, 8192.0f );
@@ -934,6 +953,7 @@ public:
 		m_iFaceIndex = faceIndex;
 		m_iShadowMapIndex = shadowMapIndex;
 		m_iShadowExcludeEntIndex = pLight->iShadowExcludeEntIndex;
+		m_iCacheEntry = -1;
 	}
 
 	virtual void	CalcShadowView();
@@ -943,10 +963,18 @@ public:
 		return DEFERRED_SHADOW_MODE_PROJECTED;
 	};
 
+	void			SetCacheEntry( int iEntry ) { m_iCacheEntry = iEntry; }
+	virtual bool	KeepsLastShadow()
+	{
+		return m_iCacheEntry >= 0 &&
+			DeferredShadowCache_IsCurrentPointFace( m_iCacheEntry, m_iFaceIndex, m_pLight, width, m_bRenderablesListBuilt ? m_pRenderablesList : NULL );
+	}
+
 private:
 	def_light_t *m_pLight;
 	int m_iFaceIndex;
 	int m_iShadowMapIndex;
+	int m_iCacheEntry;
 };
 
 class CSpotLightShadowView : public CBaseShadowView
@@ -1041,6 +1069,8 @@ public:
 
 	void Setup(  const CViewSetup &view, bool bDrawSkybox, const VisibleFogVolumeInfo_t &fogInfo, const WaterRenderInfo_t& waterInfo );
 	void			Draw();
+
+	virtual bool	ShouldCacheLists() { return true; }
 
 	// HL2RPM: wet surfaces + weather fog on the lit opaque scene, as CSimpleWorldViewDeferred.
 	// With water in sight the main view is drawn by this class, which had none: the wet
@@ -2897,6 +2927,7 @@ CDeferredViewRender::CDeferredViewRender()
 {
 	m_pMesh_RadiosityScreenGrid[0] = NULL;
 	m_pMesh_RadiosityScreenGrid[1] = NULL;
+	m_bMainViewVisDirty = false;
 }
 
 void CDeferredViewRender::Shutdown()
@@ -2925,13 +2956,19 @@ void CDeferredViewRender::Shutdown()
 	BaseClass::Shutdown();
 }
 
+void DeferredWaterTargets_Invalidate();
+
 void CDeferredViewRender::LevelInit()
 {
 	BaseClass::LevelInit();
 
 	s_bGlobalLightSmoothed = false;
 	s_bCsmLightStateValid = false;
+	s_bCsmSunSnapValid = false;
+	s_bSunSnapCamValid = false;
+	m_bMainViewVisDirty = true;
 	ResetCascadeDelay();
+	DeferredWaterTargets_Invalidate();
 	DeferredShadowCache_InvalidateAll();
 	extern void ClearShadowLeafCache();
 	ClearShadowLeafCache();
@@ -2985,8 +3022,10 @@ static bool ShouldUpdateCascade( int iCascade, const cascade_t &cascade, const C
 	if ( DotProduct( vecViewFwd, st.vecViewFwd ) < 0.9925f )	// ~7 degrees
 		return true;
 
-	// sun moved
-	if ( DotProduct( vecLightDir, st.vecLightDir ) < 0.99996f )	// ~0.5 degree
+	// sun moved (when sun angle quantization is active, vecLightDir stays bit-exact while held,
+	// so sync all cascades on the exact frame a discrete sun step happens)
+	const float flSunDotThresh = ( r_csm_sun_snap_deg.GetFloat() > 0.001f ) ? 0.999999f : 0.99996f;
+	if ( DotProduct( vecLightDir, st.vecLightDir ) < flSunDotThresh )
 		return true;
 
 	if ( fabsf( view.fov - st.flFov ) > 0.5f || fabsf( cascade.flSplitFar - st.flSplitFar ) > 1.0f )
@@ -3117,13 +3156,20 @@ void CDeferredViewRender::ViewDrawGBuffer( const CViewSetup &view, bool &bDrew3d
 
 	CSkyboxViewDeferred *pSkyView = new CSkyboxViewDeferred( this );
 	if ( ( bDrew3dSkybox = pSkyView->Setup( view, true, &nSkyboxVisible ) ) != false )
+	{
 		AddViewToScene( pSkyView );
+		m_bMainViewVisDirty = true;
+	}
 
 	SafeRelease( pSkyView );
 
-	// Start view
-	unsigned int visFlags;
-	SetupVis( view, visFlags, NULL );
+	// Start view: only re-run SetupVis if the 3D skybox or another sub-view clobbered main vis
+	if ( m_bMainViewVisDirty )
+	{
+		unsigned int visFlags;
+		SetupVis( view, visFlags, NULL );
+		m_bMainViewVisDirty = false;
+	}
 
 	CRefPtr<CGBufferView> pGBufferView = new CGBufferView( this );
 	pGBufferView->Setup( view, bDrew3dSkybox );
@@ -3146,6 +3192,8 @@ void CDeferredViewRender::ViewDrawComposite( const CViewSetup &view, bool &bDrew
 		GPUPROF_SCOPE( "sky3d" );
 		UpdateSkyAtmoLUT();
 		DrawSkyboxComposite( view, bDrew3dSkybox );
+		if ( bDrew3dSkybox )
+			m_bMainViewVisDirty = true;
 	}
 
 	// this allows the refract texture to be updated once per *scene* on 360
@@ -3159,9 +3207,13 @@ void CDeferredViewRender::ViewDrawComposite( const CViewSetup &view, bool &bDrew
 	// Invoke pre-render methods
 	IGameSystem::PreRenderAllSystems();
 
-	// Start view
-	unsigned int visFlags;
-	SetupVis( view, visFlags, NULL );
+	// Start view: only re-run SetupVis when a sub-view (skybox, rainmap, non-leaflist shadow) clobbered main vis
+	if ( m_bMainViewVisDirty )
+	{
+		unsigned int visFlags;
+		SetupVis( view, visFlags, NULL );
+		m_bMainViewVisDirty = false;
+	}
 
 	// HL2RPM: no sky at all - the engine says none is in sight from here (CSkyboxViewDeferred::
 	// ComputeSkyboxVisibility: the eye in a solid - a camera pushed into a wall, noclip - or a leaf the
@@ -3276,23 +3328,30 @@ static ConVar r_deferred_water_views( "r_deferred_water_views", "1", FCVAR_ARCHI
 // expensive water path (not with cheap water or r_deferred_water_views 0)
 static ConVar r_deferred_water_all_targets( "r_deferred_water_all_targets", "1", FCVAR_ARCHIVE,
 	"Draw the water reflection and refraction targets whenever a water is in sight, not only when the closest water's material asks for them" );
-// which water targets the expensive waters loaded with the map use (cached until the number
-// of loaded materials changes)
+// which water targets the expensive waters loaded with the map use (cached across the level,
+// invalidated on level load, material restore, material count change, or r_waterforceexpensive change)
+static int s_iWaterTargetsEpoch = 1;
+
+void DeferredWaterTargets_Invalidate()
+{
+	s_iWaterTargetsEpoch++;
+}
+
 static void GetMapWaterTargets( bool &bAnyReflect, bool &bAnyRefract )
 {
 	static int s_nMaterialCount = -1;
+	static int s_iCachedEpoch = -1;
+	static bool s_bLastForceExpensive = false;
 	static bool s_bReflect = false, s_bRefract = false;
-	// (and once a second: the water materials can be loaded anew with other targets -
-	// r_deferred_water_reflect_all, mat_reloadmaterial)
-	static float s_flNextScan = 0.0f;
+	static ConVarRef r_waterforceexpensive( "r_waterforceexpensive" );
+	const bool bForceExpensive = r_waterforceexpensive.IsValid() && r_waterforceexpensive.GetBool();
 	const int nCount = materials->GetNumMaterials();
-	if ( nCount != s_nMaterialCount || gpGlobals->realtime > s_flNextScan || gpGlobals->realtime < s_flNextScan - 2.0f )
+	if ( s_iCachedEpoch != s_iWaterTargetsEpoch || nCount != s_nMaterialCount || bForceExpensive != s_bLastForceExpensive )
 	{
-		s_flNextScan = gpGlobals->realtime + 1.0f;
+		s_iCachedEpoch = s_iWaterTargetsEpoch;
 		s_nMaterialCount = nCount;
+		s_bLastForceExpensive = bForceExpensive;
 		s_bReflect = s_bRefract = false;
-		static ConVarRef r_waterforceexpensive( "r_waterforceexpensive" );
-		const bool bForceExpensive = r_waterforceexpensive.IsValid() && r_waterforceexpensive.GetBool();
 		for ( MaterialHandle_t h = materials->FirstMaterial(); h != materials->InvalidMaterial(); h = materials->NextMaterial( h ) )
 		{
 			IMaterial *pMat = materials->GetMaterial( h );
@@ -3357,6 +3416,30 @@ static ConVar r_deferred_glass_views( "r_deferred_glass_views", "1", FCVAR_ARCHI
 ConVar r_deferred_soft_particles( "r_deferred_soft_particles", "1", FCVAR_ARCHIVE,
 	"Soft particles: smoke, dust and sparks fade where they cut into walls and the floor (takes effect for particle materials loaded after it is turned on)" );
 
+static bool HasActiveSoftParticles()
+{
+	CParticleMgr *pMgr = ParticleMgr();
+	if ( !pMgr )
+		return false;
+	if ( pMgr->GetNumActiveOldParticles() > 0 )
+		return true;
+	for ( CNewParticleEffect *pEffect = pMgr->FirstNewEffect(); pEffect; pEffect = pEffect->m_pNext )
+	{
+		if ( pEffect->IsValid() && !pEffect->m_bDormant && !pEffect->GetRemoveFlag() && pEffect->m_nActiveParticles > 0 )
+			return true;
+	}
+	return false;
+}
+
+bool DeferredShouldUpdateFullScreenDepth()
+{
+	if ( !GetDeferredManager() || !GetDeferredManager()->IsDeferredRenderingEnabled() )
+		return true;
+	if ( r_depthoverlay.GetBool() )
+		return true;
+	return HasActiveSoftParticles();
+}
+
 static void DeferredSoftParticleDepth( const CViewSetup &view )
 {
 	if ( !r_deferred_soft_particles.GetBool() || CurrentViewID() != VIEW_MAIN )
@@ -3366,6 +3449,8 @@ static void DeferredSoftParticleDepth( const CViewSetup &view )
 	static IMaterial *s_pMatDepthAlpha[2] = { NULL, NULL };
 	static ConVarRef r_deferred_soft_particles_debug( "r_deferred_soft_particles_debug" );
 	const int iMat = ( r_deferred_soft_particles_debug.IsValid() && r_deferred_soft_particles_debug.GetInt() > 0 ) ? 1 : 0;
+	if ( iMat == 0 && !r_depthoverlay.GetBool() && !HasActiveSoftParticles() )
+		return;
 	if ( !s_pMatDepthAlpha[ iMat ] )
 	{
 		KeyValues *pKV = new KeyValues( "HL2RPM_DEPTHALPHA" );
@@ -3395,7 +3480,7 @@ static void DeferredSoftParticleDepth( const CViewSetup &view )
 static ConVar r_deferred_aa( "r_deferred_aa", "1", FCVAR_ARCHIVE,
 	"Anti-aliasing of the deferred renderer: 0 none, 1 FXAA", true, 0.0f, true, 1.0f );
 
-static void DrawDeferredFXAA( const CViewSetup &view )
+static void DrawDeferredFXAA( const CViewSetup &view, ITexture *pSourceTex = NULL, ITexture *pDestRT = NULL )
 {
 	static IMaterial *s_pMatFXAA = NULL;
 	if ( !s_pMatFXAA )
@@ -3409,13 +3494,29 @@ static void DrawDeferredFXAA( const CViewSetup &view )
 	if ( s_pMatFXAA->IsErrorMaterial() )
 		return;
 
+	CMatRenderContextPtr pRenderContext( materials );
+
+	// Direct RT-to-RT path (zero extra copy when chaining FXAA -> PostFX):
+	// reads pSourceTex at (view.x, view.y, view.width, view.height) and writes pDestRT at (0, 0, view.width, view.height).
+	if ( pSourceTex && pDestRT && !pSourceTex->IsError() && !pDestRT->IsError() )
+	{
+		ITexture *pSavedCopy = pRenderContext->GetFrameBufferCopyTexture( 0 );
+		pRenderContext->PushRenderTargetAndViewport( pDestRT, 0, 0, view.width, view.height );
+		pRenderContext->SetFrameBufferCopyTexture( pSourceTex, 0 );
+		pRenderContext->DrawScreenSpaceRectangle( s_pMatFXAA, 0, 0, view.width, view.height,
+			view.x, view.y, view.x + view.width - 1, view.y + view.height - 1,
+			pSourceTex->GetActualWidth(), pSourceTex->GetActualHeight() );
+		pRenderContext->SetFrameBufferCopyTexture( pSavedCopy, 0 );
+		pRenderContext->PopRenderTargetAndViewport();
+		return;
+	}
+
 	ITexture *pFrame = GetDefRT_SceneCopy();
 	if ( !pFrame || pFrame->IsError() )
 		pFrame = materials->FindTexture( "_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET );
 	if ( !pFrame || pFrame->IsError() )
 		return;
 
-	CMatRenderContextPtr pRenderContext( materials );
 	Rect_t rect;
 	rect.x = view.x;
 	rect.y = view.y;
@@ -3663,7 +3764,76 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 		WeatherRender_SetSkyLight( lightDataState );
 		s_skyLightState = lightDataState;
 		s_bSkyLightStateValid = true;
-		if ( GetGlobalLight() && !GetLightingEditor()->IsEditorLightingActive() )
+
+		// HL2RPM: smart sun-angle quantization for shadow stability (eliminates crawling shadow-edge
+		// stairs during real-time timecycle motion without blurring shadows or hurting FPS).
+		// Sky/clouds/atmosphere keep the continuous s_skyLightState above; shadows + global sun light
+		// hold their direction bit-exact while the player is still, catching up quietly during camera
+		// or player motion, or once the sun drifts by r_csm_sun_snap_deg.
+		const float flSnapDeg = r_csm_sun_snap_deg.GetFloat();
+		const bool bEditorActive = GetLightingEditor()->IsEditorLightingActive();
+		if ( flSnapDeg > 0.001f && !bEditorActive && !building_cubemaps.GetBool() )
+		{
+			Vector curSunDir = lightDataState.vecLight.AsVector3D();
+			const float flCurLen = curSunDir.Length();
+			if ( flCurLen > 1e-4f )
+				curSunDir /= flCurLen;
+			else
+				curSunDir.Init( 0, 0, 1 );
+
+			const bool bIsMainView = ( CurrentViewID() == VIEW_MAIN );
+			if ( !s_bCsmSunSnapValid )
+			{
+				s_vecCsmSunSnapDir = curSunDir;
+				s_bCsmSunSnapValid = true;
+			}
+			else if ( bIsMainView )
+			{
+				const float flDot = clamp( DotProduct( curSunDir, s_vecCsmSunSnapDir ), -1.0f, 1.0f );
+				const float flCosStill = cosf( DEG2RAD( flSnapDeg ) );
+
+				bool bCameraMoving = false;
+				if ( r_csm_sun_snap_move.GetBool() )
+				{
+					Vector camFwd;
+					AngleVectors( view.angles, &camFwd );
+					if ( s_bSunSnapCamValid )
+					{
+						const float flDt = gpGlobals ? Max( gpGlobals->frametime, 0.001f ) : 0.016f;
+						const float flMoveSpeed = ( view.origin - s_vecSunSnapCamPos ).Length() / flDt;
+						const float flTurnCos = clamp( DotProduct( camFwd, s_vecSunSnapCamFwd ), -1.0f, 1.0f );
+						const float flTurnDegPerSec = RAD2DEG( acosf( flTurnCos ) ) / flDt;
+						bCameraMoving = ( flMoveSpeed > 40.0f || flTurnDegPerSec > 25.0f );
+					}
+					s_vecSunSnapCamPos = view.origin;
+					s_vecSunSnapCamFwd = camFwd;
+					s_bSunSnapCamValid = true;
+				}
+
+				const float flMoveDeg = Min( flSnapDeg, r_csm_sun_snap_move_deg.GetFloat() );
+				const float flCosMove = cosf( DEG2RAD( flMoveDeg ) );
+
+				const bool bAngleStep = ( flDot < flCosStill );
+				const bool bMoveCatchup = ( bCameraMoving && flDot < flCosMove );
+				if ( bAngleStep || bMoveCatchup )
+				{
+					if ( r_csm_sun_snap_debug.GetBool() )
+					{
+						Msg( "[csm_snap] update (%s) delta=%.3f deg (still=%.2f move=%.2f)\n",
+							bAngleStep ? "angle" : "move", RAD2DEG( acosf( flDot ) ), flSnapDeg, flMoveDeg );
+					}
+					s_vecCsmSunSnapDir = curSunDir;
+				}
+			}
+
+			lightDataState.vecLight.Init( s_vecCsmSunSnapDir.x, s_vecCsmSunSnapDir.y, s_vecCsmSunSnapDir.z, lightDataState.vecLight.w );
+		}
+		else if ( CurrentViewID() == VIEW_MAIN )
+		{
+			s_bCsmSunSnapValid = false;
+		}
+
+		if ( GetGlobalLight() && !bEditorActive )
 			GetWeatherSystem()->ApplyLightningFlash( lightDataState, GetGlobalLight()->HasShadow() );
 
 		s_csmLightState = lightDataState;
@@ -3702,12 +3872,6 @@ void CDeferredViewRender::PerformLighting( const CViewSetup &view )
 			if ( lightDataState.bShadow )
 			{
 				bDrawDebugShadow = r_deferred_debug_shadow.GetBool();
-				// HL2RPM: casters come from every leaf, culled by each cascade's own box. The PVS
-				// of the camera (and of a point toward the sun) dropped walls and props outside
-				// it: their shadows popped in and out as the camera crossed leaves (the main view
-				// sets up its own vis again before the composite)
-				Vector origins[2] = { view.origin, view.origin + lightDataState.vecLight.AsVector3D() * 1024 };
-				render->ViewSetupVis( r_csm_novis.GetBool(), 2, origins );
 
 				GPUPROF_SCOPE( "csm" );
 				CPUPROF_SCOPE( "csm" );
@@ -4113,6 +4277,7 @@ void CDeferredViewRender::RenderCascadedShadows( const CViewSetup &view, const b
 	Vector vecViewFwd;
 	AngleVectors( view.angles, &vecViewFwd );
 	const Vector vecLightDir = ( s_bCsmLightStateValid ? s_csmLightState : GetActiveGlobalLightState() ).vecLight.AsVector3D();
+	bool bSetupVisDone = false;
 
 	for ( int i = 0; i < SHADOW_NUM_CASCADES; i++ )
 	{
@@ -4142,6 +4307,22 @@ void CDeferredViewRender::RenderCascadedShadows( const CViewSetup &view, const b
 
 		if ( !bDoRadiosity && !ShouldUpdateCascade( i, cascade, view, vecViewFwd, vecLightDir ) )
 			continue;
+
+		// HL2RPM: only run ViewSetupVis when at least one cascade actually renders this frame
+		// AND the engine world-list fallback is used (BuildLeafListsOnly enumerates leaves directly).
+		if ( !bSetupVisDone )
+		{
+			bSetupVisDone = true;
+			Vector vecTest;
+			bool bSolid = false;
+			const bool bNeedVis = !ShadowLeafListsUsable( true ) || !DeferredOcclusion_GetLeafBounds( 0, vecTest, vecTest, bSolid );
+			if ( bNeedVis )
+			{
+				Vector origins[2] = { view.origin, view.origin + vecLightDir * 1024.0f };
+				render->ViewSetupVis( r_csm_novis.GetBool(), 2, origins );
+				m_bMainViewVisDirty = true;
+			}
+		}
 
 		st.bValid = true;
 		st.iLastFrame = gpGlobals->framecount;
@@ -4210,7 +4391,61 @@ bool CDeferredViewRender::RenderRainOcclusion( const CViewSetup &view )
 	// current vis - m_bForceNoVis only affects CViewRender::SetupVis, which they don't
 	// call; the main view sets up its own vis again before the composite.)
 	render->ViewSetupVis( true, 1, &view.origin );
+	m_bMainViewVisDirty = true;
 	AddViewToScene( pRainView );
+	return true;
+}
+
+static ConVar r_deferred_point_face_cull( "r_deferred_point_face_cull", "1", FCVAR_ARCHIVE,
+	"HL2RPM: skip point-light cube shadow faces whose frustum pyramid lies outside the main camera frustum" );
+
+// Exact convex 5-vertex pyramid test for cube face iFace (0..5 matching CPointLightCubeFaceShadowView::CalcShadowView)
+static bool IsPointCubeFaceVisible( const Vector &vecLightPos, float flRadius, int iFace, const Frustum_t &mainFrustum )
+{
+	static const Vector s_faceFwd[6] = {
+		Vector( 1, 0, 0 ), Vector( -1, 0, 0 ),
+		Vector( 0, 1, 0 ), Vector( 0, -1, 0 ),
+		Vector( 0, 0, 1 ), Vector( 0, 0, -1 ),
+	};
+	static const Vector s_faceRight[6] = {
+		Vector( 0, -1, 0 ), Vector( 0, 1, 0 ),
+		Vector( 1, 0, 0 ), Vector( -1, 0, 0 ),
+		Vector( 0, -1, 0 ), Vector( 0, -1, 0 ),
+	};
+	static const Vector s_faceUp[6] = {
+		Vector( 0, 0, 1 ), Vector( 0, 0, 1 ),
+		Vector( 0, 0, 1 ), Vector( 0, 0, 1 ),
+		Vector( -1, 0, 0 ), Vector( 1, 0, 0 ),
+	};
+
+	// 92 deg FOV -> tan(46 deg) = 1.036; pad 1.06x for guard band + receiver normal bias
+	const float flR = Max( flRadius, 1.0f ) * 1.06f;
+	const Vector vecCenter = vecLightPos + s_faceFwd[ iFace ] * flR;
+	const Vector vecR = s_faceRight[ iFace ] * flR;
+	const Vector vecU = s_faceUp[ iFace ] * flR;
+
+	Vector verts[ 5 ];
+	verts[ 0 ] = vecLightPos;
+	verts[ 1 ] = vecCenter - vecR - vecU;
+	verts[ 2 ] = vecCenter + vecR - vecU;
+	verts[ 3 ] = vecCenter + vecR + vecU;
+	verts[ 4 ] = vecCenter - vecR + vecU;
+
+	for ( int p = 0; p < FRUSTUM_NUMPLANES; p++ )
+	{
+		const cplane_t *pPlane = mainFrustum.GetPlane( p );
+		bool bAnyInside = false;
+		for ( int v = 0; v < 5; v++ )
+		{
+			if ( DotProduct( verts[ v ], pPlane->normal ) >= pPlane->dist )
+			{
+				bAnyInside = true;
+				break;
+			}
+		}
+		if ( !bAnyInside )
+			return false;
+	}
 	return true;
 }
 
@@ -4232,6 +4467,7 @@ void CDeferredViewRender::DrawLightShadowView( const CViewSetup &view, int iDesi
 		CPUPROF_SCOPE( "ls_vis" );
 		Vector origins[2] = { view.origin, l->pos };
 		render->ViewSetupVis( false, 2, origins );
+		m_bMainViewVisDirty = true;
 	}
 
 	switch ( l->iLighttype )
@@ -4250,16 +4486,43 @@ void CDeferredViewRender::DrawLightShadowView( const CViewSetup &view, int iDesi
 				CRefPtr<CDualParaboloidShadowView> pDPView1 = new CDualParaboloidShadowView( this, l, true );
 				pDPView1->Setup( setup, GetShadowDepthRT_DP( iDesiredShadowmap ), GetShadowColorRT_DP( iDesiredShadowmap ) );
 				AddViewToScene( pDPView1 );
+
+				ITexture *pSample = GetShadowSampleRT_DP( iDesiredShadowmap );
+				QUEUE_FIRE( CommitTexture_DualParaboloidDepth, iDesiredShadowmap, pSample );
 			}
 			else
 			{
+				// HL2RPM: acquire a cached cube atlas from the pool if available, and frustum-cull
+				// faces whose 92 deg pyramid lies completely outside the main camera frustum.
+				const int faceRes = GetShadowResolution_Point();
+				const int iCache = DeferredShadowCache_AcquirePoint( l, faceRes );
+				ITexture *pDepth = ( iCache >= 0 ) ? DeferredShadowCache_GetPointTexture( iCache ) : GetShadowDepthRT_DP( iDesiredShadowmap );
+				ITexture *pDummy = GetShadowColorRT_DP( iDesiredShadowmap );
+
+				Frustum_t mainFrustum;
+				const bool bCullFaces = r_deferred_point_face_cull.GetBool() && !view.m_bOrtho;
+				if ( bCullFaces )
+				{
+					const float flAspect = ( view.m_flAspectRatio > 0.0f ) ? view.m_flAspectRatio
+						: ( ( view.height > 0 ) ? (float)view.width / (float)view.height : 1.0f );
+					const float flZFar = Max( view.zFar, view.zNear + 1.0f );
+					GeneratePerspectiveFrustum( view.origin, view.angles, view.zNear, flZFar, view.fov, flAspect, mainFrustum );
+				}
+
 				for ( int face = 0; face < 6; face++ )
 				{
+					if ( bCullFaces && !IsPointCubeFaceVisible( l->pos, l->flRadius, face, mainFrustum ) )
+						continue;
+
 					CRefPtr<CPointLightCubeFaceShadowView> pFaceView =
 						new CPointLightCubeFaceShadowView( this, l, face, iDesiredShadowmap );
-					pFaceView->Setup( setup, GetShadowDepthRT_DP( iDesiredShadowmap ), GetShadowColorRT_DP( iDesiredShadowmap ) );
+					pFaceView->SetCacheEntry( iCache );
+					pFaceView->Setup( setup, pDepth, pDummy );
 					AddViewToScene( pFaceView );
 				}
+
+				ITexture *pSample = ( iCache >= 0 ) ? pDepth : GetShadowSampleRT_DP( iDesiredShadowmap );
+				QUEUE_FIRE( CommitTexture_DualParaboloidDepth, iDesiredShadowmap, pSample );
 			}
 		}
 		break;
@@ -4499,6 +4762,7 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 
 	unsigned int visFlags;
 	SetupVis( worldView, visFlags, NULL );
+	m_bMainViewVisDirty = false;
 
 	{
 		CPUPROF_SCOPE( "globals" );
@@ -4621,9 +4885,13 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 	g_ShaderEditorSystem->CustomPostRender();
 	#endif
 
-	// HL2RPM: anti-aliasing of the final frame (the viewmodel included, the HUD not): FXAA
+	// HL2RPM: anti-aliasing of the final frame (the viewmodel included, the HUD not): FXAA,
+	// fused directly into PostFX at native 1.0x render scale (zero extra fullscreen RT pass!),
+	// or chained pSceneRT -> pSceneCopy -> PostFX when renderscale < 1.0.
 	bool bUpscalePushed = false;
-	bool bPostFXDirectFromScene = false;
+	bool bFusedFXAA = false;
+	ITexture *pPostFXSource = NULL;
+	int nPostFXSrcW = 0, nPostFXSrcH = 0;
 	if ( !building_cubemaps.GetBool() )
 	{
 		{
@@ -4631,30 +4899,64 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 			DeferredPostFX_DrawDoF( worldView );
 		}
 
-		GPUPROF_SCOPE( "aa" );
-		if ( r_deferred_aa.GetInt() >= 1 )
-			DrawDeferredFXAA( worldView );
+		const bool bFXAA = ( r_deferred_aa.GetInt() >= 1 );
+		const bool bPostFX = DeferredPostFX_IsActive();
 
 		if ( pSceneRT )
 		{
-			// Stretch the scaled 3D frame up to the screen; when PostFX runs and pSceneRT matches
-			// worldView size, feed pSceneRT straight into PostFX (zero full-frame copies).
+			// renderscale < 1.0: pSceneRT already holds the 3D frame (0, 0, sw, sh).
+			// Chain FXAA directly pSceneRT -> pSceneCopy (0 copies), then feed straight to PostFX.
 			const int sw = Max( 2, worldView.width ), sh = Max( 2, worldView.height );
 			const int W = Max( 2, view.width ), H = Max( 2, view.height );
+			ITexture *pFinalScene = pSceneRT;
+
+			if ( bFXAA )
+			{
+				GPUPROF_SCOPE( "aa" );
+				ITexture *pSceneCopy = GetDefRT_SceneCopy();
+				if ( pSceneCopy && !pSceneCopy->IsError()
+					&& pSceneCopy->GetActualWidth() >= sw && pSceneCopy->GetActualHeight() >= sh )
+				{
+					DrawDeferredFXAA( worldView, pSceneRT, pSceneCopy );
+					pFinalScene = pSceneCopy;
+				}
+				else
+				{
+					DrawDeferredFXAA( worldView );
+				}
+			}
+
 			CMatRenderContextPtr pRC( materials );
 			pRC->PushRenderTargetAndViewport( NULL, view.x, view.y, W, H );
-			if ( DeferredPostFX_IsActive()
-				&& pSceneRT->GetActualWidth() == sw && pSceneRT->GetActualHeight() == sh )
+			if ( bPostFX && pFinalScene->GetActualWidth() == sw && pFinalScene->GetActualHeight() == sh )
 			{
-				bPostFXDirectFromScene = true;
+				pPostFXSource = pFinalScene;
+				nPostFXSrcW = sw;
+				nPostFXSrcH = sh;
 			}
 			else
 			{
 				Rect_t src = { 0, 0, sw, sh };
 				Rect_t dst = { view.x, view.y, W, H };
-				pRC->CopyTextureToRenderTargetEx( 0, pSceneRT, &src, &dst );
+				pRC->CopyTextureToRenderTargetEx( 0, pFinalScene, &src, &dst );
 			}
 			bUpscalePushed = true;
+		}
+		else if ( bFXAA )
+		{
+			// renderscale == 1.0: when PostFX is active, fuse FXAA directly into the single
+			// hl2rpm_postfx_ps30 combine pass (eliminating the entire _rt_FullFrameFB1 RT pass
+			// and sharing the 5-tap cross with edge-protected CAS). Fallback to standalone FXAA
+			// only when PostFX is disabled.
+			if ( bPostFX )
+			{
+				bFusedFXAA = true;
+			}
+			else
+			{
+				GPUPROF_SCOPE( "aa" );
+				DrawDeferredFXAA( worldView );
+			}
 		}
 	}
 
@@ -4668,15 +4970,15 @@ void CDeferredViewRender::RenderView( const CViewSetup &view, int nClearFlags, i
 		postView.height = view.height;
 	}
 
-	// HL2RPM: eye adaptation, bloom, grading, lens effects (the HUD comes after)
+	// HL2RPM: eye adaptation, bloom, grading, lens effects (plus fused FXAA at 1.0x; HUD comes after)
 	if ( !building_cubemaps.GetBool() )
 	{
 		GPUPROF_SCOPE( "postfx" );
 		CPUPROF_SCOPE( "postfx" );
-		if ( bPostFXDirectFromScene )
-			DeferredPostFX_Draw( postView, pSceneRT, Max( 2, worldView.width ), Max( 2, worldView.height ) );
+		if ( pPostFXSource )
+			DeferredPostFX_Draw( postView, pPostFXSource, nPostFXSrcW, nPostFXSrcH, false );
 		else
-			DeferredPostFX_Draw( postView );
+			DeferredPostFX_Draw( postView, NULL, 0, 0, bFusedFXAA );
 	}
 
 	// HL2RPM: the view of a wounded man without the suit - red edges, vessels, clouding

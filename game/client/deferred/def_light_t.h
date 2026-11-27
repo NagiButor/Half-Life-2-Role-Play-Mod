@@ -114,6 +114,10 @@ struct def_light_t
 		iFlags |= DEFLIGHT_DIRTY_XFORMS | DEFLIGHT_DIRTY_RENDERMESH;
 	};
 
+	// HL2RPM: fast point-light transform/bounds update without 14 world traces or leaf enumeration
+	// (used for small per-frame firelight wander / dynamic light updates).
+	void UpdatePointTransformFast();
+
 	FORCEINLINE bool IsPoint()
 	{
 		return iLighttype == DEFLIGHTTYPE_POINT;

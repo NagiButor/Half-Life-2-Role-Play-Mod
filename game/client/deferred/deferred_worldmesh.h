@@ -34,6 +34,8 @@ void DeferredWorldMesh_DebugDraw();
 struct WorldOccluder_t
 {
 	Vector	vecVerts[ WORLD_OCCLUDER_MAX_VERTS ];
+	Vector	vecMins;
+	Vector	vecMaxs;
 	Vector	vecCenter;
 	Vector	vecNormal;
 	float	flArea;

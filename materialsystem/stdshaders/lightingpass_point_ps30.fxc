@@ -150,21 +150,25 @@ float4 DoPointLightBasic( const int index, float3 normal,
 
 	return float4( 0, saturate( litDot ) * distFade, 0, 0 );
 #else
-	float3 normalizedLightVec = vecWorldToLight / lightToWorldDist;
+	float3 normalizedLightVec = vecWorldToLight / max( lightToWorldDist, 1e-4f );
 	float3 flLitNormal = lerp( normal, dot( normal, normalizedLightVec ) * normal, litface );
-
-#if DEFCFG_BLINN_PHONG
-	// HL2RPM (PBR): phong_exp is the roughness of the surface (UnpackLightingControls)
-	float flSpecular = SpecularGGX( normal, vecWorldRayInv, normalizedLightVec, phong_exp );
-#else
-	float flSpecular = dot( reflect( -normalizedLightVec, flLitNormal ), vecWorldRayInv );
-	flSpecular = pow( flSpecular, phong_exp );
-#endif
 
 	float viewFwdDot = dot( normalizedLightVec, flLitNormal );
 	float litDot = lerp( viewFwdDot, viewFwdDot * 0.5f + 0.5f, half_lambert );
 
 	float lightAmount = saturate( litDot );
+
+	float flSpecular = 0.0f;
+	if ( lightAmount > 0.0f )
+	{
+#if DEFCFG_BLINN_PHONG
+		// HL2RPM (PBR): phong_exp is the roughness of the surface (UnpackLightingControls)
+		flSpecular = SpecularGGX( normal, vecWorldRayInv, normalizedLightVec, phong_exp );
+#else
+		flSpecular = dot( reflect( -normalizedLightVec, flLitNormal ), vecWorldRayInv );
+		flSpecular = pow( flSpecular, phong_exp );
+#endif
+	}
 
 	// (HL2RPM: the curve of the light, or the engine's attenuation of a converted lamp - common_lighting_fxc.h)
 	float distFade = DeferredLightFalloff( lightToWorldDist, g_flMixedData[ index ].w, g_flMixedData[ index + 1 ].w );
@@ -234,40 +238,48 @@ PS_OUTPUT main( const PS_INPUT In )
 		int iSamplerIndex = i * 2;
 
 		float3 vecDeltaWorld = worldPos - g_flMixedData[ iDataIndex ].xyz;
-		float dist = length( vecDeltaWorld );
-
-		float3x3 matRotation = float3x3( g_flMixedData[ iDataIndex + 3 ].xyz,
-			g_flMixedData[ iDataIndex + 4 ].xyz,
-			g_flMixedData[ iDataIndex + 5 ].xyz );
-
-		float4 localLight = DoPointLightBasic( iDataIndex, flNormal,
-									-vecDeltaWorld, dist, worldRayInv,
-									litface, half_lambert, phong_exp );
-
-		float3 vecDeltaRotated = mul3x3( vecDeltaWorld, matRotation );
-		// HL2RPM: no light reaches the point (outside the cone or the radius, turned away): the
-		// shadow filter and normal-offset shadow setup are skipped
-		float flShadow = 1.0f;
+		float flRadius = g_flMixedData[ iDataIndex ].w;
+		float distSqr = dot( vecDeltaWorld, vecDeltaWorld );
 		[branch]
-		if ( localLight.y * localLight.w > 0.0f )
+		if ( distSqr < flRadius * flRadius )
 		{
-			float normalDotLight = dot( -vecDeltaWorld, flNormal ) / max( dist, 1e-4f );
-			float sinAngle = sqrt( saturate( 1.0f - normalDotLight * normalDotLight ) );
-			float normalOffsetScale = 0.25f + 1.25f * sinAngle;
-			float3 vecDeltaOffset = vecDeltaWorld + flNormal * normalOffsetScale;
-			float distOffset = length( vecDeltaOffset );
-			float3 vecDeltaShadow = ( g_flMixedData[ iDataIndex + 2 ].w < 0.0f )
-				? mul3x3( vecDeltaOffset, matRotation ) : vecDeltaOffset;
-			flShadow = PerformDualParaboloidShadow( sMixedSampler[ iSamplerIndex ],
-				vecDeltaShadow, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
-				distOffset, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
-		}
-		localLight.y *= flShadow;
+			float dist = sqrt( distSqr );
 
-		flLight += DoLightFinalCookied( g_flMixedData[ iDataIndex + 1 ].xyz,
-			g_flMixedData[ iDataIndex + 2 ].xyz,
-			localLight, DoCubemapCookie( sMixedSampler[ iSamplerIndex + 1 ], vecDeltaRotated ) )
-			* LightReach( g_flMixedData[ iDataIndex + 3 ].w, worldPos, flNormal, g_flMixedData[ iDataIndex ].xyz );
+			float3x3 matRotation = float3x3( g_flMixedData[ iDataIndex + 3 ].xyz,
+				g_flMixedData[ iDataIndex + 4 ].xyz,
+				g_flMixedData[ iDataIndex + 5 ].xyz );
+
+			float4 localLight = DoPointLightBasic( iDataIndex, flNormal,
+										-vecDeltaWorld, dist, worldRayInv,
+										litface, half_lambert, phong_exp );
+
+			float3 vecDeltaRotated = mul3x3( vecDeltaWorld, matRotation );
+			// HL2RPM: no light reaches the point (outside the cone or the radius, turned away): the
+			// shadow filter and normal-offset shadow setup are skipped
+			float flShadow = 1.0f;
+			[branch]
+			if ( localLight.y * localLight.w > 0.0f )
+			{
+				float normalDotLight = dot( -vecDeltaWorld, flNormal ) / max( dist, 1e-4f );
+				float sinAngle = sqrt( saturate( 1.0f - normalDotLight * normalDotLight ) );
+				float normalOffsetScale = 0.25f + 1.25f * sinAngle;
+				float3 vecDeltaOffset = vecDeltaWorld + flNormal * normalOffsetScale;
+				float distOffset = length( vecDeltaOffset );
+				float3 vecDeltaShadow = ( g_flMixedData[ iDataIndex + 2 ].w < 0.0f )
+					? mul3x3( vecDeltaOffset, matRotation ) : vecDeltaOffset;
+				flShadow = PerformDualParaboloidShadow( sMixedSampler[ iSamplerIndex ],
+					vecDeltaShadow, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
+					distOffset, flRadius, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
+			}
+			localLight.y *= flShadow;
+
+			float4 contrib = DoLightFinalCookied( g_flMixedData[ iDataIndex + 1 ].xyz,
+				g_flMixedData[ iDataIndex + 2 ].xyz,
+				localLight, texCUBElod( sMixedSampler[ iSamplerIndex + 1 ], float4( vecDeltaRotated, 0 ) ).rgb );
+			[branch]
+			if ( dot( contrib.rgb, 1.0f ) + contrib.a > 0.0001f )
+				flLight += contrib * LightReach( g_flMixedData[ iDataIndex + 3 ].w, worldPos, flNormal, g_flMixedData[ iDataIndex ].xyz );
+		}
 	}
 
 	for ( int i = 0; i < NUM_SHADOWED; i++ )
@@ -277,41 +289,49 @@ PS_OUTPUT main( const PS_INPUT In )
 		int iSamplerIndex = NUM_SHADOWED_COOKIE * 2 + i;
 
 		float3 vecDeltaWorld = worldPos - g_flMixedData[ iDataIndex ].xyz;
-		float dist = length( vecDeltaWorld );
-
-		float4 localLight = DoPointLightBasic( iDataIndex, flNormal,
-									-vecDeltaWorld, dist, worldRayInv,
-									litface, half_lambert, phong_exp );
-
-		// HL2RPM: no light reaches the point (outside the cone or the radius, turned away): the
-		// shadow filter and rotation/offset setup are skipped
-		float flShadow = 1.0f;
+		float flRadius = g_flMixedData[ iDataIndex ].w;
+		float distSqr = dot( vecDeltaWorld, vecDeltaWorld );
 		[branch]
-		if ( localLight.y * localLight.w > 0.0f )
+		if ( distSqr < flRadius * flRadius )
 		{
-			float normalDotLight = dot( -vecDeltaWorld, flNormal ) / max( dist, 1e-4f );
-			float sinAngle = sqrt( saturate( 1.0f - normalDotLight * normalDotLight ) );
-			float normalOffsetScale = 0.25f + 1.25f * sinAngle;
-			float3 vecDeltaOffset = vecDeltaWorld + flNormal * normalOffsetScale;
-			float distOffset = length( vecDeltaOffset );
-			float3 vecDeltaShadow = vecDeltaOffset;
-			if ( g_flMixedData[ iDataIndex + 2 ].w < 0.0f )
-			{
-				float3x3 matRotation = float3x3( g_flMixedData[ iDataIndex + 3 ].xyz,
-					g_flMixedData[ iDataIndex + 4 ].xyz,
-					g_flMixedData[ iDataIndex + 5 ].xyz );
-				vecDeltaShadow = mul3x3( vecDeltaOffset, matRotation );
-			}
-			flShadow = PerformDualParaboloidShadow( sMixedSampler[ iSamplerIndex ],
-				vecDeltaShadow, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
-				distOffset, g_flMixedData[ iDataIndex ].w, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
-		}
-		localLight.y *= flShadow;
+			float dist = sqrt( distSqr );
 
-		flLight += DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,
-			g_flMixedData[ iDataIndex + 2 ].xyz,
-			localLight )
-			* LightReach( g_flMixedData[ iDataIndex + 3 ].w, worldPos, flNormal, g_flMixedData[ iDataIndex ].xyz );
+			float4 localLight = DoPointLightBasic( iDataIndex, flNormal,
+										-vecDeltaWorld, dist, worldRayInv,
+										litface, half_lambert, phong_exp );
+
+			// HL2RPM: no light reaches the point (outside the cone or the radius, turned away): the
+			// shadow filter and rotation/offset setup are skipped
+			float flShadow = 1.0f;
+			[branch]
+			if ( localLight.y * localLight.w > 0.0f )
+			{
+				float normalDotLight = dot( -vecDeltaWorld, flNormal ) / max( dist, 1e-4f );
+				float sinAngle = sqrt( saturate( 1.0f - normalDotLight * normalDotLight ) );
+				float normalOffsetScale = 0.25f + 1.25f * sinAngle;
+				float3 vecDeltaOffset = vecDeltaWorld + flNormal * normalOffsetScale;
+				float distOffset = length( vecDeltaOffset );
+				float3 vecDeltaShadow = vecDeltaOffset;
+				if ( g_flMixedData[ iDataIndex + 2 ].w < 0.0f )
+				{
+					float3x3 matRotation = float3x3( g_flMixedData[ iDataIndex + 3 ].xyz,
+						g_flMixedData[ iDataIndex + 4 ].xyz,
+						g_flMixedData[ iDataIndex + 5 ].xyz );
+					vecDeltaShadow = mul3x3( vecDeltaOffset, matRotation );
+				}
+				flShadow = PerformDualParaboloidShadow( sMixedSampler[ iSamplerIndex ],
+					vecDeltaShadow, g_vecShadowMappingTweaks_0, g_vecShadowMappingTweaks_1,
+					distOffset, flRadius, g_flMixedData[ iDataIndex + 2 ].w, normalDotLight );
+			}
+			localLight.y *= flShadow;
+
+			float4 contrib = DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,
+				g_flMixedData[ iDataIndex + 2 ].xyz,
+				localLight );
+			[branch]
+			if ( dot( contrib.rgb, 1.0f ) + contrib.a > 0.0001f )
+				flLight += contrib * LightReach( g_flMixedData[ iDataIndex + 3 ].w, worldPos, flNormal, g_flMixedData[ iDataIndex ].xyz );
+		}
 	}
 
 	for ( int i = 0; i < NUM_COOKIE; i++ )
@@ -322,22 +342,30 @@ PS_OUTPUT main( const PS_INPUT In )
 		int iSamplerIndex = NUM_SHADOWED_COOKIE * 2 + NUM_SHADOWED + i;
 
 		float3 vecDeltaWorld = worldPos - g_flMixedData[ iDataIndex ].xyz;
-		float dist = length( vecDeltaWorld );
+		float flRadius = g_flMixedData[ iDataIndex ].w;
+		float distSqr = dot( vecDeltaWorld, vecDeltaWorld );
+		[branch]
+		if ( distSqr < flRadius * flRadius )
+		{
+			float dist = sqrt( distSqr );
 
-		float3x3 matRotation = float3x3( g_flMixedData[ iDataIndex + 3 ].xyz,
-			g_flMixedData[ iDataIndex + 4 ].xyz,
-			g_flMixedData[ iDataIndex + 5 ].xyz );
+			float3x3 matRotation = float3x3( g_flMixedData[ iDataIndex + 3 ].xyz,
+				g_flMixedData[ iDataIndex + 4 ].xyz,
+				g_flMixedData[ iDataIndex + 5 ].xyz );
 
-		float4 localLight = DoPointLightBasic( iDataIndex, flNormal,
-									-vecDeltaWorld, dist, worldRayInv,
-									litface, half_lambert, phong_exp );
+			float4 localLight = DoPointLightBasic( iDataIndex, flNormal,
+										-vecDeltaWorld, dist, worldRayInv,
+										litface, half_lambert, phong_exp );
 
-		float3 vecDeltaRotated = mul3x3( vecDeltaWorld, matRotation );
+			float3 vecDeltaRotated = mul3x3( vecDeltaWorld, matRotation );
 
-		flLight += DoLightFinalCookied( g_flMixedData[ iDataIndex + 1 ].xyz,
-			g_flMixedData[ iDataIndex + 2 ].xyz,
-			localLight, DoCubemapCookie( sMixedSampler[ iSamplerIndex ], vecDeltaRotated ) )
-			* LightReach( g_flMixedData[ iDataIndex + 3 ].w, worldPos, flNormal, g_flMixedData[ iDataIndex ].xyz );
+			float4 contrib = DoLightFinalCookied( g_flMixedData[ iDataIndex + 1 ].xyz,
+				g_flMixedData[ iDataIndex + 2 ].xyz,
+				localLight, texCUBElod( sMixedSampler[ iSamplerIndex ], float4( vecDeltaRotated, 0 ) ).rgb );
+			[branch]
+			if ( dot( contrib.rgb, 1.0f ) + contrib.a > 0.0001f )
+				flLight += contrib * LightReach( g_flMixedData[ iDataIndex + 3 ].w, worldPos, flNormal, g_flMixedData[ iDataIndex ].xyz );
+		}
 	}
 
 	for ( int i = 0; i < NUM_SIMPLE; i++ )
@@ -348,16 +376,24 @@ PS_OUTPUT main( const PS_INPUT In )
 			+ i * NUM_CONSTS_POINT_SIMPLE;
 
 		float3 vecDelta = worldPos - g_flMixedData[ iDataIndex ].xyz;
-		float dist = length( vecDelta );
+		float flRadius = g_flMixedData[ iDataIndex ].w;
+		float distSqr = dot( vecDelta, vecDelta );
+		[branch]
+		if ( distSqr < flRadius * flRadius )
+		{
+			float dist = sqrt( distSqr );
 
-		float4 localLight = DoPointLightBasic( iDataIndex, flNormal,
-									-vecDelta, dist, worldRayInv,
-									litface, half_lambert, phong_exp );
+			float4 localLight = DoPointLightBasic( iDataIndex, flNormal,
+										-vecDelta, dist, worldRayInv,
+										litface, half_lambert, phong_exp );
 
-		flLight += DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,
-			g_flMixedData[ iDataIndex + 2 ].xyz,
-			localLight )
-			* LightReach( g_flMixedData[ iDataIndex + 2 ].w, worldPos, flNormal, g_flMixedData[ iDataIndex ].xyz );
+			float4 contrib = DoLightFinal( g_flMixedData[ iDataIndex + 1 ].xyz,
+				g_flMixedData[ iDataIndex + 2 ].xyz,
+				localLight );
+			[branch]
+			if ( dot( contrib.rgb, 1.0f ) + contrib.a > 0.0001f )
+				flLight += contrib * LightReach( g_flMixedData[ iDataIndex + 2 ].w, worldPos, flNormal, g_flMixedData[ iDataIndex ].xyz );
+		}
 	}
 
 	PS_OUTPUT Out;

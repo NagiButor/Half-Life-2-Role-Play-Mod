@@ -18,6 +18,15 @@ static ConVar r_deferred_fxaa_edge_min( "r_deferred_fxaa_edge_min", "0.0625", FC
 	"FXAA: contrast below which dark areas are left alone", true, 0.0f, true, 0.25f );
 static ConVar r_deferred_fxaa_debug( "r_deferred_fxaa_debug", "0", 0, "FXAA: show the edges it smooths in red" );
 
+// Shared with hl2rpm_postfx.cpp for the single-pass fused FXAA + PostFX path at native render scale.
+void HL2RPM_GetFXAAParams( float out4[4] )
+{
+	out4[0] = r_deferred_fxaa_subpix.GetFloat();
+	out4[1] = r_deferred_fxaa_edge.GetFloat();
+	out4[2] = r_deferred_fxaa_edge_min.GetFloat();
+	out4[3] = r_deferred_fxaa_debug.GetBool() ? 1.0f : 0.0f;
+}
+
 BEGIN_VS_SHADER( HL2RPM_FXAA, "" )
 	BEGIN_SHADER_PARAMS
 	END_SHADER_PARAMS

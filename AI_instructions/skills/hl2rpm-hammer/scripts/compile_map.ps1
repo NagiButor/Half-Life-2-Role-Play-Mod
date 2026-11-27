@@ -27,7 +27,7 @@ param(
 $ErrorActionPreference = "Stop"
 $bin = "E:\Steam\steamapps\common\Source SDK Base 2013 Singleplayer\bin"
 $game = "E:\Steam\steamapps\sourcemods\hl2rpm"
-$mapsrc = "E:\XBLAH's modding tool\content\Mapbase\hl2rpm\mapsrc"
+$mapsrc = "E:\SourceModding\HL2RPMSOURCE\Mapping\mapsrc"
 $backupDir = "E:\SourceModding\HL2RPMSOURCE\map_backups"
 
 if ($Vmf -eq "") {

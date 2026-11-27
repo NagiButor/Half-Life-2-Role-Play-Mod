@@ -63,7 +63,6 @@ float SkyVisibility( float3 worldPos, float3 normal )
 	float inside = min( insideCam, insideMap );
 
 	const float4 vis = tex2Dlod( sSkyMap, float4( uvz.xy, 0, 0 ) );
-	const float4 visWide = tex2Dlod( sSkyMapWide, float4( uvz.xy, 0, 0 ) );
 	const float dColumn = tex2Dlod( sRainRaw, float4( uvz.xy, 0, 0 ) ).x;
 
 	// under the top of its own column (a roof, a canopy, a bridge over it - more than 24
@@ -83,13 +82,25 @@ float SkyVisibility( float3 worldPos, float3 normal )
 	// under a cover: the open part around at the lowest ground the map sees there - none,
 	// if that ground is well above the point OR if no ground below the cover was found at all
 	// (vis.w <= dColumn: prevents a thin roof or chimney from lighting up its own interior).
-	const float vLow = vis.y
-		* saturate( 1.0 - ( ( uvz.z - vis.w ) * g_vecSky.y - 24.0 ) / 24.0 )
-		* saturate( ( ( vis.w - dColumn ) * g_vecSky.y - 24.0 ) / 24.0 );
-	const float vLowWide = visWide.y
-		* saturate( 1.0 - ( ( uvz.z - visWide.w ) * g_vecSky.y - 24.0 ) / 24.0 )
-		* saturate( ( ( visWide.w - dColumn ) * g_vecSky.y - 24.0 ) / 24.0 );
-	const float vCover = lerp( vLow, vLowWide, saturate( ( below - 128.0 ) / 384.0 ) );
+	float vCover = 0.0;
+	[branch]
+	if ( cover > 0.001 || g_vecSky.x > 2.5 )
+	{
+		const float vLow = vis.y
+			* saturate( 1.0 - ( ( uvz.z - vis.w ) * g_vecSky.y - 24.0 ) / 24.0 )
+			* saturate( ( ( vis.w - dColumn ) * g_vecSky.y - 24.0 ) / 24.0 );
+		vCover = vLow;
+		const float wideBlend = saturate( ( below - 128.0 ) * ( 1.0 / 384.0 ) );
+		[branch]
+		if ( wideBlend > 0.001 )
+		{
+			const float4 visWide = tex2Dlod( sSkyMapWide, float4( uvz.xy, 0, 0 ) );
+			const float vLowWide = visWide.y
+				* saturate( 1.0 - ( ( uvz.z - visWide.w ) * g_vecSky.y - 24.0 ) / 24.0 )
+				* saturate( ( ( visWide.w - dColumn ) * g_vecSky.y - 24.0 ) / 24.0 );
+			vCover = lerp( vLow, vLowWide, wideBlend );
+		}
+	}
 
 	const float v = lerp( vTop, saturate( vCover * g_vecSky.w ), cover );
 
@@ -116,6 +127,18 @@ static const float2 g_ssaoSpiral[12] =
 	float2( -0.248035f, -0.925679f ),
 };
 
+// HL2RPM: bilinear-safe 2-range depth packing into B/A (0..512u linear in B, 400..12000u sqrt in A;
+// sky = (0,0)). Avoids byte-rollover spikes under bilinear filtering and eliminates all 18 full-res
+// sDepth fetches in deferred_ssaoblur_ps30.
+float2 PackSSAODepth( float d )
+{
+	if ( d < 0.1 )
+		return float2( 0.0, 0.0 );
+	const float b = saturate( ( d + 8.0 ) * ( 1.0 / 520.0 ) );
+	const float a = saturate( sqrt( max( d - 400.0, 0.0 ) * ( 1.0 / 11600.0 ) ) );
+	return float2( b, a );
+}
+
 float4 main( const PS_INPUT In ) : COLOR
 {
 	float2 uv = In.vTexCoord;
@@ -126,8 +149,9 @@ float4 main( const PS_INPUT In ) : COLOR
 
 	float depth = tex2D( sDepth, uv ).x;
 	if ( depth < 0.1 )
-		return float4( 1, 1, 1, 1 );
+		return float4( 1, 1, 0, 0 );
 
+	const float2 packedDepth = PackSSAODepth( depth );
 	float3 P = ray * depth;
 	float3 N = normalize( tex2D( sNormals, uv ).xyz * 2.0 - 1.0 );
 
@@ -135,12 +159,12 @@ float4 main( const PS_INPUT In ) : COLOR
 
 	// HL2RPM: skip screen-space AO on compressed viewmodel depth (keeps indoor/outdoor sky visibility intact)
 	if ( depth < 2.5 )
-		return float4( 1, sky, 1, 1 );
+		return float4( 1, sky, packedDepth );
 
 	float radius = g_vecAO.x;
 	float radiusPx = radius * g_vecAO.w / depth;
 	if ( g_vecAO.y <= 0.0 || radiusPx < 1.5 )
-		return float4( 1, sky, 1, 1 );
+		return float4( 1, sky, packedDepth );
 	radiusPx = min( radiusPx, g_vecAO2.z );
 
 	// interleaved gradient noise: rotation of the spiral per pixel (1 sincos instead of 12 cos+sin)
@@ -174,5 +198,5 @@ float4 main( const PS_INPUT In ) : COLOR
 	}
 
 	float ao = saturate( 1.0 - occlusion * ( g_vecAO.y / NUM_SAMPLES ) * 1.6 );
-	return float4( ao, sky, ao, 1 );
+	return float4( ao, sky, packedDepth );
 }

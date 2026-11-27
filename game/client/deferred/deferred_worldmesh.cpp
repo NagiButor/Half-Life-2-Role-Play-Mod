@@ -602,6 +602,10 @@ static bool BuildWorldMeshes()
 							WorldOccluder_t &occ = s_Occluders[ s_Occluders.AddToTail() ];
 							occ.nVerts = 3;
 							occ.vecVerts[0] = p0; occ.vecVerts[1] = p1; occ.vecVerts[2] = p2;
+							VectorMin( p0, p1, occ.vecMins );
+							VectorMin( occ.vecMins, p2, occ.vecMins );
+							VectorMax( p0, p1, occ.vecMaxs );
+							VectorMax( occ.vecMaxs, p2, occ.vecMaxs );
 							occ.vecCenter = ( p0 + p1 + p2 ) / 3.0f;
 							occ.vecNormal = vecN * flSign;
 							occ.flArea = flTriArea;
@@ -702,6 +706,8 @@ static bool BuildWorldMeshes()
 			{
 				WorldOccluder_t &occ = s_Occluders[ s_Occluders.AddToTail() ];
 				occ.nVerts = nCorners;
+				occ.vecMins.Init( FLT_MAX, FLT_MAX, FLT_MAX );
+				occ.vecMaxs.Init( -FLT_MAX, -FLT_MAX, -FLT_MAX );
 				occ.vecCenter = vecCenter;
 				occ.vecNormal = basis.vecNormal;
 				occ.flArea = flArea;
@@ -711,6 +717,8 @@ static bool BuildWorldMeshes()
 				for ( int k = 0; k < nCorners; k++ )
 				{
 					occ.vecVerts[k] = poly[ iCorner[k] ].vecPos;
+					VectorMin( occ.vecMins, occ.vecVerts[k], occ.vecMins );
+					VectorMax( occ.vecMaxs, occ.vecVerts[k], occ.vecMaxs );
 					occluderEdgeSides.AddToTail( nSideEdges[k] );
 					for ( int m = 0; m < nSideEdges[k]; m++ )
 						occluderEdges.AddToTail( abs( surfedges[ face.firstedge + ( iCorner[k] + m ) % poly.Count() ] ) );
